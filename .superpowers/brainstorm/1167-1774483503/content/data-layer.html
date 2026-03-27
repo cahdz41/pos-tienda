@@ -1,0 +1,69 @@
+<h2>Capa de Datos — ¿Qué vive en IndexedDB?</h2>
+<p class="subtitle">Tablas de Supabase y su estrategia offline</p>
+
+<div style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
+
+  <!-- Section: Synced locally -->
+  <div class="label" style="color:#10B981;margin-bottom:4px">✅ Sincronizadas localmente (disponibles offline)</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--border-color,#333);border-radius:10px;overflow:hidden;font-size:12px">
+    <div style="background:#1a1a24;padding:10px 14px;font-weight:700;color:#999;font-size:11px;text-transform:uppercase">Tabla Dexie</div>
+    <div style="background:#1a1a24;padding:10px 14px;font-weight:700;color:#999;font-size:11px;text-transform:uppercase">Fuente Supabase</div>
+    <div style="background:#1a1a24;padding:10px 14px;font-weight:700;color:#999;font-size:11px;text-transform:uppercase">Frecuencia de sync</div>
+    <div style="background:#1a1a24;padding:10px 14px;font-weight:700;color:#999;font-size:11px;text-transform:uppercase">Para qué sirve offline</div>
+
+    <div style="background:#13131e;padding:10px 14px;color:#F0B429;font-weight:600">product_variants</div>
+    <div style="background:#13131e;padding:10px 14px;color:#ccc">product_variants + products</div>
+    <div style="background:#13131e;padding:10px 14px"><span style="background:rgba(16,185,129,0.15);color:#10B981;padding:2px 8px;border-radius:4px;font-size:11px">Al abrir app</span></div>
+    <div style="background:#13131e;padding:10px 14px;color:#aaa">Escanear código, ver precios, buscar productos</div>
+
+    <div style="background:#1a1a24;padding:10px 14px;color:#F0B429;font-weight:600">active_shift</div>
+    <div style="background:#1a1a24;padding:10px 14px;color:#ccc">shifts (solo el activo)</div>
+    <div style="background:#1a1a24;padding:10px 14px"><span style="background:rgba(16,185,129,0.15);color:#10B981;padding:2px 8px;border-radius:4px;font-size:11px">Al abrir turno</span></div>
+    <div style="background:#1a1a24;padding:10px 14px;color:#aaa">Asociar ventas offline al turno correcto</div>
+
+    <div style="background:#13131e;padding:10px 14px;color:#F0B429;font-weight:600">offline_queue</div>
+    <div style="background:#13131e;padding:10px 14px;color:#ccc">— (solo local)</div>
+    <div style="background:#13131e;padding:10px 14px"><span style="background:rgba(240,180,41,0.15);color:#F0B429;padding:2px 8px;border-radius:4px;font-size:11px">Se vacía al reconectar</span></div>
+    <div style="background:#13131e;padding:10px 14px;color:#aaa">Cola de ventas pendientes de subir a Supabase</div>
+
+    <div style="background:#1a1a24;padding:10px 14px;color:#F0B429;font-weight:600">sync_meta</div>
+    <div style="background:#1a1a24;padding:10px 14px;color:#ccc">— (solo local)</div>
+    <div style="background:#1a1a24;padding:10px 14px"><span style="background:rgba(107,114,128,0.2);color:#9CA3AF;padding:2px 8px;border-radius:4px;font-size:11px">Siempre</span></div>
+    <div style="background:#1a1a24;padding:10px 14px;color:#aaa">Timestamp del último sync para decidir si re-sincronizar</div>
+  </div>
+
+  <!-- Section: NOT offline -->
+  <div class="label" style="color:#EF4444;margin-top:16px;margin-bottom:4px">❌ No disponibles offline (requieren conexión)</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--border-color,#333);border-radius:10px;overflow:hidden;font-size:12px">
+    <div style="background:#1a1a24;padding:10px 14px;font-weight:700;color:#999;font-size:11px;text-transform:uppercase">Tabla</div>
+    <div style="background:#1a1a24;padding:10px 14px;font-weight:700;color:#999;font-size:11px;text-transform:uppercase">Por qué no offline</div>
+    <div style="background:#1a1a24;padding:10px 14px;font-weight:700;color:#999;font-size:11px;text-transform:uppercase">Comportamiento sin conexión</div>
+
+    <div style="background:#13131e;padding:10px 14px;color:#888">customers / credit</div>
+    <div style="background:#13131e;padding:10px 14px;color:#666">Riesgo de sobregiro de crédito</div>
+    <div style="background:#13131e;padding:10px 14px"><span style="background:rgba(239,68,68,0.1);color:#F87171;padding:2px 8px;border-radius:4px;font-size:11px">Ventas a crédito bloqueadas</span></div>
+
+    <div style="background:#1a1a24;padding:10px 14px;color:#888">sales / sale_items</div>
+    <div style="background:#1a1a24;padding:10px 14px;color:#666">Solo lectura histórica, no crítico</div>
+    <div style="background:#1a1a24;padding:10px 14px"><span style="background:rgba(107,114,128,0.15);color:#9CA3AF;padding:2px 8px;border-radius:4px;font-size:11px">Reportes no disponibles</span></div>
+
+    <div style="background:#13131e;padding:10px 14px;color:#888">reportes</div>
+    <div style="background:#13131e;padding:10px 14px;color:#666">Requiere datos históricos completos</div>
+    <div style="background:#13131e;padding:10px 14px"><span style="background:rgba(107,114,128,0.15);color:#9CA3AF;padding:2px 8px;border-radius:4px;font-size:11px">Pantalla "Requiere conexión"</span></div>
+  </div>
+
+  <!-- Stock strategy note -->
+  <div style="margin-top:16px;padding:14px 18px;background:rgba(240,180,41,0.07);border:1px solid rgba(240,180,41,0.2);border-radius:10px">
+    <div style="font-size:12px;font-weight:700;color:#F0B429;margin-bottom:8px">Estrategia de stock offline</div>
+    <div style="font-size:12px;color:#ccc;line-height:1.7">
+      Al vender offline → el stock se <strong style="color:#fff">decrementa localmente en Dexie</strong> de forma optimista.<br>
+      Al reconectar → la venta se sube a Supabase y el stock real se reconcilia.<br>
+      <span style="color:#999">Si hubo discrepancia (otro dispositivo vendió el mismo producto) → Supabase gana. El stock local se refresca con el valor correcto.</span>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:20px">¿Estás de acuerdo con qué tablas van offline y cuáles no?</p>

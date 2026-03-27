@@ -1,0 +1,105 @@
+<h2>UX Offline — ¿Qué ve el cajero?</h2>
+<p class="subtitle">Mockups de los 3 estados: offline, sincronizando y reconectado</p>
+
+<div style="display:flex;flex-direction:column;gap:24px;margin-top:20px">
+
+  <!-- Estado 1: Offline con ventas en cola -->
+  <div class="mockup">
+    <div class="mockup-header">Estado 1 — Sin conexión (ventas en cola)</div>
+    <div class="mockup-body" style="padding:0;overflow:hidden;background:#0D0D12">
+
+      <!-- Offline banner -->
+      <div style="background:rgba(239,68,68,0.12);border-bottom:1px solid rgba(239,68,68,0.3);padding:8px 16px;display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:8px;height:8px;background:#EF4444;border-radius:50%"></div>
+          <span style="font-size:12px;color:#F87171;font-weight:600">Sin conexión</span>
+          <span style="font-size:12px;color:#9CA3AF">— trabajando con datos locales</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:11px;color:#F0B429;background:rgba(240,180,41,0.15);padding:2px 10px;border-radius:20px;font-weight:600">3 ventas en cola</span>
+          <span style="font-size:10px;color:#6B7280">· Sync: hace 12m</span>
+        </div>
+      </div>
+
+      <!-- POS simulado -->
+      <div style="display:flex;height:200px">
+        <!-- Product grid -->
+        <div style="flex:1;padding:10px;border-right:1px solid #1f1f2e">
+          <div style="font-size:10px;color:#6B7280;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Productos (caché local)</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+            <div style="background:#1a1a2e;border:1px solid #2a2a3e;border-radius:6px;padding:8px;font-size:10px;color:#ccc">Whey 2lb<br><span style="color:#F0B429;font-weight:700">$580</span><br><span style="color:#6B7280;font-size:9px">12 uds</span></div>
+            <div style="background:#1a1a2e;border:1px solid #2a2a3e;border-radius:6px;padding:8px;font-size:10px;color:#ccc">Creatina<br><span style="color:#F0B429;font-weight:700">$320</span><br><span style="color:#6B7280;font-size:9px">5 uds</span></div>
+            <div style="background:#1a1a2e;border:1px solid #2a2a3e;border-radius:6px;padding:8px;font-size:10px;color:#ccc">Pre-entreno<br><span style="color:#F0B429;font-weight:700">$450</span><br><span style="color:#6B7280;font-size:9px">8 uds</span></div>
+          </div>
+        </div>
+        <!-- Cart -->
+        <div style="width:180px;padding:10px;display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:.05em">Carrito</div>
+          <div style="background:#1a1a2e;border-radius:6px;padding:6px 8px;font-size:10px;color:#ccc;display:flex;justify-content:space-between">
+            <span>Whey 2lb x1</span><span style="color:#F0B429">$580</span>
+          </div>
+          <div style="margin-top:auto">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px">
+              <button style="background:#F0B429;color:#0D0D12;border:none;border-radius:6px;padding:6px;font-size:10px;font-weight:700;cursor:pointer">Efectivo</button>
+              <button style="background:transparent;color:#ccc;border:1px solid #333;border-radius:6px;padding:6px;font-size:10px;cursor:pointer">Tarjeta</button>
+            </div>
+            <!-- Crédito deshabilitado -->
+            <button style="width:100%;background:transparent;color:#4B5563;border:1px dashed #333;border-radius:6px;padding:6px;font-size:9px;cursor:not-allowed;display:flex;align-items:center;justify-content:center;gap:4px">
+              <span>🔒</span> Crédito (requiere conexión)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Estado 2: Sincronizando -->
+  <div class="mockup">
+    <div class="mockup-header">Estado 2 — Reconectado, sincronizando</div>
+    <div class="mockup-body" style="background:#0D0D12;padding:0">
+      <div style="background:rgba(139,92,246,0.12);border-bottom:1px solid rgba(139,92,246,0.3);padding:8px 16px;display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:8px;height:8px;background:#8B5CF6;border-radius:50%;animation:pulse 1s infinite"></div>
+          <span style="font-size:12px;color:#A78BFA;font-weight:600">Sincronizando…</span>
+          <span style="font-size:12px;color:#9CA3AF">subiendo ventas a la nube</span>
+        </div>
+        <span style="font-size:11px;color:#A78BFA;background:rgba(139,92,246,0.15);padding:2px 10px;border-radius:20px">2 de 3 ✓</span>
+      </div>
+      <div style="padding:16px;font-size:12px;color:#6B7280;text-align:center">El POS sigue funcionando durante la sincronización</div>
+    </div>
+  </div>
+
+  <!-- Estado 3: Todo sincronizado -->
+  <div class="mockup">
+    <div class="mockup-header">Estado 3 — Reconectado y sincronizado</div>
+    <div class="mockup-body" style="background:#0D0D12;padding:0">
+      <div style="background:rgba(16,185,129,0.1);border-bottom:1px solid rgba(16,185,129,0.25);padding:8px 16px;display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:8px;height:8px;background:#10B981;border-radius:50%"></div>
+          <span style="font-size:12px;color:#34D399;font-weight:600">Conectado</span>
+          <span style="font-size:12px;color:#9CA3AF">— 3 ventas sincronizadas</span>
+        </div>
+        <span style="font-size:10px;color:#6B7280">Sync: ahora</span>
+      </div>
+      <div style="padding:16px;font-size:12px;color:#6B7280;text-align:center">Banner desaparece después de 3 segundos en estado normal</div>
+    </div>
+  </div>
+
+</div>
+
+<div style="margin-top:20px;padding:14px 18px;background:rgba(16,185,129,0.07);border:1px solid rgba(16,185,129,0.2);border-radius:10px;font-size:12px;color:#ccc;line-height:1.7">
+  <strong style="color:#10B981">Reglas UX clave:</strong><br>
+  • El cajero <strong style="color:#fff">nunca pierde una venta</strong> — efectivo y tarjeta siempre disponibles<br>
+  • El botón de crédito se deshabilita con candado visible<br>
+  • El banner es persistente mientras hay ventas en cola o sin conexión<br>
+  • El POS sigue funcionando mientras sincroniza al reconectar
+</div>
+
+<p class="subtitle" style="margin-top:16px">¿Te convence este diseño de UX offline? ¿Algún cambio a los estados visuales?</p>
+
+<style>
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+</style>
