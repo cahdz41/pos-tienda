@@ -232,6 +232,57 @@
 
 ---
 
-## Pendiente
-- Mejoras adicionales a criterio del dueño (próximas features por definir)
-- Probar offline en producción (`npm run build && npm start`) — el modo dev con Turbopack no cachea correctamente por diseño
+---
+
+## Sesión 7 — 2026-03-26
+
+### ✅ Mejoras POS — Pagos y Precios
+
+**PaymentModal — Pagos mixtos y Monedero:**
+- Estado `active` migrado de `Set` a objeto plano `Record<SalePaymentMethod, boolean>` — fix de reactividad React que impedía activar múltiples métodos simultáneamente
+- Monedero se **auto-activa** al seleccionar un cliente con saldo (antes solo pre-llenaba el monto)
+- Wallet se pre-llena con `min(saldo, total)` para no exceder el total
+- Todos los métodos combinables: Efectivo + Tarjeta + Transferencia + Monedero
+
+**CartPanel — Precio mayoreo y edición de precio:**
+- Botón **"May"** en cada producto del carrito (solo si `wholesale_price ≠ sale_price`): toggle entre precio público y mayoreo. Se resalta en ámbar cuando está activo
+- **Doble clic** en el precio abre un input inline para precio personalizado/preferencial. Enter confirma, Escape cancela. Input con `flex:1` y fuente 15px bold para precios >$1,000
+
+### ✅ Programa de Lealtad + Clientes mejorados
+
+*(implementado en sesión anterior, documentado aquí)*
+- `schema_lealtad.sql` — nuevas columnas `whatsapp`, `loyalty_balance`, `loyalty_spent` en `customers`; tablas `loyalty_transactions` y `sale_payments`
+- $50 de monedero por cada $1,000 gastados (solo en pagos no-monedero)
+- Cliente en POS: búsqueda por WhatsApp o nombre, auto-selección si hay 1 resultado
+- Página Clientes rehecha: estadísticas, filtros, tabs Compras/Monedero/Crédito por cliente
+
+---
+
+## Deploy a Producción — Estado (2026-03-27) ✅ COMPLETO
+
+### ✅ Completado
+- [x] Repo GitHub: `https://github.com/cahdz41/pos-tienda` (privado, branch `main`)
+- [x] Workflow CI/CD: `.github/workflows/deploy.yml`
+- [x] PM2 config: `ecosystem.config.js` (puerto 3003)
+- [x] Repo clonado en VPS → `/var/www/pos-tienda`
+- [x] `.env.local` creado en el servidor con credenciales de Supabase
+- [x] App corriendo con PM2 (nombre: `pos-tienda`, puerto `3003`)
+- [x] **Traefik** rutea `pos-storeonline.duckdns.org` → `172.17.0.1:3003` (config: `/docker/n8n/traefik-dynamic/pos.yml`)
+- [x] **SSL/HTTPS** — Certificado Let's Encrypt gestionado automáticamente por Traefik
+- [x] DNS resolviendo → `76.13.109.126`
+- [x] GitHub Secrets configurados: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`
+- [x] **Auto-deploy verificado** — push a `main` → GitHub Actions despliega solo ✅
+
+### Notas importantes del VPS
+- Puerto 3001 ocupado por `bot-gym` (WhatsApp) — POS usa puerto 3003
+- Traefik (Docker) maneja SSL en puertos 80/443 — Nginx está inactivo
+- pm2 path: `/usr/lib/node_modules/pm2/bin/pm2`
+
+### Comandos útiles en el VPS
+```bash
+/usr/lib/node_modules/pm2/bin/pm2 status
+/usr/lib/node_modules/pm2/bin/pm2 logs pos-tienda
+/usr/lib/node_modules/pm2/bin/pm2 reload pos-tienda
+docker ps --format "table {{.Names}}\t{{.Ports}}"
+cat /docker/n8n/traefik-dynamic/pos.yml
+```
