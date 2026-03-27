@@ -78,6 +78,12 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !saving) onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose, saving])
+
   const productLabel = `${variant.product?.name ?? '—'}${variant.flavor ? ` - ${variant.flavor}` : ''}`
   const currentStock = Number(variant.stock)
 
@@ -103,8 +109,17 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
     const qtyChange = type === 'correction' ? newStock - currentStock : type === 'add' ? n : -n
 
     setSaving(true); setErr(null)
+
+    const withTimeout = <T,>(p: PromiseLike<T>): Promise<T> =>
+      Promise.race([
+        Promise.resolve(p),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Tiempo de espera agotado. Verifica tu conexión e intenta de nuevo.')), 15000)
+        ),
+      ])
+
     try {
-      const { error: adjError } = await supabase.from('inventory_adjustments').insert({
+      const { error: adjError } = await withTimeout(supabase.from('inventory_adjustments').insert({
         variant_id: variant.id,
         cashier_id: userId,
         type,
@@ -112,14 +127,14 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
         quantity_change: qtyChange,
         quantity_after: newStock,
         reason: reason.trim() || null,
-      })
-      if (adjError) throw adjError
+      }))
+      if (adjError) throw new Error(adjError.message)
 
-      const { error: updError } = await supabase
+      const { error: updError } = await withTimeout(supabase
         .from('product_variants')
         .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
-        .eq('id', variant.id)
-      if (updError) throw updError
+        .eq('id', variant.id))
+      if (updError) throw new Error(updError.message)
 
       // Actualizar Dexie para que el POS refleje los cambios al instante
       await db.product_variants.update(variant.id, {
@@ -131,7 +146,7 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
       onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setErr(e instanceof Error ? e.message : 'Error al guardar. Intenta de nuevo.')
       setSaving(false)
     }
   }
@@ -139,7 +154,7 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
   const newStock = qty.trim() ? computeNewStock() : null
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay">
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div>
