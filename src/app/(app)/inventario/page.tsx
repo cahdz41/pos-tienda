@@ -514,14 +514,18 @@ export default function InventarioPage() {
     if (!file) return
     const reader = new FileReader()
     reader.onload = (evt) => {
-      const wb = XLSX.read(evt.target?.result, { type: 'binary' })
+      const wb = XLSX.read(evt.target?.result, { type: 'binary', cellText: true, cellDates: true })
       const sheet = wb.Sheets[wb.SheetNames[0]]
-      const raw = XLSX.utils.sheet_to_json(sheet) as Record<string, unknown>[]
+      // raw: false + defval: '' para que XLSX formatee las celdas como texto
+      // y preserve ceros iniciales en códigos de barras
+      const raw = XLSX.utils.sheet_to_json(sheet, { raw: false, defval: '' }) as Record<string, unknown>[]
       const parsed: ExcelRow[] = raw.map(r => {
         const fullName = String(r['Producto'] || '')
         const { brand, parent_name, flavor } = parseProductName(fullName)
+        // Limpiar el barcode: quitar espacios y comas de formato numérico (ej. "0,123" → "0123")
+        const rawBarcode = String(r['Código'] || '').trim().replace(/,/g, '')
         return {
-          barcode: String(r['Código'] || ''),
+          barcode: rawBarcode,
           full_name: fullName,
           cost_price: parsePrice(r['P. Costo']),
           sale_price: parsePrice(r['P. Venta']),
