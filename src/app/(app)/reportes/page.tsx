@@ -428,7 +428,7 @@ export default function ReportesPage() {
         const dMap = new Map<string, DeptStat>()
 
         for (const item of items ?? []) {
-          const v = item.variant as {
+          const v = item.variant as unknown as {
             cost_price: number
             flavor: string | null
             product: { name: string; brand: string | null; category: string | null }
