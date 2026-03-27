@@ -13,6 +13,8 @@ function toProductVariant(v: LocalVariant): ProductVariant {
     description: null,
     image_url: null,
     active: v.active,
+    supplier_id: null,
+    sale_type: 'unidad',
     created_at: '',
     updated_at: '',
   }
