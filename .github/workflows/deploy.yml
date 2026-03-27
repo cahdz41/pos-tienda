@@ -29,6 +29,6 @@ jobs:
             npm run build
 
             echo "♻️  Reiniciando servicio..."
-            pm2 reload pos-tienda || pm2 start ecosystem.config.js
+            /usr/lib/node_modules/pm2/bin/pm2 reload pos-tienda || /usr/lib/node_modules/pm2/bin/pm2 start ecosystem.config.js
 
             echo "✅ Deploy completado"
