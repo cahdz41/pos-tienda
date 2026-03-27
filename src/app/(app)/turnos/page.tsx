@@ -262,7 +262,7 @@ export default function TurnosPage() {
       .order('closed_at', { ascending: false })
       .limit(10)
     setClosedShifts((closed ?? []).map((s: Record<string, unknown>) => ({
-      ...(s as Shift),
+      ...(s as unknown as Shift),
       cashier_name: (s.cashier as { name?: string } | null)?.name,
     })))
 
