@@ -522,10 +522,12 @@ export default function InventarioPage() {
       const parsed: ExcelRow[] = raw.map(r => {
         const fullName = String(r['Producto'] || '')
         const { brand, parent_name, flavor } = parseProductName(fullName)
-        // Limpiar el barcode: quitar espacios y comas de formato numérico (ej. "0,123" → "0123")
-        const rawBarcode = String(r['Código'] || '').trim().replace(/,/g, '')
+        // UPC-A = 12 dígitos. Excel elimina el 0 inicial al guardar como número,
+        // así que siempre rellenamos hasta 12 con padStart.
+        const rawBarcode = String(r['Código'] || '').trim().replace(/[,.\s]/g, '').replace(/\.0+$/, '')
+        const barcode = rawBarcode ? rawBarcode.padStart(12, '0') : ''
         return {
-          barcode: rawBarcode,
+          barcode,
           full_name: fullName,
           cost_price: parsePrice(r['P. Costo']),
           sale_price: parsePrice(r['P. Venta']),
