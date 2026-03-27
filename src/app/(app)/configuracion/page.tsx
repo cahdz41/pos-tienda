@@ -1,30 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-
-interface PrintSettings {
-  printerName: string
-  paperWidth: '58mm' | '80mm'
-  autoPrint: boolean
-  storeName: string
-  storeFooter: string
-}
-
-const DEFAULTS: PrintSettings = {
-  printerName: '',
-  paperWidth: '80mm',
-  autoPrint: false,
-  storeName: 'CHOCHOLAND',
-  storeFooter: '¡Gracias por su compra!',
-}
-
-export function usePrintSettings(): PrintSettings {
-  if (typeof window === 'undefined') return DEFAULTS
-  try {
-    const saved = localStorage.getItem('pos_print_settings')
-    return saved ? { ...DEFAULTS, ...JSON.parse(saved) } : DEFAULTS
-  } catch { return DEFAULTS }
-}
+import { type PrintSettings, PRINT_DEFAULTS as DEFAULTS } from '@/lib/usePrintSettings'
 
 export default function ConfiguracionPage() {
   const [settings, setSettings] = useState<PrintSettings>(DEFAULTS)

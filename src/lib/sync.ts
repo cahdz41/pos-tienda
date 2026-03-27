@@ -133,9 +133,11 @@ class SyncEngine {
 
       if (saleError || !sale) throw new Error(saleError?.message ?? 'Error creando venta')
 
-      const items = payload.items.map(i => ({ ...i, sale_id: sale.id }))
-      const { error: itemsError } = await supabase.from('sale_items').insert(items)
-      if (itemsError) throw new Error(itemsError.message)
+      if (payload.items.length > 0) {
+        const items = payload.items.map(i => ({ ...i, sale_id: sale.id }))
+        const { error: itemsError } = await supabase.from('sale_items').insert(items)
+        if (itemsError) throw new Error(itemsError.message)
+      }
 
       // Decrement stock en Supabase + Dexie (fallo silencioso)
       for (const item of payload.items) {

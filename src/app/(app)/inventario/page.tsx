@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useOffline } from '@/contexts/OfflineContext'
 import { syncEngine } from '@/lib/sync'
+import { db } from '@/lib/db'
 import type { ProductVariant } from '@/types'
 
 /* ─── Excel import logic ─── */
@@ -60,7 +61,7 @@ interface AdjustModalProps {
   variant: ProductVariant
   userId: string
   onClose: () => void
-  onDone: (variantId: string, newStock: number) => void
+  onDone: (variantId: string, newStock: number, prices: { cost_price: number; sale_price: number; wholesale_price: number }) => void
 }
 
 function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
@@ -68,6 +69,9 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
   const [type, setType] = useState<'add' | 'remove' | 'correction'>('add')
   const [qty, setQty] = useState('')
   const [reason, setReason] = useState('')
+  const [costPrice, setCostPrice] = useState(String(variant.cost_price ?? ''))
+  const [salePrice, setSalePrice] = useState(String(variant.sale_price ?? ''))
+  const [wholesalePrice, setWholesalePrice] = useState(String(variant.wholesale_price ?? ''))
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -81,7 +85,7 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
     const n = parseFloat(qty) || 0
     if (type === 'add') return currentStock + n
     if (type === 'remove') return currentStock - n
-    return n // correction: qty es el nuevo stock absoluto
+    return n
   }
 
   async function handleSave() {
@@ -91,6 +95,10 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
     const newStock = computeNewStock()
     if (newStock < 0) { setErr('El stock resultante no puede ser negativo'); return }
+
+    const newCost = parseFloat(costPrice) || 0
+    const newSale = parseFloat(salePrice) || 0
+    const newWholesale = parseFloat(wholesalePrice) || 0
 
     const qtyChange = type === 'correction' ? newStock - currentStock : type === 'add' ? n : -n
 
@@ -109,11 +117,19 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
       const { error: updError } = await supabase
         .from('product_variants')
-        .update({ stock: newStock })
+        .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
         .eq('id', variant.id)
       if (updError) throw updError
 
-      onDone(variant.id, newStock)
+      // Actualizar Dexie para que el POS refleje los cambios al instante
+      await db.product_variants.update(variant.id, {
+        stock: newStock,
+        cost_price: newCost,
+        sale_price: newSale,
+        wholesale_price: newWholesale,
+      })
+
+      onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e))
       setSaving(false)
@@ -127,7 +143,7 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <div className="modal-title">Ajustar stock</div>
+            <div className="modal-title">Ajustar stock y precios</div>
             <div className="modal-subtitle">{productLabel}</div>
           </div>
           <button className="modal-close" onClick={onClose}>
@@ -187,6 +203,49 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
               <strong>{newStock < 0 ? 'Error: negativo' : `${newStock} uds`}</strong>
             </div>
           )}
+
+          {/* Precios */}
+          <div className="field-group">
+            <label className="field-label">Precios</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+              <div>
+                <label className="field-label" style={{ fontSize: '11px', marginBottom: '4px' }}>Costo</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={costPrice}
+                  onChange={e => setCostPrice(e.target.value)}
+                  className="field-input"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="field-label" style={{ fontSize: '11px', marginBottom: '4px' }}>P. Venta</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={salePrice}
+                  onChange={e => setSalePrice(e.target.value)}
+                  className="field-input"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="field-label" style={{ fontSize: '11px', marginBottom: '4px' }}>Mayoreo</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={wholesalePrice}
+                  onChange={e => setWholesalePrice(e.target.value)}
+                  className="field-input"
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+          </div>
 
           {/* Razón */}
           <div className="field-group">
@@ -403,8 +462,8 @@ export default function InventarioPage() {
   const soonCount = variants.filter(v => getExpStatus(v.expiration_date ?? null) === 'soon').length
 
   // ── Update stock in local state after adjustment ──
-  function handleAdjustDone(variantId: string, newStock: number) {
-    setVariants(prev => prev.map(v => v.id === variantId ? { ...v, stock: newStock } : v))
+  function handleAdjustDone(variantId: string, newStock: number, prices: { cost_price: number; sale_price: number; wholesale_price: number }) {
+    setVariants(prev => prev.map(v => v.id === variantId ? { ...v, stock: newStock, ...prices } : v))
     setAdjusting(null)
   }
 

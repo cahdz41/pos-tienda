@@ -39,6 +39,7 @@ export interface QueueEntry {
       amount_paid: number
       change_given: number
       discount: number
+      notes?: string | null
     }
     items: {
       variant_id: string

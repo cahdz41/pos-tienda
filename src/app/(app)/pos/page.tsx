@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
+import Link from 'next/link'
 import type { CartItem, ProductVariant } from '@/types'
+import { createClient } from '@/lib/supabase/client'
 import ProductPanel from './ProductPanel'
 import CartPanel from './CartPanel'
 
@@ -277,8 +279,16 @@ function HoldsPanel({ tickets, onRecall, onDelete, onClose }: HoldsPanelProps) {
 
 /* ─── POS Page ─── */
 export default function PosPage() {
+  const supabase = createClient()
   const [cart, setCart] = useState<CartItem[]>([])
   const [heldTickets, setHeldTickets] = useState<HeldTicket[]>([])
+  const [activeShiftId, setActiveShiftId] = useState<string | null | undefined>(undefined) // undefined = cargando
+
+  useEffect(() => {
+    supabase.from('shifts').select('id').eq('status', 'open')
+      .order('opened_at', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => setActiveShiftId(data?.id ?? null))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cargar desde localStorage solo en el cliente, después del primer render
   useEffect(() => {
@@ -363,6 +373,10 @@ export default function PosPage() {
 
   const clearCart = useCallback(() => setCart([]), [])
 
+  const addCartItemDirect = useCallback((item: import('@/types').CartItem) => {
+    setCart(prev => [...prev, item])
+  }, [])
+
   // Hold current cart
   const holdCart = useCallback(() => {
     if (cart.length === 0) return
@@ -408,7 +422,32 @@ export default function PosPage() {
   }, [])
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', position: 'relative' }}>
+      {/* Candado: sin turno abierto */}
+      {activeShiftId === null && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 300,
+          background: 'rgba(13,13,18,0.92)', backdropFilter: 'blur(6px)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
+        }}>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#F0B429" strokeWidth="1.5">
+            <rect x="3" y="11" width="18" height="11" rx="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ color: '#F0B429', fontWeight: 700, fontSize: 18, marginBottom: 6 }}>Sin turno activo</div>
+            <div style={{ color: '#9CA3AF', fontSize: 14 }}>Debes abrir un turno para realizar ventas</div>
+          </div>
+          <Link href="/turnos" style={{
+            marginTop: 8, padding: '10px 24px',
+            background: '#F0B429', color: '#0D0D12',
+            borderRadius: 8, fontWeight: 700, fontSize: 14,
+            textDecoration: 'none',
+          }}>
+            Ir a Turnos / Caja
+          </Link>
+        </div>
+      )}
       {showHolds && (
         <HoldsPanel
           tickets={heldTickets}
@@ -427,6 +466,7 @@ export default function PosPage() {
         onHold={holdCart}
         heldCount={heldTickets.length}
         onShowHolds={() => setShowHolds(true)}
+        onAddToCart={addCartItemDirect}
       />
     </div>
   )

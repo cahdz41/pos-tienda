@@ -16,15 +16,36 @@ interface Props {
   onHold: () => void
   heldCount: number
   onShowHolds: () => void
+  onAddToCart: (item: CartItem) => void
 }
 
 const fmt = (n: number) => `$${n.toFixed(2)}`
 
-export default function CartPanel({ cart, onUpdateQuantity, onUpdatePrice, onRemove, onClear, onHold, heldCount, onShowHolds }: Props) {
+export default function CartPanel({ cart, onUpdateQuantity, onUpdatePrice, onRemove, onClear, onHold, heldCount, onShowHolds, onAddToCart }: Props) {
   const [showPayment, setShowPayment] = useState(false)
   const [receipt, setReceipt] = useState<SaleReceipt | null>(null)
   const [showVoid, setShowVoid] = useState(false)
+  const [showCustom, setShowCustom] = useState(false)
+  const [customName, setCustomName] = useState('')
+  const [customPrice, setCustomPrice] = useState('')
+  const [customQty, setCustomQty] = useState('1')
   const { isOnline } = useOffline()
+
+  function addCustomItem() {
+    const price = parseFloat(customPrice)
+    const qty = parseInt(customQty) || 1
+    if (!customName.trim() || isNaN(price) || price <= 0) return
+    const fakeId = `custom-${Date.now()}`
+    const fakeVariant = {
+      id: fakeId, product_id: '', barcode: fakeId, flavor: null,
+      cost_price: 0, sale_price: price, wholesale_price: 0,
+      stock: 9999, min_stock: 0, max_stock: 0, expiration_date: null,
+      active: true, created_at: '', updated_at: '',
+      product: { id: '', name: customName.trim(), brand: null, category: null, description: null, image_url: null, supplier_id: null, sale_type: 'unidad' as const, active: true, created_at: '', updated_at: '' },
+    }
+    onAddToCart({ variant: fakeVariant, quantity: qty, unit_price: price, discount: 0, isCustom: true, customName: customName.trim() })
+    setCustomName(''); setCustomPrice(''); setCustomQty('1'); setShowCustom(false)
+  }
 
   // Inline price editing
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null)
@@ -58,6 +79,130 @@ export default function CartPanel({ cart, onUpdateQuantity, onUpdatePrice, onRem
     <div className="cart-panel">
       {showVoid && <VoidSaleModal onClose={() => setShowVoid(false)} />}
 
+      {/* Modal artículo común */}
+      {showCustom && (
+        <div onClick={() => setShowCustom(false)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+          backdropFilter: 'blur(4px)', zIndex: 400,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'var(--bg-surface, #1a1a24)',
+            border: '1px solid var(--border, rgba(255,255,255,0.1))',
+            borderRadius: 14, width: 380, maxWidth: '95vw',
+            boxShadow: '0 24px 48px rgba(0,0,0,0.5)',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '18px 20px 14px',
+              borderBottom: '1px solid var(--border, rgba(255,255,255,0.1))',
+            }}>
+              <div>
+                <div style={{ fontFamily: 'var(--font-syne, sans-serif)', fontWeight: 700, fontSize: 16, color: 'var(--text-primary, #fff)' }}>
+                  Artículo común
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted, #9CA3AF)', marginTop: 2 }}>
+                  Producto sin código — solo se agrega al carrito
+                </div>
+              </div>
+              <button onClick={() => setShowCustom(false)} style={{
+                width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent', border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                borderRadius: 7, color: 'var(--text-muted, #9CA3AF)', cursor: 'pointer',
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted, #9CA3AF)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Descripción *
+                </label>
+                <input
+                  autoFocus
+                  value={customName}
+                  onChange={e => setCustomName(e.target.value)}
+                  placeholder="Ej: Adelanto, servicio, producto sin código…"
+                  onKeyDown={e => e.key === 'Enter' && addCustomItem()}
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: 'var(--bg-card, #0D0D12)', border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                    borderRadius: 8, padding: '10px 12px', color: 'var(--text-primary, #fff)',
+                    fontSize: 14, outline: 'none',
+                  }}
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted, #9CA3AF)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Precio *
+                  </label>
+                  <input
+                    type="number" min="0" step="0.01"
+                    value={customPrice}
+                    onChange={e => setCustomPrice(e.target.value)}
+                    placeholder="0.00"
+                    onKeyDown={e => e.key === 'Enter' && addCustomItem()}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      background: 'var(--bg-card, #0D0D12)', border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                      borderRadius: 8, padding: '10px 12px', color: 'var(--text-primary, #fff)',
+                      fontSize: 14, outline: 'none',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted, #9CA3AF)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Cantidad
+                  </label>
+                  <input
+                    type="number" min="1" step="1"
+                    value={customQty}
+                    onChange={e => setCustomQty(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addCustomItem()}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      background: 'var(--bg-card, #0D0D12)', border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                      borderRadius: 8, padding: '10px 12px', color: 'var(--text-primary, #fff)',
+                      fontSize: 14, outline: 'none',
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              display: 'flex', gap: 10, padding: '0 20px 20px', justifyContent: 'flex-end',
+            }}>
+              <button onClick={() => setShowCustom(false)} style={{
+                padding: '9px 18px', borderRadius: 8, border: '1px solid var(--border, rgba(255,255,255,0.1))',
+                background: 'transparent', color: 'var(--text-secondary, #ccc)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}>
+                Cancelar
+              </button>
+              <button
+                onClick={addCustomItem}
+                disabled={!customName.trim() || !customPrice}
+                style={{
+                  padding: '9px 20px', borderRadius: 8, border: 'none',
+                  background: !customName.trim() || !customPrice ? 'rgba(240,180,41,0.3)' : 'var(--accent, #F0B429)',
+                  color: '#0D0D12', fontSize: 13, fontWeight: 700, cursor: !customName.trim() || !customPrice ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Agregar al carrito
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="cart-header">
         <h2 className="cart-title">
@@ -69,6 +214,11 @@ export default function CartPanel({ cart, onUpdateQuantity, onUpdatePrice, onRem
           {cart.length > 0 && <span className="cart-count">{cart.reduce((a, i) => a + i.quantity, 0)}</span>}
         </h2>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {/* Artículo común */}
+          <button className="custom-item-btn" onClick={() => setShowCustom(true)} title="Agregar artículo sin código">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Artículo
+          </button>
           {/* Void sale */}
           {isOnline && (
             <button className="void-btn" onClick={() => setShowVoid(true)} title="Anular una venta reciente">
@@ -129,8 +279,11 @@ export default function CartPanel({ cart, onUpdateQuantity, onUpdatePrice, onRem
             return (
             <div key={item.variant.id} className="cart-item">
               <div className="item-info">
-                <span className="item-name">{item.variant.product?.name ?? '—'}</span>
-                {item.variant.flavor && <span className="item-flavor">{item.variant.flavor}</span>}
+                <span className="item-name">
+                  {item.isCustom ? item.customName : (item.variant.product?.name ?? '—')}
+                  {item.isCustom && <span style={{ marginLeft: 5, fontSize: 10, color: 'var(--accent)', opacity: 0.8 }}>común</span>}
+                </span>
+                {!item.isCustom && item.variant.flavor && <span className="item-flavor">{item.variant.flavor}</span>}
                 <div className="item-price-row">
                   {isEditing ? (
                     <input
@@ -343,6 +496,17 @@ export default function CartPanel({ cart, onUpdateQuantity, onUpdatePrice, onRem
           transition: all 0.15s;
         }
         .clear-btn:hover { color: var(--danger, #EF4444); border-color: rgba(239,68,68,0.4); background: var(--danger-dim, rgba(239,68,68,0.08)); }
+
+        .custom-item-btn {
+          display: flex; align-items: center; gap: 5px;
+          font-size: 11px; font-weight: 600;
+          color: var(--accent);
+          background: transparent;
+          border: 1px solid rgba(240,180,41,0.35);
+          border-radius: 6px; padding: 5px 8px;
+          cursor: pointer; transition: all 0.15s;
+        }
+        .custom-item-btn:hover { background: var(--accent-glow); border-color: rgba(240,180,41,0.6); }
 
         .void-btn {
           display: flex; align-items: center; gap: 5px;

@@ -59,7 +59,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
   // Load active shift
   useEffect(() => {
     supabase.from('shifts').select('id').eq('status', 'open')
-      .order('opened_at', { ascending: false }).limit(1).single()
+      .order('opened_at', { ascending: false }).limit(1).maybeSingle()
       .then(({ data }) => { if (data) setActiveShiftId(data.id) })
   }, [supabase])
 
@@ -175,7 +175,13 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
     setError(null)
     try {
       const expandedItems: Array<{ variant_id: string; quantity: number; unit_price: number; discount: number; subtotal: number }> = []
+      const customItemsNote: string[] = []
       for (const i of cart) {
+        if (i.isCustom) {
+          // Artículo común: no se inserta en sale_items (no existe en DB), se guarda en notes
+          customItemsNote.push(`${i.quantity}x ${i.customName ?? 'Artículo'} $${i.unit_price.toFixed(2)}`)
+          continue
+        }
         if (i.isCombo && i.comboComponents && i.comboComponents.length > 0) {
           i.comboComponents.forEach((comp, idx) => {
             const unitPrice = idx === 0 ? i.unit_price : 0
@@ -197,6 +203,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
           amount_paid: cashPaid || total,
           change_given: change,
           discount: cart.reduce((acc, i) => acc + i.discount * i.quantity, 0),
+          notes: customItemsNote.length > 0 ? `Artículos comunes: ${customItemsNote.join(', ')}` : null,
         },
         items: expandedItems,
       }

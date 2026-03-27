@@ -24,7 +24,16 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: 'POS Sistema',
-  description: 'Sistema punto de venta',
+  description: 'Sistema punto de venta offline-first',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'POS',
+  },
+  other: {
+    'mobile-web-app-capable': 'yes',
+  },
 }
 
 export default function RootLayout({
@@ -37,6 +46,10 @@ export default function RootLayout({
       lang="es"
       className={`${syne.variable} ${dmSans.variable} ${jetbrainsMono.variable} h-full`}
     >
+      <head>
+        <meta name="theme-color" content="#0D0D12" />
+        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+      </head>
       <body className="min-h-full flex flex-col antialiased">
         <AuthProvider>
           <SwRegister />

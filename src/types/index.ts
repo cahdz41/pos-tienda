@@ -177,6 +177,9 @@ export interface CartItem {
   comboId?: string
   comboName?: string
   comboComponents?: Array<{ variantId: string; quantity: number }>
+  // Artículo común (ficticio, no existe en DB)
+  isCustom?: boolean
+  customName?: string
 }
 
 export interface ShiftSummary {

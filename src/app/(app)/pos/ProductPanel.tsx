@@ -26,15 +26,14 @@ const CATEGORY_ORDER = [
   'Farmaco',
   'CLA Y CARNITINA',
   'Snacks',
-  'Bebidas_sin_calorias',
   'COLAGENO',
-  'Diureticos',
 ]
 
 export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Props) {
   const supabase = createClient()
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<string | null>(null)
+  const [onlyInStock, setOnlyInStock] = useState(false)
   const [allVariants, setAllVariants] = useState<ProductVariant[]>([])
   const [combos, setCombos] = useState<ComboForPOS[]>([])
   const [loading, setLoading] = useState(true)
@@ -43,12 +42,21 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
   // Carga desde IndexedDB (funciona online y offline)
   useEffect(() => {
     async function fetchAll() {
-      // Sincronizar catálogo si es necesario (solo cuando hay conexión)
-      if (navigator.onLine) {
-        const needs = await syncEngine.shouldResync()
-        if (needs) await syncEngine.syncCatalog().catch(e => console.error('[POS sync]', e))
+      // 1. Mostrar datos cacheados inmediatamente (Dexie)
+      const cached = await syncEngine.getProducts()
+      setAllVariants(cached)
+      setLoading(false)
 
-        // Cargar combos activos desde Supabase
+      // 2. Siempre sincronizar desde Supabase en background cuando hay conexión
+      if (navigator.onLine) {
+        syncEngine.syncCatalog()
+          .then(async () => {
+            const fresh = await syncEngine.getProducts()
+            setAllVariants(fresh)
+          })
+          .catch(e => console.error('[POS sync]', e))
+
+        // Cargar combos activos
         supabase
           .from('combos')
           .select('id, name, sale_price, items:combo_items(variant_id, quantity)')
@@ -66,9 +74,6 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
             })))
           })
       }
-      const all = await syncEngine.getProducts()
-      setAllVariants(all)
-      setLoading(false)
     }
 
     fetchAll()
@@ -90,6 +95,7 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
   const products = useMemo(() => {
     const q = query.trim().toLowerCase()
     return allVariants.filter(v => {
+      if (onlyInStock && v.stock <= 0) return false
       if (category) {
         const vCat = v.product?.category?.trim().toLowerCase() ?? ''
         if (vCat !== category.toLowerCase()) return false
@@ -100,7 +106,7 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
       const barcode = v.barcode?.toLowerCase() ?? ''
       return name.includes(q) || flavor.includes(q) || barcode.includes(q)
     })
-  }, [allVariants, query, category])
+  }, [allVariants, query, category, onlyInStock])
 
   const getCartQty = useCallback(
     (variantId: string) => cart.find(i => i.variant.id === variantId)?.quantity ?? 0,
@@ -179,21 +185,30 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
       {/* Category filters */}
       {categories.length > 0 && (
         <div className="category-bar">
-          <button
-            className={`cat-btn ${category === null ? 'cat-btn--active' : ''}`}
-            onClick={() => setCategory(null)}
-          >
-            Todos
-          </button>
-          {categories.map(cat => (
+          <div className="category-scroll">
             <button
-              key={cat}
-              className={`cat-btn ${category === cat ? 'cat-btn--active' : ''}`}
-              onClick={() => setCategory(cat)}
+              className={`cat-btn ${category === null ? 'cat-btn--active' : ''}`}
+              onClick={() => setCategory(null)}
             >
-              {cat}
+              Todos
             </button>
-          ))}
+            {categories.map(cat => (
+              <button
+                key={cat}
+                className={`cat-btn ${category === cat ? 'cat-btn--active' : ''}`}
+                onClick={() => setCategory(cat)}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+          <button
+            className={`cat-btn cat-btn--stock ${onlyInStock ? 'cat-btn--active' : ''}`}
+            onClick={() => setOnlyInStock(v => !v)}
+            title="Mostrar solo productos con existencia"
+          >
+            ✓ Existencia
+          </button>
         </div>
       )}
 
@@ -343,14 +358,20 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
         /* Categories */
         .category-bar {
           display: flex;
+          align-items: center;
           gap: 6px;
           padding: 8px 16px;
           border-bottom: 1px solid var(--border);
-          overflow-x: auto;
-          scrollbar-width: none;
           flex-shrink: 0;
         }
-        .category-bar::-webkit-scrollbar { display: none; }
+        .category-scroll {
+          display: flex;
+          gap: 6px;
+          overflow-x: auto;
+          scrollbar-width: none;
+          flex: 1;
+        }
+        .category-scroll::-webkit-scrollbar { display: none; }
 
         .cat-btn {
           padding: 5px 12px;

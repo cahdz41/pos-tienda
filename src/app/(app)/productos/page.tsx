@@ -283,6 +283,7 @@ interface ProductFormData {
   supplier_id: string
   qty_add: string
   min_stock: string
+  expiration_month_year: string // MM/AAAA → se guarda como YYYY-MM-01
 }
 
 function ProductFormModal({ variant, suppliers, departments, onClose, onSaved }: {
@@ -304,6 +305,9 @@ function ProductFormModal({ variant, suppliers, departments, onClose, onSaved }:
     supplier_id: variant?.product?.supplier_id ?? '',
     qty_add: '',
     min_stock: variant ? String(variant.min_stock) : '0',
+    expiration_month_year: variant?.expiration_date
+      ? `${variant.expiration_date.slice(5, 7)}/${variant.expiration_date.slice(0, 4)}`
+      : '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -372,6 +376,14 @@ function ProductFormModal({ variant, suppliers, departments, onClose, onSaved }:
       // 2. Upsert variant
       const currentStock = variant?.stock ?? 0
       const addQty = parseFloat(form.qty_add) || 0
+      // Convertir MM/AAAA → YYYY-MM-01
+      let expiration_date: string | null = null
+      const expRaw = form.expiration_month_year.trim()
+      if (expRaw) {
+        const [mm, yyyy] = expRaw.split('/')
+        if (mm && yyyy && yyyy.length === 4) expiration_date = `${yyyy}-${mm.padStart(2, '0')}-01`
+      }
+
       const variantPayload = {
         product_id: productId,
         barcode: form.barcode.trim(),
@@ -380,6 +392,7 @@ function ProductFormModal({ variant, suppliers, departments, onClose, onSaved }:
         wholesale_price: parseFloat(form.wholesale_price) || 0,
         stock: currentStock + addQty,
         min_stock: parseInt(form.min_stock) || 0,
+        expiration_date,
       }
       if (variant) {
         const { error: e } = await supabase.from('product_variants').update(variantPayload).eq('id', variant.id)
@@ -474,6 +487,21 @@ function ProductFormModal({ variant, suppliers, departments, onClose, onSaved }:
           <div className="field">
             <label className="field-label">Existencia mínima</label>
             <input className="field-input" type="number" min="0" step="1" value={form.min_stock} onChange={e => set('min_stock', e.target.value)} placeholder="0" />
+          </div>
+          <div className="field">
+            <label className="field-label">Fecha de caducidad <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(opcional)</span></label>
+            <input
+              className="field-input"
+              value={form.expiration_month_year}
+              onChange={e => {
+                let v = e.target.value.replace(/[^\d/]/g, '')
+                // Auto-insertar / después de 2 dígitos
+                if (v.length === 2 && !v.includes('/')) v = v + '/'
+                if (v.length <= 7) set('expiration_month_year', v)
+              }}
+              placeholder="MM/AAAA"
+              maxLength={7}
+            />
           </div>
         </div>
         {error && <p className="form-error">{error}</p>}
