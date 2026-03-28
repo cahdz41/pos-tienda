@@ -8,6 +8,7 @@ import { useOffline } from '@/contexts/OfflineContext'
 import { syncEngine } from '@/lib/sync'
 import { db } from '@/lib/db'
 import type { ProductVariant } from '@/types'
+import { useSearchFocus } from '@/hooks/useSearchFocus'
 
 /* ─── Excel import logic ─── */
 interface ExcelRow {
@@ -437,6 +438,8 @@ export default function InventarioPage() {
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
   const [showImportPreview, setShowImportPreview] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  useSearchFocus(searchRef)
 
   const loadInventory = useCallback(async () => {
     setLoadingList(true)
@@ -695,6 +698,7 @@ export default function InventarioPage() {
               )
               if (match) setSearch('')
             }}
+            ref={searchRef}
             placeholder="Buscar producto, sabor o código…"
             className="inv-search"
           />

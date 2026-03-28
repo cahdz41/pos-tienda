@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchFocus } from '@/hooks/useSearchFocus'
 import { createClient } from '@/lib/supabase/client'
 import type { Customer, LoyaltyTransaction } from '@/types'
 
@@ -452,6 +453,8 @@ function CustomerDetailModal({ customer, onClose }: { customer: Customer; onClos
 /* ─── Main Page ─── */
 export default function ClientesPage() {
   const supabase = createClient()
+  const searchRef = useRef<HTMLInputElement>(null)
+  useSearchFocus(searchRef)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -556,7 +559,7 @@ export default function ClientesPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="search-icon">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          <input className="search-input" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nombre o WhatsApp…" />
+          <input ref={searchRef} className="search-input" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nombre o WhatsApp…" />
         </div>
         <div className="filter-chips">
           <button className={`chip ${filterCredit ? 'chip--active' : ''}`} onClick={() => setFilterCredit(p => !p)}>Con crédito</button>

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSearchFocus } from '@/hooks/useSearchFocus'
 import { createClient } from '@/lib/supabase/client'
 import type { ProductVariant, Supplier, Combo, ComboItem } from '@/types'
 
@@ -518,6 +519,8 @@ function ProductFormModal({ variant, suppliers, departments, onClose, onSaved }:
 
 function ProductosTab({ suppliers, departments }: { suppliers: Supplier[]; departments: Department[] }) {
   const supabase = createClient()
+  const searchRef = useRef<HTMLInputElement>(null)
+  useSearchFocus(searchRef)
   const [variants, setVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -598,6 +601,7 @@ function ProductosTab({ suppliers, departments }: { suppliers: Supplier[]; depar
         <div className="search-wrap">
           <svg className="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <input
+            ref={searchRef}
             className="search-input"
             value={search}
             onChange={e => { setSearch(e.target.value); setActiveSearch(e.target.value) }}

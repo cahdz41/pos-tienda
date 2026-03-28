@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { syncEngine } from '@/lib/sync'
 import { createClient } from '@/lib/supabase/client'
 import type { CartItem, ProductVariant } from '@/types'
+import { useSearchFocus } from '@/hooks/useSearchFocus'
 
 interface ComboForPOS {
   id: string
@@ -97,9 +98,10 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
     }
 
     fetchAll()
-    inputRef.current?.focus()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useSearchFocus(inputRef)
 
   // Categorías que existen en los datos, en el orden definido (comparación sin mayúsculas)
   const categories = useMemo(() => {
