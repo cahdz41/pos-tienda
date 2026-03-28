@@ -113,15 +113,13 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
     const withTimeout = <T,>(label: string, p: PromiseLike<T>): Promise<T> => {
       console.log(`[AdjustModal] → ${label}`)
-      let timerId: ReturnType<typeof setTimeout>
-      const timeout = new Promise<never>((_, reject) => {
-        timerId = setTimeout(() => {
-          reject(new Error(`Tiempo de espera agotado (${label}). Verifica tu conexión e intenta de nuevo.`))
-        }, 30000)
-      })
       return Promise.race([
-        Promise.resolve(p).finally(() => clearTimeout(timerId)),
-        timeout,
+        Promise.resolve(p),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => {
+            reject(new Error(`Tiempo de espera agotado (${label}). Verifica tu conexión e intenta de nuevo.`))
+          }, 30000)
+        ),
       ])
     }
 
