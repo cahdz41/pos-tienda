@@ -16,6 +16,7 @@ interface HeldTicket {
 }
 
 const HOLDS_KEY = 'pos_holds'
+const CART_KEY  = 'pos_cart'
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
@@ -293,13 +294,20 @@ export default function PosPage() {
   // Cargar desde localStorage solo en el cliente, después del primer render
   useEffect(() => {
     try {
+      const storedCart = JSON.parse(localStorage.getItem(CART_KEY) ?? '[]')
+      if (storedCart.length > 0) setCart(storedCart)
+    } catch { /* ignore */ }
+    try {
       const stored = JSON.parse(localStorage.getItem(HOLDS_KEY) ?? '[]')
       if (stored.length > 0) setHeldTickets(stored)
     } catch { /* ignore */ }
   }, [])
   const [showHolds, setShowHolds] = useState(false)
 
-  // Persist holds to localStorage
+  // Persist cart and holds to localStorage
+  useEffect(() => {
+    localStorage.setItem(CART_KEY, JSON.stringify(cart))
+  }, [cart])
   useEffect(() => {
     localStorage.setItem(HOLDS_KEY, JSON.stringify(heldTickets))
   }, [heldTickets])
