@@ -521,6 +521,7 @@ function ProductosTab({ suppliers, departments }: { suppliers: Supplier[]; depar
   const [variants, setVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [activeSearch, setActiveSearch] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<ProductVariant | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -557,7 +558,7 @@ function ProductosTab({ suppliers, departments }: { suppliers: Supplier[]; depar
   useEffect(() => { load() }, [load])
 
   const filtered = variants.filter(v => {
-    const q = search.toLowerCase()
+    const q = activeSearch.toLowerCase()
     return (
       v.barcode.toLowerCase().includes(q) ||
       (v.product?.name ?? '').toLowerCase().includes(q) ||
@@ -591,7 +592,19 @@ function ProductosTab({ suppliers, departments }: { suppliers: Supplier[]; depar
       <div className="tab-toolbar">
         <div className="search-wrap">
           <svg className="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <input className="search-input" value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nombre, código, departamento…" />
+          <input
+            className="search-input"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setActiveSearch(e.target.value) }}
+            onKeyDown={e => {
+              if (e.key !== 'Enter' || !search.trim()) return
+              const match = variants.find(
+                v => v.barcode?.toLowerCase() === search.trim().toLowerCase()
+              )
+              if (match) setSearch('')
+            }}
+            placeholder="Buscar por nombre, código, departamento…"
+          />
         </div>
         <button className="btn btn--primary" onClick={() => { setEditing(null); setModalOpen(true) }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>

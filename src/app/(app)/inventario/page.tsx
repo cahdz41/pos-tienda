@@ -443,6 +443,7 @@ export default function InventarioPage() {
   const [loadingList, setLoadingList] = useState(true)
   const [soloConExistencias, setSoloConExistencias] = useState(false)
   const [search, setSearch] = useState('')
+  const [activeSearch, setActiveSearch] = useState('')
   const [adjusting, setAdjusting] = useState<ProductVariant | null>(null)
   const [vencimientoFilter, setVencimientoFilter] = useState(false)
 
@@ -477,8 +478,8 @@ export default function InventarioPage() {
       const s = getExpStatus(v.expiration_date ?? null)
       if (s !== 'expired' && s !== 'soon') return false
     }
-    if (search.trim()) {
-      const q = search.toLowerCase()
+    if (activeSearch.trim()) {
+      const q = activeSearch.toLowerCase()
       const name = v.product?.name?.toLowerCase() ?? ''
       const flavor = v.flavor?.toLowerCase() ?? ''
       const barcode = v.barcode?.toLowerCase() ?? ''
@@ -702,7 +703,14 @@ export default function InventarioPage() {
           <input
             type="text"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => { setSearch(e.target.value); setActiveSearch(e.target.value) }}
+            onKeyDown={e => {
+              if (e.key !== 'Enter' || !search.trim()) return
+              const match = variants.find(
+                v => v.barcode?.toLowerCase() === search.trim().toLowerCase()
+              )
+              if (match) setSearch('')
+            }}
             placeholder="Buscar producto, sabor o código…"
             className="inv-search"
           />

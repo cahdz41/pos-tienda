@@ -38,6 +38,8 @@ function toProductVariant(v: LocalVariant): ProductVariant {
 }
 
 class SyncEngine {
+  private _syncingCatalog: Promise<void> | null = null
+
   async shouldResync(): Promise<boolean> {
     const meta = await db.sync_meta.get('last_catalog_sync')
     if (!meta) return true
@@ -50,6 +52,12 @@ class SyncEngine {
   }
 
   async syncCatalog(): Promise<void> {
+    if (this._syncingCatalog) return this._syncingCatalog
+    this._syncingCatalog = this._doSyncCatalog().finally(() => { this._syncingCatalog = null })
+    return this._syncingCatalog
+  }
+
+  private async _doSyncCatalog(): Promise<void> {
     const supabase = createClient()
     const PAGE = 1000
     let page = 0

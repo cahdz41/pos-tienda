@@ -32,6 +32,7 @@ const CATEGORY_ORDER = [
 export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Props) {
   const supabase = createClient()
   const [query, setQuery] = useState('')
+  const [activeQuery, setActiveQuery] = useState('')
   const [category, setCategory] = useState<string | null>(null)
   const [onlyInStock, setOnlyInStock] = useState(false)
   const [allVariants, setAllVariants] = useState<ProductVariant[]>([])
@@ -47,14 +48,18 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
       setAllVariants(cached)
       setLoading(false)
 
-      // 2. Siempre sincronizar desde Supabase en background cuando hay conexión
+      // 2. Sincronizar desde Supabase en background solo si es necesario
       if (navigator.onLine) {
-        syncEngine.syncCatalog()
-          .then(async () => {
-            const fresh = await syncEngine.getProducts()
-            setAllVariants(fresh)
-          })
-          .catch(e => console.error('[POS sync]', e))
+        syncEngine.shouldResync().then(needs => {
+          if (needs) {
+            syncEngine.syncCatalog()
+              .then(async () => {
+                const fresh = await syncEngine.getProducts()
+                setAllVariants(fresh)
+              })
+              .catch(e => console.error('[POS sync]', e))
+          }
+        })
 
         // Cargar combos activos
         supabase
@@ -93,7 +98,7 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
 
   // Filtrado 100% en cliente — instantáneo
   const products = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = activeQuery.trim().toLowerCase()
     return allVariants.filter(v => {
       if (onlyInStock && v.stock <= 0) return false
       if (category) {
@@ -106,7 +111,7 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
       const barcode = v.barcode?.toLowerCase() ?? ''
       return name.includes(q) || flavor.includes(q) || barcode.includes(q)
     })
-  }, [allVariants, query, category, onlyInStock])
+  }, [allVariants, activeQuery, category, onlyInStock])
 
   const getCartQty = useCallback(
     (variantId: string) => cart.find(i => i.variant.id === variantId)?.quantity ?? 0,
@@ -120,10 +125,10 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
 
   const filteredCombos = useMemo(() => {
     if (category) return [] // combos no tienen categoría, solo aparecen en "Todos"
-    const q = query.trim().toLowerCase()
+    const q = activeQuery.trim().toLowerCase()
     if (!q) return combos
     return combos.filter(c => c.name.toLowerCase().includes(q))
-  }, [combos, query, category])
+  }, [combos, activeQuery, category])
 
   const fmt = (n: number) => `$${n.toFixed(2)}`
 
@@ -151,7 +156,7 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
             ref={inputRef}
             type="text"
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => { setQuery(e.target.value); setActiveQuery(e.target.value) }}
             onKeyDown={e => {
               if (e.key !== 'Enter' || !query.trim()) return
               const match = allVariants.find(
@@ -160,13 +165,14 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
               if (match && match.stock > 0) {
                 onAddToCart(match)
                 setQuery('')
+                // activeQuery se mantiene: el producto escaneado sigue visible
               }
             }}
             placeholder="Buscar producto o escanear código de barras…"
             className="search-input"
           />
           {query && (
-            <button className="search-clear" onClick={() => setQuery('')}>
+            <button className="search-clear" onClick={() => { setQuery(''); setActiveQuery('') }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
               </svg>
