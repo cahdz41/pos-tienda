@@ -109,44 +109,25 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
     const qtyChange = type === 'correction' ? newStock - currentStock : type === 'add' ? n : -n
 
     setSaving(true); setErr(null)
-    console.log('[AdjustModal] Iniciando guardado…', { variantId: variant.id, type, newStock })
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const withTimeout = (label: string, p: PromiseLike<any>): Promise<any> => {
-      console.log(`[AdjustModal] → ${label}`)
-      return Promise.race([
-        Promise.resolve(p),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => {
-            reject(new Error(`Tiempo de espera agotado (${label}). Verifica tu conexión e intenta de nuevo.`))
-          }, 30000)
-        ),
-      ])
-    }
 
     try {
-      const { error: adjError } = await withTimeout('inventory_adjustments.insert',
-        supabase.from('inventory_adjustments').insert({
-          variant_id: variant.id,
-          cashier_id: userId,
-          type,
-          quantity_before: currentStock,
-          quantity_change: qtyChange,
-          quantity_after: newStock,
-          reason: reason.trim() || null,
-        })
-      )
-      if (adjError) throw new Error(`inventory_adjustments: ${adjError.message}`)
+      const { error: adjError } = await supabase.from('inventory_adjustments').insert({
+        variant_id: variant.id,
+        cashier_id: userId,
+        type,
+        quantity_before: currentStock,
+        quantity_change: qtyChange,
+        quantity_after: newStock,
+        reason: reason.trim() || null,
+      })
+      if (adjError) throw adjError
 
-      const { error: updError } = await withTimeout('product_variants.update',
-        supabase
-          .from('product_variants')
-          .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
-          .eq('id', variant.id)
-      )
-      if (updError) throw new Error(`product_variants: ${updError.message}`)
+      const { error: updError } = await supabase
+        .from('product_variants')
+        .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
+        .eq('id', variant.id)
+      if (updError) throw updError
 
-      console.log('[AdjustModal] Supabase OK — actualizando caché local')
       // Dexie es solo caché local: no bloqueamos el flujo si falla
       db.product_variants.update(variant.id, {
         stock: newStock,
@@ -155,11 +136,16 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
         wholesale_price: newWholesale,
       }).catch(e => console.warn('[AdjustModal] Dexie cache update falló (no crítico):', e))
 
-      console.log('[AdjustModal] ✓ Guardado exitoso')
       onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido al guardar'
-      console.error('[AdjustModal] ERROR:', msg, e)
+      const isNetwork = e instanceof Error && (
+        e.name === 'TimeoutError' || e.name === 'AbortError' ||
+        e.message.includes('Failed to fetch') || e.message.includes('NetworkError')
+      )
+      const msg = isNetwork
+        ? 'Sin conexión — verifica tu red e intenta de nuevo.'
+        : (e instanceof Error ? e.message : 'Error desconocido al guardar')
+      console.error('[AdjustModal]', e)
       setErr(msg)
       setSaving(false)
     }
