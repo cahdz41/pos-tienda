@@ -51,19 +51,21 @@ async function cacheFirst(request) {
 async function networkFirst(request) {
   const cache = await caches.open(CACHE)
   try {
-    const res = await fetch(request)
+    // Timeout de 5s: si el servidor tarda, cae al cache inmediatamente
+    // sin bloquear otras peticiones de red (Supabase, etc.)
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5000)
+    const res = await fetch(request, { signal: controller.signal })
+    clearTimeout(timer)
     if (res.ok) {
       cache.put(request, res.clone())
-      // Also update the app shell whenever we successfully load any page
       cache.put(SHELL_KEY, res.clone())
     }
     return res
   } catch {
-    // Try the exact cached page first
+    // Timeout o fallo de red: servir desde cache
     const exact = await cache.match(request)
     if (exact) return exact
-    // Fall back to the app shell — Next.js router will handle the path
-    // client-side using the already-loaded JS bundles
     const shell = await cache.match(SHELL_KEY)
     return shell ?? Response.error()
   }
