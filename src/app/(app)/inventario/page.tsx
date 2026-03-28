@@ -109,22 +109,32 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
     setSaving(true); setErr(null)
 
-    // Cada intento obtiene el cliente actual (puede ser uno nuevo si el anterior
-    // fue reseteado por un fallo previo — equivale a un F5 sin recargar la página).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function race(p: PromiseLike<any>): Promise<any> {
+    function race(label: string, p: PromiseLike<any>): Promise<any> {
+      console.log(`[Save] → iniciando: ${label}`)
+      const start = Date.now()
       return Promise.race([
-        p,
+        Promise.resolve(p).then(r => { console.log(`[Save] ✓ ${label} en ${Date.now()-start}ms`, r); return r }),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('timeout')), 8000)
+          setTimeout(() => { console.warn(`[Save] ✗ TIMEOUT ${label} después de 8000ms`); reject(new Error('timeout')) }, 8000)
         ),
       ])
     }
 
     const supabase = createClient()
 
+    // Diagnóstico: estado de auth y Web Locks antes de intentar
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    supabase.auth.getSession().then(({ data, error }: any) => {
+      console.log('[Save] auth.getSession →', error ? `ERROR: ${error.message}` : `user=${data.session?.user?.email ?? 'null'} expires=${data.session?.expires_at}`)
+    })
+    if ('locks' in navigator) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (navigator.locks as any).query().then((s: any) => console.log('[Save] WebLocks:', JSON.stringify(s)))
+    }
+
     try {
-      const { error: adjError } = await race(supabase.from('inventory_adjustments').insert({
+      const { error: adjError } = await race('inventory_adjustments.insert', supabase.from('inventory_adjustments').insert({
         variant_id: variant.id,
         cashier_id: userId,
         type,
@@ -135,7 +145,7 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
       }))
       if (adjError) throw adjError
 
-      const { error: updError } = await race(supabase
+      const { error: updError } = await race('product_variants.update', supabase
         .from('product_variants')
         .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
         .eq('id', variant.id))
@@ -147,8 +157,9 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
         cost_price: newCost,
         sale_price: newSale,
         wholesale_price: newWholesale,
-      }).catch(e => console.warn('[AdjustModal] Dexie cache update falló (no crítico):', e))
+      }).catch(e => console.warn('[AdjustModal] Dexie cache update falló:', e))
 
+      console.log('[Save] ✓ GUARDADO EXITOSO')
       onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
       const isNetwork = e instanceof Error && (
@@ -159,7 +170,7 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
       const msg = isNetwork
         ? 'Sin conexión — verifica tu red e intenta de nuevo.'
         : (e instanceof Error ? e.message : 'Error desconocido al guardar')
-      console.error('[AdjustModal]', e)
+      console.error('[Save] ✗ ERROR FINAL:', { name: (e as Error)?.name, message: (e as Error)?.message, isNetwork })
       setErr(msg)
       setSaving(false)
     }
