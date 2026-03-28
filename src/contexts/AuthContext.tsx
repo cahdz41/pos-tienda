@@ -45,7 +45,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (_event: any, session: any) => {
         setUser(session?.user ?? null)
         if (session?.user) {
           await fetchProfile(session.user.id)

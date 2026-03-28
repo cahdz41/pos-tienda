@@ -60,7 +60,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
   useEffect(() => {
     supabase.from('shifts').select('id').eq('status', 'open')
       .order('opened_at', { ascending: false }).limit(1).maybeSingle()
-      .then(({ data }) => { if (data) setActiveShiftId(data.id) })
+      .then(({ data }: { data: { id: string } | null }) => { if (data) setActiveShiftId(data.id) })
   }, [supabase])
 
   // Search customers by WhatsApp or name

@@ -287,7 +287,7 @@ export default function PosPage() {
   useEffect(() => {
     supabase.from('shifts').select('id').eq('status', 'open')
       .order('opened_at', { ascending: false }).limit(1).maybeSingle()
-      .then(({ data }) => setActiveShiftId(data?.id ?? null))
+      .then(({ data }: { data: { id: string } | null }) => setActiveShiftId(data?.id ?? null))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cargar desde localStorage solo en el cliente, después del primer render

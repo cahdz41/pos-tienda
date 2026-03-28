@@ -66,7 +66,8 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
           .from('combos')
           .select('id, name, sale_price, items:combo_items(variant_id, quantity)')
           .eq('active', true)
-          .then(({ data }) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .then(({ data }: { data: any }) => {
             if (!data) return
             setCombos(data.map((c: Record<string, unknown>) => ({
               id: c.id as string,

@@ -1171,12 +1171,14 @@ export default function ProductosPage() {
 
   const loadSuppliers = useCallback(() => {
     supabase.from('suppliers').select('id, name').eq('active', true).order('name')
-      .then(({ data }) => setSuppliers((data as Supplier[]) ?? []))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(({ data }: { data: any }) => setSuppliers((data as Supplier[]) ?? []))
   }, [supabase])
 
   const loadDepartments = useCallback(() => {
     supabase.from('departments').select('*').eq('active', true).order('name')
-      .then(({ data }) => setDepartments((data as Department[]) ?? []))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(({ data }: { data: any }) => setDepartments((data as Department[]) ?? []))
   }, [supabase])
 
   useEffect(() => { loadSuppliers(); loadDepartments() }, [loadSuppliers, loadDepartments])

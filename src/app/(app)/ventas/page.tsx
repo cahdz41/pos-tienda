@@ -61,7 +61,8 @@ export default function VentasPage() {
       .select('id, opened_at, cashier:profiles(name)')
       .order('opened_at', { ascending: false })
       .limit(20)
-      .then(({ data }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(({ data }: { data: any }) => {
         if (!data) return
         setShifts(data.map((s: Record<string, unknown>) => ({
           id: s.id as string,
@@ -89,9 +90,12 @@ export default function VentasPage() {
     if (error) { console.error('[Ventas]', error); setLoading(false); return }
     if (!data || data.length === 0) { setSales([]); setLoading(false); return }
 
-    const ids = data.map(s => s.id as string)
-    const cashierIds = [...new Set(data.map(s => s.cashier_id as string).filter(Boolean))]
-    const customerIds = [...new Set(data.map(s => s.customer_id as string).filter(Boolean))]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ids = data.map((s: any) => s.id as string)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cashierIds = [...new Set(data.map((s: any) => s.cashier_id as string).filter(Boolean))]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const customerIds = [...new Set(data.map((s: any) => s.customer_id as string).filter(Boolean))]
 
     // Queries en paralelo: items, cajeros, clientes
     const [itemsRes, cashiersRes, customersRes] = await Promise.all([
@@ -114,7 +118,8 @@ export default function VentasPage() {
     const customerMap: Record<string, string> = {}
     for (const c of customersRes.data ?? []) customerMap[(c as { id: string; name: string }).id] = (c as { id: string; name: string }).name
 
-    setSales(data.map(s => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setSales(data.map((s: any) => ({
       id: s.id as string,
       folio: `#${(s.id as string).slice(0, 8).toUpperCase()}`,
       total: Number(s.total),
@@ -143,7 +148,8 @@ export default function VentasPage() {
       if (error) throw error
 
       // Paso 2: obtener variantes + producto
-      const variantIds = [...new Set((items ?? []).map(i => (i as { variant_id: string }).variant_id).filter(Boolean))]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const variantIds = [...new Set((items ?? []).map((i: any) => (i as { variant_id: string }).variant_id).filter(Boolean))]
       const { data: variants } = variantIds.length > 0
         ? await supabase.from('product_variants').select('id, barcode, flavor, product:products(name)').in('id', variantIds)
         : { data: [] }
@@ -158,7 +164,8 @@ export default function VentasPage() {
         }
       }
 
-      const mapped: SaleDetail[] = (items ?? []).map(i => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mapped: SaleDetail[] = (items ?? []).map((i: any) => {
         const ii = i as { id: string; variant_id: string; quantity: number; unit_price: number; discount: number; subtotal: number | null }
         return { ...ii, variant: variantMap[ii.variant_id] ?? null }
       })

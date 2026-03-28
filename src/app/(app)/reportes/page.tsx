@@ -387,12 +387,16 @@ export default function ReportesPage() {
         .order('created_at')
       if (sErr) throw sErr
 
-      const totalRevenue = sales?.reduce((a, s) => a + s.total, 0) ?? 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const totalRevenue = sales?.reduce((a: number, s: any) => a + s.total, 0) ?? 0
       const totalTransactions = sales?.length ?? 0
       const avgTicket = totalTransactions > 0 ? totalRevenue / totalTransactions : 0
-      const cashTotal = sales?.filter(s => s.payment_method === 'cash').reduce((a, s) => a + s.total, 0) ?? 0
-      const cardTotal = sales?.filter(s => s.payment_method === 'card').reduce((a, s) => a + s.total, 0) ?? 0
-      const creditTotal = sales?.filter(s => s.payment_method === 'credit').reduce((a, s) => a + s.total, 0) ?? 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cashTotal = sales?.filter((s: any) => s.payment_method === 'cash').reduce((a: number, s: any) => a + s.total, 0) ?? 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cardTotal = sales?.filter((s: any) => s.payment_method === 'card').reduce((a: number, s: any) => a + s.total, 0) ?? 0
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const creditTotal = sales?.filter((s: any) => s.payment_method === 'credit').reduce((a: number, s: any) => a + s.total, 0) ?? 0
 
       // Daily grouping
       const dayMap = new Map<string, { total: number; count: number }>()
@@ -415,7 +419,8 @@ export default function ReportesPage() {
       let topProducts: TopProduct[] = []
       let deptStats: DeptStat[] = []
       let totalCost = 0
-      const saleIds = (sales ?? []).map(s => s.id)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const saleIds = (sales ?? []).map((s: any) => s.id)
 
       if (saleIds.length > 0) {
         const { data: items, error: iErr } = await supabase
