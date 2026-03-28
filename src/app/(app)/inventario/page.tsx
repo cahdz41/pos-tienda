@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
-import { createClient, resetSupabaseClient } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useOffline } from '@/contexts/OfflineContext'
 import { syncEngine } from '@/lib/sync'
@@ -151,9 +151,6 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
       onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
-      // Resetear el singleton para que el próximo intento arranque con cliente limpio.
-      // Sin esto, un fallo de auth deja el cliente en estado roto y todo falla hasta F5.
-      resetSupabaseClient()
       const isNetwork = e instanceof Error && (
         e.message === 'timeout' ||
         e.name === 'TimeoutError' || e.name === 'AbortError' ||

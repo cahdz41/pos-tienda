@@ -12,9 +12,3 @@ export function createClient() {
   )
   return _client
 }
-
-// Destruye el singleton. Llamar después de un fallo grave para que el próximo
-// createClient() arranque con un cliente limpio, equivalente a un F5.
-export function resetSupabaseClient() {
-  _client = null
-}
