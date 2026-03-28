@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, resetSupabaseClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useOffline } from '@/contexts/OfflineContext'
 import { syncEngine } from '@/lib/sync'
@@ -65,7 +65,6 @@ interface AdjustModalProps {
 }
 
 function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
-  const supabase = createClient()
   const [type, setType] = useState<'add' | 'remove' | 'correction'>('add')
   const [qty, setQty] = useState('')
   const [reason, setReason] = useState('')
@@ -110,8 +109,8 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
     setSaving(true); setErr(null)
 
-    // Timeout corto para feedback rápido al usuario: si la operación
-    // no responde en 8 s, informar de inmediato en vez de esperar 30 s.
+    // Cada intento obtiene el cliente actual (puede ser uno nuevo si el anterior
+    // fue reseteado por un fallo previo — equivale a un F5 sin recargar la página).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     function race(p: PromiseLike<any>): Promise<any> {
       return Promise.race([
@@ -121,6 +120,8 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
         ),
       ])
     }
+
+    const supabase = createClient()
 
     try {
       const { error: adjError } = await race(supabase.from('inventory_adjustments').insert({
@@ -150,6 +151,9 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
       onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
+      // Resetear el singleton para que el próximo intento arranque con cliente limpio.
+      // Sin esto, un fallo de auth deja el cliente en estado roto y todo falla hasta F5.
+      resetSupabaseClient()
       const isNetwork = e instanceof Error && (
         e.message === 'timeout' ||
         e.name === 'TimeoutError' || e.name === 'AbortError' ||
