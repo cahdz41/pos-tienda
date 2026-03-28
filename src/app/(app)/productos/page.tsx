@@ -539,20 +539,25 @@ function ProductosTab({ suppliers, departments }: { suppliers: Supplier[]; depar
     const PAGE = 1000
     let page = 0
     const all: ProductVariant[] = []
-    while (true) {
-      const { data } = await supabase
-        .from('product_variants')
-        .select('*, product:products(id, name, brand, category, sale_type, supplier_id, supplier:suppliers(id, name))')
-        .eq('active', true)
-        .range(page * PAGE, (page + 1) * PAGE - 1)
-        .order('created_at', { ascending: false })
-      if (!data || data.length === 0) break
-      all.push(...(data as ProductVariant[]))
-      if (data.length < PAGE) break
-      page++
+    try {
+      while (true) {
+        const { data } = await supabase
+          .from('product_variants')
+          .select('*, product:products(id, name, brand, category, sale_type, supplier_id, supplier:suppliers(id, name))')
+          .eq('active', true)
+          .range(page * PAGE, (page + 1) * PAGE - 1)
+          .order('created_at', { ascending: false })
+        if (!data || data.length === 0) break
+        all.push(...(data as ProductVariant[]))
+        if (data.length < PAGE) break
+        page++
+      }
+      setVariants(all)
+    } catch (e) {
+      console.error('[ProductosTab] load error:', e)
+    } finally {
+      setLoading(false)
     }
-    setVariants(all)
-    setLoading(false)
   }, [supabase])
 
   useEffect(() => { load() }, [load])
