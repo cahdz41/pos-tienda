@@ -43,25 +43,39 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
   // Carga desde IndexedDB (funciona online y offline)
   useEffect(() => {
     async function fetchAll() {
-      // 1. Mostrar datos cacheados inmediatamente (Dexie)
       const cached = await syncEngine.getProducts()
-      setAllVariants(cached)
-      setLoading(false)
 
-      // 2. Sincronizar desde Supabase en background solo si es necesario
+      if (cached.length > 0) {
+        // Caché disponible → mostrar inmediatamente, sincronizar en background
+        setAllVariants(cached)
+        setLoading(false)
+        if (navigator.onLine) {
+          syncEngine.shouldResync().then(needs => {
+            if (needs) {
+              syncEngine.syncCatalog()
+                .then(async () => setAllVariants(await syncEngine.getProducts()))
+                .catch(e => console.error('[POS sync]', e))
+            }
+          })
+        }
+      } else if (navigator.onLine) {
+        // Sin caché y online → sincronizar primero, mostrar cuando termine
+        // (mantiene loading=true para no mostrar "Sin resultados" mientras carga)
+        try {
+          await syncEngine.syncCatalog()
+          setAllVariants(await syncEngine.getProducts())
+        } catch (e) {
+          console.error('[POS sync]', e)
+        } finally {
+          setLoading(false)
+        }
+      } else {
+        // Sin caché y offline
+        setLoading(false)
+      }
+
+      // Combos: carga independiente, no bloquea el catálogo
       if (navigator.onLine) {
-        syncEngine.shouldResync().then(needs => {
-          if (needs) {
-            syncEngine.syncCatalog()
-              .then(async () => {
-                const fresh = await syncEngine.getProducts()
-                setAllVariants(fresh)
-              })
-              .catch(e => console.error('[POS sync]', e))
-          }
-        })
-
-        // Cargar combos activos
         supabase
           .from('combos')
           .select('id, name, sale_price, items:combo_items(variant_id, quantity)')

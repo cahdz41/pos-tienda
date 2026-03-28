@@ -110,8 +110,20 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
     setSaving(true); setErr(null)
 
+    // Timeout corto para feedback rápido al usuario: si la operación
+    // no responde en 8 s, informar de inmediato en vez de esperar 30 s.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function race(p: PromiseLike<any>): Promise<any> {
+      return Promise.race([
+        p,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 8000)
+        ),
+      ])
+    }
+
     try {
-      const { error: adjError } = await supabase.from('inventory_adjustments').insert({
+      const { error: adjError } = await race(supabase.from('inventory_adjustments').insert({
         variant_id: variant.id,
         cashier_id: userId,
         type,
@@ -119,13 +131,13 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
         quantity_change: qtyChange,
         quantity_after: newStock,
         reason: reason.trim() || null,
-      })
+      }))
       if (adjError) throw adjError
 
-      const { error: updError } = await supabase
+      const { error: updError } = await race(supabase
         .from('product_variants')
         .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
-        .eq('id', variant.id)
+        .eq('id', variant.id))
       if (updError) throw updError
 
       // Dexie es solo caché local: no bloqueamos el flujo si falla
@@ -139,6 +151,7 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
       onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
       const isNetwork = e instanceof Error && (
+        e.message === 'timeout' ||
         e.name === 'TimeoutError' || e.name === 'AbortError' ||
         e.message.includes('Failed to fetch') || e.message.includes('NetworkError')
       )
