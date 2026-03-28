@@ -1,9 +1,16 @@
-const CACHE = 'pos-app-v1'
+const CACHE = 'pos-app-v2'
 // Key where we store the app shell (root HTML with fresh chunk URLs)
 const SHELL_KEY = '/__app-shell'
 
 self.addEventListener('install', () => self.skipWaiting())
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
+self.addEventListener('activate', (e) => e.waitUntil(
+  // Eliminar caches viejos (v1, etc.) al activar el nuevo SW
+  caches.keys()
+    .then(keys => Promise.all(
+      keys.filter(k => k !== CACHE).map(k => caches.delete(k))
+    ))
+    .then(() => self.clients.claim())
+))
 
 // Pre-cache routes on command from the app
 self.addEventListener('message', async (event) => {
