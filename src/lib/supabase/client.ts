@@ -5,20 +5,30 @@ import { createBrowserClient } from '@supabase/ssr'
 // causando "lock was stolen" y colgando todas las peticiones.
 let _client: ReturnType<typeof createBrowserClient> | null = null
 
-// Todas las peticiones de Supabase abortan a los 10 s si no responden.
-// Sin esto, una red inestable puede dejar fetches colgados para siempre,
-// bloqueando el Web Lock de auth y congelando la app entera.
+// Todas las peticiones de Supabase llevan timeout para que una red inestable
+// no deje fetches colgados para siempre bloqueando el Web Lock de auth.
+//
+// Auth (/auth/v1/): 10 s — el Web Lock se retiene mientras dura la petición
+//   de refresh; si se cuelga, bloquea TODAS las demás peticiones. 10 s es
+//   más que suficiente para un refresh token en condiciones normales.
+//
+// Datos (/rest/v1/): 30 s — syncCatalog puede paginar miles de filas y
+//   necesita más margen en conexiones lentas.
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input
+    : input instanceof URL ? input.href
+    : (input as Request).url
+  const timeoutMs = url.includes('/auth/v1/') ? 10_000 : 30_000
+
   const controller = new AbortController()
-  // Enlazar la señal del llamante si ya trae una
   const callerSignal = init?.signal
   if (callerSignal) {
-    if (callerSignal.aborted) { controller.abort(callerSignal.reason); }
+    if (callerSignal.aborted) { controller.abort(callerSignal.reason) }
     else { callerSignal.addEventListener('abort', () => controller.abort(callerSignal.reason)) }
   }
   const timer = setTimeout(
     () => controller.abort(new DOMException('Request timed out', 'TimeoutError')),
-    10_000
+    timeoutMs
   )
   return fetch(input, { ...init, signal: controller.signal })
     .finally(() => clearTimeout(timer))
