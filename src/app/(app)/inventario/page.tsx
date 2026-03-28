@@ -111,7 +111,8 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
     setSaving(true); setErr(null)
     console.log('[AdjustModal] Iniciando guardado…', { variantId: variant.id, type, newStock })
 
-    const withTimeout = <T,>(label: string, p: PromiseLike<T>): Promise<T> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const withTimeout = (label: string, p: PromiseLike<any>): Promise<any> => {
       console.log(`[AdjustModal] → ${label}`)
       return Promise.race([
         Promise.resolve(p),
