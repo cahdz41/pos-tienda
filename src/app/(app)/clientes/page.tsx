@@ -194,7 +194,7 @@ function AbonoModal({ customer, onSaved, onClose }: AbonoModalProps) {
   useEffect(() => {
     supabase.from('credit_payments').select('id,amount,created_at,payment_method').eq('customer_id', customer.id)
       .order('created_at', { ascending: false }).limit(8)
-      .then(({ data }) => setRecentPayments((data as typeof recentPayments) ?? []))
+      .then(({ data }: { data: typeof recentPayments | null }) => setRecentPayments(data ?? []))
   }, [customer.id, supabase])
 
   const balance = customer.credit_balance
