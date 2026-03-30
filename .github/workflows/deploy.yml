@@ -23,7 +23,8 @@ jobs:
 
             echo "📦 Actualizando código..."
             cd /var/www/pos-tienda
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
 
             echo "📥 Instalando dependencias..."
             npm ci
