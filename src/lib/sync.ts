@@ -40,7 +40,8 @@ function toProductVariant(v: LocalVariant): ProductVariant {
 // Todas las operaciones Supabase del flujo crítico de venta pasan por aquí.
 // Si el servidor no responde en `ms` milisegundos la promise se rechaza con
 // un error claro en lugar de colgar indefinidamente.
-const withTimeout = <T>(p: PromiseLike<T>, ms: number): Promise<T> =>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const withTimeout = (p: PromiseLike<any>, ms: number): Promise<any> =>
   Promise.race([
     Promise.resolve(p),
     new Promise<never>((_, reject) =>
