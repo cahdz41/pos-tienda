@@ -141,6 +141,16 @@ class SyncEngine {
     return db.offline_queue.where('status').equals('pending').count()
   }
 
+  /** Pre-establece la conexión TCP y refresca el JWT antes de la primera venta. */
+  async warmConnection(): Promise<void> {
+    try {
+      const supabase = createClient()
+      await supabase.from('shifts').select('id').limit(1).maybeSingle()
+    } catch {
+      // Silencioso — si falla el warmup el cobro lo detectará con su propio timeout
+    }
+  }
+
   async processSale(
     payload: QueueEntry['payload'],
     isOnline: boolean

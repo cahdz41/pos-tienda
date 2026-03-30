@@ -55,9 +55,13 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     refreshQueue()
 
     if (navigator.onLine) {
-      syncEngine.shouldResync().then(needs => {
-        if (needs) syncEngine.syncCatalog().then(refreshQueue).catch(console.error)
-      })
+      // Warmup: pre-establece conexión TCP y refresca JWT para que el primer
+      // cobro no espere ese overhead (normalmente ~300ms pero puede ser más)
+      syncEngine.warmConnection().then(() =>
+        syncEngine.shouldResync().then(needs => {
+          if (needs) syncEngine.syncCatalog().then(refreshQueue).catch(console.error)
+        })
+      )
     }
 
     const onOnline = () => { setIsOnline(true); doFlush() }
