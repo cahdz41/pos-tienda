@@ -114,22 +114,24 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
     const slowTimer = setTimeout(() => setErr('Conexión lenta — guardando, espera…'), 5000)
 
     try {
-      const { error: adjError } = await supabase.from('inventory_adjustments').insert({
-        variant_id: variant.id,
-        cashier_id: userId,
-        type,
-        quantity_before: currentStock,
-        quantity_change: qtyChange,
-        quantity_after: newStock,
-        reason: reason.trim() || null,
-      })
-      if (adjError) throw adjError
-
-      const { error: updError } = await supabase
-        .from('product_variants')
-        .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
-        .eq('id', variant.id)
-      if (updError) throw updError
+      // Ambas escrituras en paralelo — reduce el tiempo total a max(t1,t2) en lugar de t1+t2
+      const [adjResult, updResult] = await Promise.all([
+        supabase.from('inventory_adjustments').insert({
+          variant_id: variant.id,
+          cashier_id: userId,
+          type,
+          quantity_before: currentStock,
+          quantity_change: qtyChange,
+          quantity_after: newStock,
+          reason: reason.trim() || null,
+        }),
+        supabase
+          .from('product_variants')
+          .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
+          .eq('id', variant.id),
+      ])
+      if (adjResult.error) throw adjResult.error
+      if (updResult.error) throw updResult.error
 
       clearTimeout(slowTimer)
 

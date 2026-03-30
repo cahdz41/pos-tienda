@@ -18,17 +18,6 @@ interface Props {
 
 const fmt = (n: number) => `$${n.toFixed(2)}`
 
-const withTimeout = <T,>(p: PromiseLike<T>, ms: number): Promise<T> =>
-  Promise.race([
-    Promise.resolve(p),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`Sin respuesta del servidor (${ms / 1000}s). Verifica tu conexión.`)),
-        ms
-      )
-    ),
-  ])
-
 const METHOD_CONFIG: Array<{ id: SalePaymentMethod; label: string; color: string }> = [
   { id: 'cash',     label: 'Efectivo',      color: 'var(--success, #22C55E)' },
   { id: 'card',     label: 'Tarjeta',        color: '#3B82F6' },
@@ -225,53 +214,29 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
       const saleId = result.saleId
       const isOffline = saleId.startsWith('offline-')
 
+      // Loyalty math — aritmética pura, sin async
       let loyaltyEarned = 0
       let newLoyaltyBalance = customer?.loyalty_balance ?? 0
       let newLoyaltySpent = customer?.loyalty_spent ?? 0
+      let walletUsed = 0
 
-      if (isOnline && !isOffline) {
-        const paymentRows = activeMethods.map(m => ({
-          sale_id: saleId,
-          method: m,
-          amount: parseFloat(amounts[m] || '0') - (m === 'cash' ? change : 0),
-        })).filter(r => r.amount > 0)
-        if (paymentRows.length > 0) {
-          await withTimeout(supabase.from('sale_payments').insert(paymentRows), 10_000)
-        }
-
-        if (customer && !active.credit) {
-          const walletUsed = active.wallet ? parseFloat(amounts.wallet || '0') : 0
-          const nonWalletPaid = total - walletUsed
-
-          const prevSpent = customer.loyalty_spent ?? 0
-          const newSpent = prevSpent + nonWalletPaid
-          const prevThresholds = Math.floor(prevSpent / 1000)
-          const newThresholds = Math.floor(newSpent / 1000)
-          loyaltyEarned = (newThresholds - prevThresholds) * 50
-
-          let newBalance = (customer.loyalty_balance ?? 0) - walletUsed + loyaltyEarned
-          if (newBalance < 0) newBalance = 0
-
-          await withTimeout(
-            supabase.from('customers').update({
-              loyalty_spent: newSpent,
-              loyalty_balance: newBalance,
-            }).eq('id', customer.id),
-            10_000
-          )
-
-          const txns = []
-          if (walletUsed > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'redeemed', amount: walletUsed })
-          if (loyaltyEarned > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'earned', amount: loyaltyEarned })
-          if (txns.length > 0) await withTimeout(supabase.from('loyalty_transactions').insert(txns), 10_000)
-
-          newLoyaltyBalance = newBalance
-          newLoyaltySpent = newSpent
-        }
+      if (isOnline && !isOffline && customer && !active.credit) {
+        walletUsed = active.wallet ? parseFloat(amounts.wallet || '0') : 0
+        const nonWalletPaid = total - walletUsed
+        const prevSpent = customer.loyalty_spent ?? 0
+        const newSpent = prevSpent + nonWalletPaid
+        const prevThresholds = Math.floor(prevSpent / 1000)
+        const newThresholds = Math.floor(newSpent / 1000)
+        loyaltyEarned = (newThresholds - prevThresholds) * 50
+        let newBalance = (customer.loyalty_balance ?? 0) - walletUsed + loyaltyEarned
+        if (newBalance < 0) newBalance = 0
+        newLoyaltyBalance = newBalance
+        newLoyaltySpent = newSpent
       }
 
       const loyaltyNextIn = newLoyaltySpent > 0 ? 1000 - (newLoyaltySpent % 1000) : 1000
 
+      // ✅ Éxito inmediato — no esperamos escrituras secundarias
       onSuccess({
         saleId,
         date: new Date(),
@@ -287,6 +252,38 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
         loyaltyBalance: customer ? newLoyaltyBalance : undefined,
         loyaltyNextIn: customer && !active.credit ? loyaltyNextIn : undefined,
       })
+
+      // 🔁 Fire-and-forget: pagos y lealtad (no bloquean el flujo de caja)
+      if (isOnline && !isOffline) {
+        const paymentRows = activeMethods
+          .map(m => ({
+            sale_id: saleId,
+            method: m,
+            amount: parseFloat(amounts[m] || '0') - (m === 'cash' ? change : 0),
+          }))
+          .filter(r => r.amount > 0)
+
+        if (paymentRows.length > 0) {
+          supabase.from('sale_payments').insert(paymentRows)
+            .then(res => { if (res.error) console.warn('[pos] sale_payments:', res.error.message) })
+        }
+
+        if (customer && !active.credit) {
+          supabase.from('customers').update({
+            loyalty_spent: newLoyaltySpent,
+            loyalty_balance: newLoyaltyBalance,
+          }).eq('id', customer.id)
+            .then(res => { if (res.error) console.warn('[pos] customers update:', res.error.message) })
+
+          const txns: Array<{ customer_id: string; sale_id: string; type: string; amount: number }> = []
+          if (walletUsed > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'redeemed', amount: walletUsed })
+          if (loyaltyEarned > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'earned', amount: loyaltyEarned })
+          if (txns.length > 0) {
+            supabase.from('loyalty_transactions').insert(txns)
+              .then(res => { if (res.error) console.warn('[pos] loyalty_transactions:', res.error.message) })
+          }
+        }
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error al procesar el pago')
     } finally {

@@ -174,16 +174,16 @@ class SyncEngine {
         if (itemsError) throw new Error(itemsError.message)
       }
 
-      // Decrement stock en Supabase + Dexie (fallo silencioso)
+      // Decrement stock: Dexie primero (instantáneo), Supabase fire-and-forget.
+      // Si la llamada a Supabase falla, syncCatalog reconcilia en el próximo ciclo.
+      // Ya no bloquea el flujo de la venta ni puede generar falsos "errores".
       for (const item of payload.items) {
         const local = await db.product_variants.get(item.variant_id)
         if (local) {
           const newStock = Math.max(0, local.stock - item.quantity)
-          await withTimeout(
-            supabase.from('product_variants').update({ stock: newStock }).eq('id', item.variant_id),
-            8_000
-          )
           await db.product_variants.update(item.variant_id, { stock: newStock })
+          supabase.from('product_variants').update({ stock: newStock }).eq('id', item.variant_id)
+            .then(({ error }) => { if (error) console.warn('[sync] stock update:', error.message) })
         }
       }
 
