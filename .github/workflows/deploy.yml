@@ -18,17 +18,38 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
           script: |
+            set -e
+
             echo "📦 Actualizando código..."
             cd /var/www/pos-tienda
             git pull origin main
 
             echo "📥 Instalando dependencias..."
-            npm ci
+            npm ci --prefer-offline
 
             echo "🔨 Compilando..."
             npm run build
 
             echo "♻️  Reiniciando servicio..."
-            /usr/lib/node_modules/pm2/bin/pm2 reload pos-tienda || /usr/lib/node_modules/pm2/bin/pm2 start ecosystem.config.js
+            /usr/lib/node_modules/pm2/bin/pm2 reload pos-tienda --update-env \
+              || /usr/lib/node_modules/pm2/bin/pm2 start ecosystem.config.js
 
-            echo "✅ Deploy completado"
+            echo "⏳ Esperando que la app esté lista en :3003..."
+            READY=0
+            for i in $(seq 1 30); do
+              if curl -sf --max-time 3 http://localhost:3003 > /dev/null 2>&1; then
+                READY=1
+                echo "✅ App respondiendo (intento $i/30)"
+                break
+              fi
+              echo "   Esperando... ($i/30)"
+              sleep 2
+            done
+
+            if [ $READY -eq 0 ]; then
+              echo "❌ La app no respondió en 60s — últimos logs:"
+              /usr/lib/node_modules/pm2/bin/pm2 logs pos-tienda --lines 30 --nostream
+              exit 1
+            fi
+
+            echo "✅ Deploy completado y verificado"
