@@ -37,6 +37,20 @@ function toProductVariant(v: LocalVariant): ProductVariant {
   }
 }
 
+// Todas las operaciones Supabase del flujo crítico de venta pasan por aquí.
+// Si el servidor no responde en `ms` milisegundos la promise se rechaza con
+// un error claro en lugar de colgar indefinidamente.
+const withTimeout = <T>(p: PromiseLike<T>, ms: number): Promise<T> =>
+  Promise.race([
+    Promise.resolve(p),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Sin respuesta del servidor (${ms / 1000}s). Verifica tu conexión.`)),
+        ms
+      )
+    ),
+  ])
+
 class SyncEngine {
   private _syncingCatalog: Promise<void> | null = null
 
@@ -133,17 +147,19 @@ class SyncEngine {
     if (isOnline) {
       const supabase = createClient()
 
-      const { data: sale, error: saleError } = await supabase
-        .from('sales')
-        .insert(payload.sale)
-        .select('id')
-        .single()
+      const { data: sale, error: saleError } = await withTimeout(
+        supabase.from('sales').insert(payload.sale).select('id').single(),
+        12_000
+      )
 
       if (saleError || !sale) throw new Error(saleError?.message ?? 'Error creando venta')
 
       if (payload.items.length > 0) {
         const items = payload.items.map(i => ({ ...i, sale_id: sale.id }))
-        const { error: itemsError } = await supabase.from('sale_items').insert(items)
+        const { error: itemsError } = await withTimeout(
+          supabase.from('sale_items').insert(items),
+          12_000
+        )
         if (itemsError) throw new Error(itemsError.message)
       }
 
@@ -152,7 +168,10 @@ class SyncEngine {
         const local = await db.product_variants.get(item.variant_id)
         if (local) {
           const newStock = Math.max(0, local.stock - item.quantity)
-          await supabase.from('product_variants').update({ stock: newStock }).eq('id', item.variant_id)
+          await withTimeout(
+            supabase.from('product_variants').update({ stock: newStock }).eq('id', item.variant_id),
+            8_000
+          )
           await db.product_variants.update(item.variant_id, { stock: newStock })
         }
       }

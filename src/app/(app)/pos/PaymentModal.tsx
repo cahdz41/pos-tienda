@@ -18,6 +18,17 @@ interface Props {
 
 const fmt = (n: number) => `$${n.toFixed(2)}`
 
+const withTimeout = <T>(p: PromiseLike<T>, ms: number): Promise<T> =>
+  Promise.race([
+    Promise.resolve(p),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Sin respuesta del servidor (${ms / 1000}s). Verifica tu conexión.`)),
+        ms
+      )
+    ),
+  ])
+
 const METHOD_CONFIG: Array<{ id: SalePaymentMethod; label: string; color: string }> = [
   { id: 'cash',     label: 'Efectivo',      color: 'var(--success, #22C55E)' },
   { id: 'card',     label: 'Tarjeta',        color: '#3B82F6' },
@@ -225,7 +236,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
           amount: parseFloat(amounts[m] || '0') - (m === 'cash' ? change : 0),
         })).filter(r => r.amount > 0)
         if (paymentRows.length > 0) {
-          await supabase.from('sale_payments').insert(paymentRows)
+          await withTimeout(supabase.from('sale_payments').insert(paymentRows), 10_000)
         }
 
         if (customer && !active.credit) {
@@ -241,15 +252,18 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
           let newBalance = (customer.loyalty_balance ?? 0) - walletUsed + loyaltyEarned
           if (newBalance < 0) newBalance = 0
 
-          await supabase.from('customers').update({
-            loyalty_spent: newSpent,
-            loyalty_balance: newBalance,
-          }).eq('id', customer.id)
+          await withTimeout(
+            supabase.from('customers').update({
+              loyalty_spent: newSpent,
+              loyalty_balance: newBalance,
+            }).eq('id', customer.id),
+            10_000
+          )
 
           const txns = []
           if (walletUsed > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'redeemed', amount: walletUsed })
           if (loyaltyEarned > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'earned', amount: loyaltyEarned })
-          if (txns.length > 0) await supabase.from('loyalty_transactions').insert(txns)
+          if (txns.length > 0) await withTimeout(supabase.from('loyalty_transactions').insert(txns), 10_000)
 
           newLoyaltyBalance = newBalance
           newLoyaltySpent = newSpent
@@ -275,6 +289,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
       })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Error al procesar el pago')
+    } finally {
       setProcessing(false)
     }
   }
