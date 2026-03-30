@@ -183,7 +183,7 @@ class SyncEngine {
           const newStock = Math.max(0, local.stock - item.quantity)
           await db.product_variants.update(item.variant_id, { stock: newStock })
           supabase.from('product_variants').update({ stock: newStock }).eq('id', item.variant_id)
-            .then(({ error }) => { if (error) console.warn('[sync] stock update:', error.message) })
+            .then((res: { error: { message: string } | null }) => { if (res.error) console.warn('[sync] stock update:', res.error.message) })
         }
       }
 

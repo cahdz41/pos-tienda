@@ -263,9 +263,11 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
           }))
           .filter(r => r.amount > 0)
 
+        type PgResult = { error: { message: string } | null }
+
         if (paymentRows.length > 0) {
           supabase.from('sale_payments').insert(paymentRows)
-            .then(res => { if (res.error) console.warn('[pos] sale_payments:', res.error.message) })
+            .then((res: PgResult) => { if (res.error) console.warn('[pos] sale_payments:', res.error.message) })
         }
 
         if (customer && !active.credit) {
@@ -273,14 +275,14 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
             loyalty_spent: newLoyaltySpent,
             loyalty_balance: newLoyaltyBalance,
           }).eq('id', customer.id)
-            .then(res => { if (res.error) console.warn('[pos] customers update:', res.error.message) })
+            .then((res: PgResult) => { if (res.error) console.warn('[pos] customers update:', res.error.message) })
 
           const txns: Array<{ customer_id: string; sale_id: string; type: string; amount: number }> = []
           if (walletUsed > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'redeemed', amount: walletUsed })
           if (loyaltyEarned > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'earned', amount: loyaltyEarned })
           if (txns.length > 0) {
             supabase.from('loyalty_transactions').insert(txns)
-              .then(res => { if (res.error) console.warn('[pos] loyalty_transactions:', res.error.message) })
+              .then((res: PgResult) => { if (res.error) console.warn('[pos] loyalty_transactions:', res.error.message) })
           }
         }
       }
