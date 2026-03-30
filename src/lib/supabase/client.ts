@@ -4,11 +4,21 @@ import { createBrowserClient } from '@supabase/ssr'
 // ("lock was stolen") que bloqueaba todas las peticiones.
 let _client: ReturnType<typeof createBrowserClient> | null = null
 
+// Cancela la conexión TCP real (no solo la promise) después de 15 s.
+// Esto cubre el refresh de JWT y cualquier query que se cuelgue por red muerta.
+const REQUEST_TIMEOUT_MS = 15_000
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(id))
+}
+
 export function createClient() {
   if (_client) return _client
   _client = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { global: { fetch: fetchWithTimeout } }
   )
   return _client
 }

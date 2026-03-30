@@ -313,9 +313,12 @@ function PriceCell({ value, canEdit, onSave }: PriceCellProps) {
     if (isNaN(n) || n < 0) { setEditing(false); return }
     if (Math.abs(n - value) < 0.001) { setEditing(false); return }
     setSaving(true)
-    await onSave(n)
-    setSaving(false)
-    setEditing(false)
+    try {
+      await onSave(n)
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (editing) {
@@ -371,8 +374,11 @@ function DateCell({ value, canEdit, onSave }: DateCellProps) {
     setEditing(false)
     if (newVal === value) return
     setSaving(true)
-    await onSave(newVal)
-    setSaving(false)
+    try {
+      await onSave(newVal)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (editing) {

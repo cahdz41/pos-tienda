@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchFocus } from '@/hooks/useSearchFocus'
 import { createClient } from '@/lib/supabase/client'
+import { syncEngine } from '@/lib/sync'
 import type { ProductVariant, Supplier, Combo, ComboItem } from '@/types'
 
 type Tab = 'productos' | 'combos' | 'proveedores' | 'departamentos'
@@ -694,6 +695,7 @@ function ProductosTab({ suppliers, departments }: { suppliers: Supplier[]; depar
             setModalOpen(false)
             setToast(editing ? 'Producto actualizado correctamente' : 'Producto registrado con éxito')
             load()
+            syncEngine.syncCatalog().catch(console.error)
           }}
         />
       )}
