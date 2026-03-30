@@ -18,7 +18,7 @@ interface Props {
 
 const fmt = (n: number) => `$${n.toFixed(2)}`
 
-const withTimeout = <T>(p: PromiseLike<T>, ms: number): Promise<T> =>
+const withTimeout = <T,>(p: PromiseLike<T>, ms: number): Promise<T> =>
   Promise.race([
     Promise.resolve(p),
     new Promise<never>((_, reject) =>
