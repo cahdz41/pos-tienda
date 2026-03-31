@@ -43,10 +43,15 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
   useEffect(() => {
     async function fetchAll() {
       try {
-        const { data, error } = await supabase
-          .from('product_variants')
-          .select('*, product:products(id, name, brand, category, description, image_url, active, supplier_id, sale_type, created_at, updated_at)')
-          .eq('active', true)
+        const { data, error } = await Promise.race([
+          supabase
+            .from('product_variants')
+            .select('*, product:products(id, name, brand, category, description, image_url, active, supplier_id, sale_type, created_at, updated_at)')
+            .eq('active', true),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Tiempo de espera agotado al cargar productos')), 15_000)
+          ),
+        ])
         if (error) throw error
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         setAllVariants((data ?? []) as any)

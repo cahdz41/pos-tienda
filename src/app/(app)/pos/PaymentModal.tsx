@@ -6,6 +6,15 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { CartItem, Customer, SalePaymentMethod } from '@/types'
 import type { SaleReceipt } from './Receipt'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const withTimeout = (p: PromiseLike<any>, ms: number): Promise<any> =>
+  Promise.race([
+    Promise.resolve(p),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Sin respuesta del servidor (${ms / 1000}s). Intenta de nuevo.`)), ms)
+    ),
+  ])
+
 interface Props {
   cart: CartItem[]
   total: number
@@ -40,6 +49,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
   // Payment methods — plain object, no Set (avoids React stale-reference issues)
   const [active, setActive] = useState<ActiveMethods>({ cash: true })
   const [amounts, setAmounts] = useState<Amounts>({ cash: '', card: '', transfer: '', wallet: '', credit: '' })
+  const [mixedMode, setMixedMode] = useState(false)
 
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -106,8 +116,24 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
   // Derived list of active method IDs (stable for the render)
   const activeMethods = (Object.keys(active) as SalePaymentMethod[]).filter(k => !!active[k])
 
+  function toggleMixedMode() {
+    setMixedMode(prev => {
+      if (prev) {
+        // Saliendo de modo mixto: dejar solo un método principal activo
+        const main = (['cash', 'card', 'transfer'] as SalePaymentMethod[]).find(m => !!active[m]) ?? 'cash'
+        setActive(cur => {
+          const next: ActiveMethods = { [main]: true }
+          if (cur.wallet) next.wallet = true
+          return next
+        })
+        setAmounts(a => ({ ...a, cash: '', card: '', transfer: '', credit: '' }))
+      }
+      return !prev
+    })
+  }
+
   function toggleMethod(m: SalePaymentMethod) {
-    // Credit is exclusive: toggling it on clears everything else; toggling off resets to cash
+    // Crédito: exclusivo — limpia todo lo demás al activar; vuelve a efectivo al desactivar
     if (m === 'credit') {
       if (active.credit) {
         setActive({ cash: true })
@@ -119,29 +145,52 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
       return
     }
 
-    const isCurrentlyActive = !!active[m]
-    // Can't deactivate the only active method
-    if (isCurrentlyActive && activeMethods.length <= 1) return
+    // Monedero: siempre combinable, lógica propia
+    if (m === 'wallet') {
+      const isActive = !!active[m]
+      if (isActive && activeMethods.length <= 1) return
+      setActive(prev => {
+        const next = { ...prev }
+        delete next.credit
+        if (isActive) delete next.wallet
+        else next.wallet = true
+        return next
+      })
+      if (active.credit) setAmounts(prev => ({ ...prev, credit: '' }))
+      if (!active[m]) {
+        const bal = customer?.loyalty_balance ?? 0
+        if (bal > 0) setAmounts(prev => ({ ...prev, wallet: Math.min(bal, total).toFixed(2) }))
+      } else {
+        setAmounts(prev => ({ ...prev, wallet: '' }))
+      }
+      return
+    }
 
+    // Cash / card / transfer
+    if (!mixedMode) {
+      // Modo simple: un solo método principal, wallet puede coexistir
+      if (!!active[m]) return // ya está activo, no hacer nada
+      setActive(prev => {
+        const next: ActiveMethods = { [m]: true }
+        if (prev.wallet) next.wallet = true
+        return next
+      })
+      setAmounts(prev => ({ ...prev, cash: '', card: '', transfer: '', credit: '' }))
+      return
+    }
+
+    // Modo mixto: multi-select libre
+    const isCurrentlyActive = !!active[m]
+    if (isCurrentlyActive && activeMethods.length <= 1) return
     setActive(prev => {
       const next = { ...prev }
-      // If credit was active, clear it
       delete next.credit
-      if (isCurrentlyActive) {
-        delete next[m]
-      } else {
-        next[m] = true
-      }
+      if (isCurrentlyActive) delete next[m]
+      else next[m] = true
       return next
     })
-
     if (active.credit) setAmounts(prev => ({ ...prev, credit: '' }))
-    if (isCurrentlyActive) {
-      setAmounts(prev => ({ ...prev, [m]: '' }))
-    } else if (m === 'wallet') {
-      const bal = customer?.loyalty_balance ?? 0
-      if (bal > 0) setAmounts(prev => ({ ...prev, wallet: Math.min(bal, total).toFixed(2) }))
-    }
+    if (isCurrentlyActive) setAmounts(prev => ({ ...prev, [m]: '' }))
   }
 
   function setAmount(m: SalePaymentMethod, val: string) {
@@ -201,17 +250,19 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
         notes: customItemsNote.length > 0 ? `Artículos comunes: ${customItemsNote.join(', ')}` : null,
       }
 
-      const { data: sale, error: saleError } = await supabase
-        .from('sales')
-        .insert(saleRow)
-        .select('id')
-        .single()
+      const { data: sale, error: saleError } = await withTimeout(
+        supabase.from('sales').insert(saleRow).select('id').single(),
+        12_000
+      )
 
       if (saleError || !sale) throw new Error(saleError?.message ?? 'Error al crear la venta')
 
       if (expandedItems.length > 0) {
         const items = expandedItems.map(i => ({ ...i, sale_id: sale.id }))
-        const { error: itemsError } = await supabase.from('sale_items').insert(items)
+        const { error: itemsError } = await withTimeout(
+          supabase.from('sale_items').insert(items),
+          12_000
+        )
         if (itemsError) throw new Error(itemsError.message)
       }
 
@@ -387,9 +438,17 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
 
           {/* Method toggles */}
           <div className="pm-section">
-            <span className="pm-section-label">
-              Métodos de pago <span className="pm-hint">— activa varios para pago mixto</span>
-            </span>
+            <div className="pm-section-header">
+              <span className="pm-section-label">Métodos de pago</span>
+              <button
+                className={`pm-mixed-toggle ${mixedMode ? 'pm-mixed-toggle--on' : ''}`}
+                onClick={toggleMixedMode}
+                type="button"
+              >
+                <span className={`pm-mixed-check ${mixedMode ? 'pm-mixed-check--on' : ''}`} />
+                Pago mixto
+              </button>
+            </div>
             <div className="pm-method-grid">
               {METHOD_CONFIG.filter(m => {
                 if (m.id === 'wallet') return !!customer && (customer.loyalty_balance ?? 0) > 0
@@ -436,6 +495,11 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
                         <button key={n} className="pm-quick-btn" onClick={() => setAmount('cash', String(n))}>${n}</button>
                       ))}
                       <button className="pm-quick-btn" onClick={() => setAmount('cash', String(Math.ceil(remaining / 10) * 10))}>Exacto ↑</button>
+                    </div>
+                  )}
+                  {(m === 'card' || m === 'transfer') && (
+                    <div className="pm-quick">
+                      <button className="pm-quick-btn" onClick={() => setAmount(m, remaining.toFixed(2))}>Exacto</button>
                     </div>
                   )}
                 </div>
@@ -547,10 +611,30 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
           display: flex; flex-direction: column; gap: 16px;
         }
         .pm-section { display: flex; flex-direction: column; gap: 8px; }
+        .pm-section-header { display: flex; align-items: center; justify-content: space-between; }
         .pm-section-label {
           font-size: 10px; font-weight: 600;
           color: var(--text-muted);
           text-transform: uppercase; letter-spacing: 0.08em;
+        }
+        .pm-mixed-toggle {
+          display: flex; align-items: center; gap: 6px;
+          font-size: 11px; font-weight: 500; color: var(--text-muted);
+          background: none; border: 1px solid var(--border);
+          border-radius: 6px; padding: 3px 8px; cursor: pointer;
+          transition: all 0.15s;
+        }
+        .pm-mixed-toggle--on { color: var(--accent); border-color: var(--accent); background: rgba(240,180,41,0.08); }
+        .pm-mixed-check {
+          width: 12px; height: 12px; border-radius: 3px;
+          border: 1px solid var(--border); background: transparent;
+          display: inline-flex; align-items: center; justify-content: center;
+          flex-shrink: 0; transition: all 0.15s;
+        }
+        .pm-mixed-check--on {
+          background: var(--accent); border-color: var(--accent);
+          background-image: url("data:image/svg+xml,%3Csvg width='8' height='8' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1.5 5L4 7.5L8.5 2.5' stroke='%230D0D12' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+          background-repeat: no-repeat; background-position: center;
         }
 
         /* Customer */
@@ -624,7 +708,6 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
         .pm-badge--wallet { background: rgba(240,180,41,0.15); color: var(--accent); border: 1px solid rgba(240,180,41,0.3); }
         .pm-badge--credit { background: rgba(129,140,248,0.1); color: #818CF8; border: 1px solid rgba(129,140,248,0.3); }
 
-        .pm-hint { font-size: 10px; font-weight: 400; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
 
         /* Methods */
         .pm-method-grid { display: flex; flex-wrap: wrap; gap: 6px; }

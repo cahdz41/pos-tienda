@@ -428,6 +428,8 @@ export default function InventarioPage() {
   const [activeSearch, setActiveSearch] = useState('')
   const [adjusting, setAdjusting] = useState<ProductVariant | null>(null)
   const [vencimientoFilter, setVencimientoFilter] = useState(false)
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false)
 
   // ── Import state ──
   const [importRows, setImportRows] = useState<ExcelRow[]>([])
@@ -457,12 +459,17 @@ export default function InventarioPage() {
 
   useEffect(() => { loadInventory() }, [loadInventory])
 
+  const categories = Array.from(
+    new Set(variants.map(v => v.product?.category).filter(Boolean) as string[])
+  ).sort()
+
   const filtered = variants.filter(v => {
     if (soloConExistencias && v.stock <= 0) return false
     if (vencimientoFilter) {
       const s = getExpStatus(v.expiration_date ?? null)
       if (s !== 'expired' && s !== 'soon') return false
     }
+    if (categoryFilter && v.product?.category !== categoryFilter) return false
     if (activeSearch.trim()) {
       const q = activeSearch.toLowerCase()
       const name = v.product?.name?.toLowerCase() ?? ''
@@ -716,6 +723,39 @@ export default function InventarioPage() {
           </svg>
           {vencimientoFilter ? 'Caducados/Por vencer ✓' : 'Caducados/Por vencer'}
         </button>
+        <div className="category-dropdown-wrap">
+          <button
+            className={`filter-stock-btn ${categoryFilter ? 'filter-stock-btn--active' : ''}`}
+            onClick={() => setCategoryDropdownOpen(o => !o)}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 6h16M7 12h10M10 18h4"/>
+            </svg>
+            {categoryFilter ?? 'Categoría'}
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginLeft: 2 }}>
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          {categoryDropdownOpen && (
+            <div className="category-dropdown">
+              <button
+                className={`category-option ${categoryFilter === null ? 'category-option--active' : ''}`}
+                onClick={() => { setCategoryFilter(null); setCategoryDropdownOpen(false) }}
+              >
+                Todas las categorías
+              </button>
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  className={`category-option ${categoryFilter === cat ? 'category-option--active' : ''}`}
+                  onClick={() => { setCategoryFilter(cat); setCategoryDropdownOpen(false) }}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <span className="results-count">{filtered.length} resultados</span>
         {isOwner && (
           <span className="edit-hint">
@@ -982,6 +1022,24 @@ export default function InventarioPage() {
         }
         .filter-stock-btn:hover { border-color: var(--accent); color: var(--accent); }
         .filter-stock-btn--active { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.4); color: var(--success, #22C55E); }
+
+        .category-dropdown-wrap { position: relative; }
+        .category-dropdown {
+          position: absolute; top: calc(100% + 6px); left: 0; z-index: 50;
+          background: var(--bg-surface); border: 1px solid var(--border);
+          border-radius: 8px; padding: 4px;
+          min-width: 180px; max-height: 260px; overflow-y: auto;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        .category-option {
+          display: block; width: 100%; text-align: left;
+          padding: 7px 10px; font-size: 13px; color: var(--text-secondary);
+          background: none; border: none; border-radius: 5px;
+          cursor: pointer; transition: background 0.1s;
+          white-space: nowrap;
+        }
+        .category-option:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .category-option--active { color: var(--accent); font-weight: 600; }
 
         .results-count { font-size: 12px; color: var(--text-muted); margin-left: auto; }
 
