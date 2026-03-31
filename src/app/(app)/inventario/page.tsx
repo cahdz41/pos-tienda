@@ -4,9 +4,6 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOffline } from '@/contexts/OfflineContext'
-import { syncEngine } from '@/lib/sync'
-import { db } from '@/lib/db'
 import type { ProductVariant } from '@/types'
 import { useSearchFocus } from '@/hooks/useSearchFocus'
 
@@ -136,14 +133,6 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
       ])
       if (adjResult.error) throw adjResult.error
       if (updResult.error) throw updResult.error
-
-      // Dexie es solo caché local: no bloqueamos el flujo si falla
-      db.product_variants.update(variant.id, {
-        stock: newStock,
-        cost_price: newCost,
-        sale_price: newSale,
-        wholesale_price: newWholesale,
-      }).catch(e => console.warn('[AdjustModal] Dexie cache update falló:', e))
 
       onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
@@ -429,7 +418,6 @@ function DateCell({ value, canEdit, onSave }: DateCellProps) {
 export default function InventarioPage() {
   const supabase = createClient()
   const { profile } = useAuth()
-  const { isOnline } = useOffline()
   const isOwner = profile?.role === 'owner'
 
   // ── Inventory state ──
@@ -453,18 +441,19 @@ export default function InventarioPage() {
   const loadInventory = useCallback(async () => {
     setLoadingList(true)
     try {
-      if (navigator.onLine) {
-        const needs = await syncEngine.shouldResync()
-        if (needs) await syncEngine.syncCatalog().catch(e => console.error('[Inventario sync]', e))
-      }
-      const all = await syncEngine.getProducts()
-      setVariants(all)
+      const { data, error } = await supabase
+        .from('product_variants')
+        .select('*, product:products(id, name, brand, category, description, image_url, active, supplier_id, sale_type, created_at, updated_at)')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setVariants((data ?? []) as any)
     } catch (e) {
       console.error('[loadInventory]', e)
     } finally {
       setLoadingList(false)
     }
-  }, [])
+  }, [supabase])
 
   useEffect(() => { loadInventory() }, [loadInventory])
 
@@ -614,10 +603,7 @@ export default function InventarioPage() {
           </p>
         </div>
         <div className="header-actions">
-          {!isOnline && (
-            <span className="offline-badge">Solo lectura</span>
-          )}
-          {isOwner && isOnline && (
+          {isOwner && (
             <>
               <input
                 ref={fileInputRef}
@@ -731,7 +717,7 @@ export default function InventarioPage() {
           {vencimientoFilter ? 'Caducados/Por vencer ✓' : 'Caducados/Por vencer'}
         </button>
         <span className="results-count">{filtered.length} resultados</span>
-        {isOwner && isOnline && (
+        {isOwner && (
           <span className="edit-hint">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -773,21 +759,21 @@ export default function InventarioPage() {
                   <td className="mono">
                     <PriceCell
                       value={v.sale_price}
-                      canEdit={isOwner && isOnline}
+                      canEdit={isOwner}
                       onSave={val => updatePrice(v.id, 'sale_price', val)}
                     />
                   </td>
                   <td className="mono">
                     <PriceCell
                       value={v.cost_price}
-                      canEdit={isOwner && isOnline}
+                      canEdit={isOwner}
                       onSave={val => updatePrice(v.id, 'cost_price', val)}
                     />
                   </td>
                   <td className="mono">
                     <PriceCell
                       value={v.wholesale_price}
-                      canEdit={isOwner && isOnline}
+                      canEdit={isOwner}
                       onSave={val => updatePrice(v.id, 'wholesale_price', val)}
                     />
                   </td>
@@ -800,7 +786,7 @@ export default function InventarioPage() {
                   <td>
                     <DateCell
                       value={v.expiration_date ?? null}
-                      canEdit={isOwner && isOnline}
+                      canEdit={isOwner}
                       onSave={val => updateExpDate(v.id, val)}
                     />
                   </td>

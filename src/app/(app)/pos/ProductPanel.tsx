@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { syncEngine } from '@/lib/sync'
 import { createClient } from '@/lib/supabase/client'
 import type { CartItem, ProductVariant } from '@/types'
 import { useSearchFocus } from '@/hooks/useSearchFocus'
@@ -41,43 +40,24 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
   const [loading, setLoading] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Carga desde IndexedDB (funciona online y offline)
   useEffect(() => {
     async function fetchAll() {
-      const cached = await syncEngine.getProducts()
-
-      if (cached.length > 0) {
-        // Caché disponible → mostrar inmediatamente, sincronizar en background
-        setAllVariants(cached)
-        setLoading(false)
-        if (navigator.onLine) {
-          syncEngine.shouldResync().then(needs => {
-            if (needs) {
-              syncEngine.syncCatalog()
-                .then(async () => setAllVariants(await syncEngine.getProducts()))
-                .catch(e => console.error('[POS sync]', e))
-            }
-          })
-        }
-      } else if (navigator.onLine) {
-        // Sin caché y online → sincronizar primero, mostrar cuando termine
-        // (mantiene loading=true para no mostrar "Sin resultados" mientras carga)
-        try {
-          await syncEngine.syncCatalog()
-          setAllVariants(await syncEngine.getProducts())
-        } catch (e) {
-          console.error('[POS sync]', e)
-        } finally {
-          setLoading(false)
-        }
-      } else {
-        // Sin caché y offline
+      try {
+        const { data, error } = await supabase
+          .from('product_variants')
+          .select('*, product:products(id, name, brand, category, description, image_url, active, supplier_id, sale_type, created_at, updated_at)')
+          .eq('active', true)
+        if (error) throw error
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setAllVariants((data ?? []) as any)
+      } catch (e) {
+        console.error('[POS load]', e)
+      } finally {
         setLoading(false)
       }
 
       // Combos: carga independiente, no bloquea el catálogo
-      if (navigator.onLine) {
-        supabase
+      supabase
           .from('combos')
           .select('id, name, sale_price, items:combo_items(variant_id, quantity)')
           .eq('active', true)
@@ -94,7 +74,6 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
               })),
             })))
           })
-      }
     }
 
     fetchAll()

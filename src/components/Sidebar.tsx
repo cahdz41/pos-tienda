@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOffline } from '@/contexts/OfflineContext'
 
 const NAV_ITEMS = [
   {
@@ -103,7 +102,6 @@ const NAV_ITEMS = [
 export default function Sidebar() {
   const pathname = usePathname()
   const { profile, signOut } = useAuth()
-  const { isOnline } = useOffline()
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
@@ -130,16 +128,6 @@ export default function Sidebar() {
         <span className="nav-section-label">Módulos</span>
         {NAV_ITEMS.filter(item => !item.ownerOnly || (mounted && profile?.role === 'owner')).map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + '/')
-          const disabled = !isOnline && !item.offlineEnabled
-          if (disabled) {
-            return (
-              <div key={item.href} className="nav-item nav-item--disabled" title="Requiere conexión">
-                <span className="nav-icon">{item.icon}</span>
-                <span className="nav-label">{item.label}</span>
-                <span style={{ fontSize: 11 }}>🔒</span>
-              </div>
-            )
-          }
           return (
             <Link
               key={item.href}

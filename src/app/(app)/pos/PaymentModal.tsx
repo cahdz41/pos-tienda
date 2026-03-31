@@ -3,9 +3,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOffline } from '@/contexts/OfflineContext'
-import { syncEngine } from '@/lib/sync'
-import type { QueueEntry } from '@/lib/db'
 import type { CartItem, Customer, SalePaymentMethod } from '@/types'
 import type { SaleReceipt } from './Receipt'
 
@@ -32,7 +29,6 @@ type Amounts = Record<SalePaymentMethod, string>
 
 export default function PaymentModal({ cart, total, onClose, onSuccess }: Props) {
   const { user, profile } = useAuth()
-  const { isOnline, refreshQueue } = useOffline()
   const supabase = createClient()
 
   // Customer search
@@ -193,26 +189,51 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
       }
 
       const cashPaid = active.cash ? cashAmt : 0
-      const payload: QueueEntry['payload'] = {
-        sale: {
-          total,
-          payment_method: getSalePaymentMethod(),
-          cashier_id: user?.id ?? null,
-          shift_id: activeShiftId,
-          customer_id: customer?.id ?? null,
-          amount_paid: cashPaid || total,
-          change_given: change,
-          discount: cart.reduce((acc, i) => acc + i.discount * i.quantity, 0),
-          notes: customItemsNote.length > 0 ? `Artículos comunes: ${customItemsNote.join(', ')}` : null,
-        },
-        items: expandedItems,
+      const saleRow = {
+        total,
+        payment_method: getSalePaymentMethod(),
+        cashier_id: user?.id ?? null,
+        shift_id: activeShiftId,
+        customer_id: customer?.id ?? null,
+        amount_paid: cashPaid || total,
+        change_given: change,
+        discount: cart.reduce((acc, i) => acc + i.discount * i.quantity, 0),
+        notes: customItemsNote.length > 0 ? `Artículos comunes: ${customItemsNote.join(', ')}` : null,
       }
 
-      const result = await syncEngine.processSale(payload, isOnline)
-      await refreshQueue()
+      const { data: sale, error: saleError } = await supabase
+        .from('sales')
+        .insert(saleRow)
+        .select('id')
+        .single()
 
-      const saleId = result.saleId
-      const isOffline = saleId.startsWith('offline-')
+      if (saleError || !sale) throw new Error(saleError?.message ?? 'Error al crear la venta')
+
+      if (expandedItems.length > 0) {
+        const items = expandedItems.map(i => ({ ...i, sale_id: sale.id }))
+        const { error: itemsError } = await supabase.from('sale_items').insert(items)
+        if (itemsError) throw new Error(itemsError.message)
+      }
+
+      // Decremento de stock — fire-and-forget, no bloquea el flujo
+      for (const item of expandedItems) {
+        supabase
+          .from('product_variants')
+          .select('stock')
+          .eq('id', item.variant_id)
+          .single()
+          .then(({ data: v }: { data: { stock: number } | null }) => {
+            if (!v) return
+            supabase.from('product_variants')
+              .update({ stock: Math.max(0, v.stock - item.quantity) })
+              .eq('id', item.variant_id)
+              .then(({ error }: { error: { message: string } | null }) => {
+                if (error) console.warn('[pos] stock update:', error.message)
+              })
+          })
+      }
+
+      const saleId = sale.id
 
       // Loyalty math — aritmética pura, sin async
       let loyaltyEarned = 0
@@ -220,7 +241,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
       let newLoyaltySpent = customer?.loyalty_spent ?? 0
       let walletUsed = 0
 
-      if (isOnline && !isOffline && customer && !active.credit) {
+      if (customer && !active.credit) {
         walletUsed = active.wallet ? parseFloat(amounts.wallet || '0') : 0
         const nonWalletPaid = total - walletUsed
         const prevSpent = customer.loyalty_spent ?? 0
@@ -254,7 +275,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
       })
 
       // 🔁 Fire-and-forget: pagos y lealtad (no bloquean el flujo de caja)
-      if (isOnline && !isOffline) {
+      {
         const paymentRows = activeMethods
           .map(m => ({
             sale_id: saleId,
@@ -372,7 +393,7 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
             <div className="pm-method-grid">
               {METHOD_CONFIG.filter(m => {
                 if (m.id === 'wallet') return !!customer && (customer.loyalty_balance ?? 0) > 0
-                if (m.id === 'credit') return !!customer && customer.credit_limit > 0 && isOnline
+                if (m.id === 'credit') return !!customer && customer.credit_limit > 0
                 return true
               }).map(m => (
                 <button

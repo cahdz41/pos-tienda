@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { Syne, DM_Sans, JetBrains_Mono } from 'next/font/google'
 import { AuthProvider } from '@/contexts/AuthContext'
-import SwRegister from '@/components/SwRegister'
 import './globals.css'
 
 const syne = Syne({
@@ -24,16 +23,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: 'POS Sistema',
-  description: 'Sistema punto de venta offline-first',
-  manifest: '/manifest.webmanifest',
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: 'black-translucent',
-    title: 'POS',
-  },
-  other: {
-    'mobile-web-app-capable': 'yes',
-  },
+  description: 'Sistema punto de venta',
 }
 
 export default function RootLayout({
@@ -52,7 +42,6 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col antialiased">
         <AuthProvider>
-          <SwRegister />
           {children}
         </AuthProvider>
       </body>

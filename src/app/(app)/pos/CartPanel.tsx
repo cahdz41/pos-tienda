@@ -5,7 +5,6 @@ import type { CartItem } from '@/types'
 import PaymentModal from './PaymentModal'
 import Receipt, { type SaleReceipt } from './Receipt'
 import VoidSaleModal from './VoidSaleModal'
-import { useOffline } from '@/contexts/OfflineContext'
 
 interface Props {
   cart: CartItem[]
@@ -29,8 +28,6 @@ export default function CartPanel({ cart, onUpdateQuantity, onUpdatePrice, onRem
   const [customName, setCustomName] = useState('')
   const [customPrice, setCustomPrice] = useState('')
   const [customQty, setCustomQty] = useState('1')
-  const { isOnline } = useOffline()
-
   function addCustomItem() {
     const price = parseFloat(customPrice)
     const qty = parseInt(customQty) || 1
@@ -220,15 +217,13 @@ export default function CartPanel({ cart, onUpdateQuantity, onUpdatePrice, onRem
             Artículo
           </button>
           {/* Void sale */}
-          {isOnline && (
-            <button className="void-btn" onClick={() => setShowVoid(true)} title="Anular una venta reciente">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                <path d="M10 11v6M14 11v6M9 6V4h6v2"/>
-              </svg>
-              Anular
-            </button>
-          )}
+          <button className="void-btn" onClick={() => setShowVoid(true)} title="Anular una venta reciente">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6M14 11v6M9 6V4h6v2"/>
+            </svg>
+            Anular
+          </button>
           {/* Held tickets badge */}
           {heldCount > 0 && (
             <button className="holds-badge" onClick={onShowHolds} title="Ver ventas en espera">
