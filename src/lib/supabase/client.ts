@@ -23,7 +23,8 @@ export function createClient() {
       auth: {
         // Desactiva el Web Lock — en un POS de sesión única no hay riesgo
         // de refresh concurrente y el lock era la causa de todos los bloqueos
-        lock: async (_name: string, _timeout: number, fn: () => Promise<unknown>) => fn(),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        lock: async (_name: string, _timeout: number, fn: () => Promise<any>) => fn(),
       },
     }
   )
