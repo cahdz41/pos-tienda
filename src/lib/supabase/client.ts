@@ -1,16 +1,25 @@
 import { createBrowserClient } from '@supabase/ssr'
 
-// Singleton: una sola instancia evita la competencia por el Web Lock de auth-token
-// ("lock was stolen") que bloqueaba todas las peticiones.
 let _client: ReturnType<typeof createBrowserClient> | null = null
 
-// Cancela la conexión TCP real (no solo la promise) después de 15 s.
-// Esto cubre el refresh de JWT y cualquier query que se cuelgue por red muerta.
-const REQUEST_TIMEOUT_MS = 15_000
-function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController()
-  const id = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(id))
+function debugFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+  const short = url.replace(/^https?:\/\/[^/]+/, '')
+  const start = Date.now()
+
+  return fetch(input, init).then(res => {
+    const ms = Date.now() - start
+    if (!res.ok) {
+      console.error(`[supabase] ❌ ${res.status} ${short} (${ms}ms)`)
+    } else {
+      console.debug(`[supabase] ✓ ${res.status} ${short} (${ms}ms)`)
+    }
+    return res
+  }).catch(err => {
+    const ms = Date.now() - start
+    console.error(`[supabase] 💥 FETCH FAILED ${short} (${ms}ms)`, err)
+    throw err
+  })
 }
 
 export function createClient() {
@@ -19,10 +28,9 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      global: { fetch: fetchWithTimeout },
+      global: { fetch: debugFetch },
       auth: {
-        // Desactiva el Web Lock — en un POS de sesión única no hay riesgo
-        // de refresh concurrente y el lock era la causa de todos los bloqueos
+        // Desactiva el Web Lock para evitar bloqueos en POS de sesión única
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         lock: async (_name: string, _timeout: number, fn: () => Promise<any>) => fn(),
       },
