@@ -213,7 +213,7 @@ function CloseShiftModal({ shift, onClose, onDone }: CloseShiftModalProps) {
 /* ─── Main page ─── */
 export default function TurnosPage() {
   const supabase = createClient()
-  const { user, profile } = useAuth()
+  const { user, profile, loading: authLoading } = useAuth()
 
   const [loading, setLoading] = useState(true)
   const [openShift, setOpenShift] = useState<ShiftSummary | null>(null)
@@ -269,7 +269,7 @@ export default function TurnosPage() {
     setLoading(false)
   }, [supabase])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => { if (!authLoading) loadData() }, [loadData, authLoading])
 
   async function handleOpenShift() {
     const n = parseFloat(openingAmount) || 0
