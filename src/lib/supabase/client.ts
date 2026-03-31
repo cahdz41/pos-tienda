@@ -18,7 +18,14 @@ export function createClient() {
   _client = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { global: { fetch: fetchWithTimeout } }
+    {
+      global: { fetch: fetchWithTimeout },
+      auth: {
+        // Desactiva el Web Lock — en un POS de sesión única no hay riesgo
+        // de refresh concurrente y el lock era la causa de todos los bloqueos
+        lock: async (_name: string, _timeout: number, fn: () => Promise<unknown>) => fn(),
+      },
+    }
   )
   return _client
 }
