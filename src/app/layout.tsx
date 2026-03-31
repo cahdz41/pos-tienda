@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Syne, DM_Sans, JetBrains_Mono } from 'next/font/google'
 import { AuthProvider } from '@/contexts/AuthContext'
+import FetchDebugger from '@/components/FetchDebugger'
 import './globals.css'
 
 const syne = Syne({
@@ -42,6 +43,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col antialiased">
         <AuthProvider>
+          <FetchDebugger />
           {children}
         </AuthProvider>
       </body>
