@@ -111,29 +111,31 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
     setSaving(true); setErr(null)
 
     const supabase = createClient()
-    const slowTimer = setTimeout(() => setErr('Conexión lenta — guardando, espera…'), 5000)
 
     try {
-      // Ambas escrituras en paralelo — reduce el tiempo total a max(t1,t2) en lugar de t1+t2
-      const [adjResult, updResult] = await Promise.all([
-        supabase.from('inventory_adjustments').insert({
-          variant_id: variant.id,
-          cashier_id: userId,
-          type,
-          quantity_before: currentStock,
-          quantity_change: qtyChange,
-          quantity_after: newStock,
-          reason: reason.trim() || null,
-        }),
-        supabase
-          .from('product_variants')
-          .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
-          .eq('id', variant.id),
+      // Ambas escrituras en paralelo con timeout real de 10s — si Supabase no responde, rechaza
+      const [adjResult, updResult] = await Promise.race([
+        Promise.all([
+          supabase.from('inventory_adjustments').insert({
+            variant_id: variant.id,
+            cashier_id: userId,
+            type,
+            quantity_before: currentStock,
+            quantity_change: qtyChange,
+            quantity_after: newStock,
+            reason: reason.trim() || null,
+          }),
+          supabase
+            .from('product_variants')
+            .update({ stock: newStock, cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
+            .eq('id', variant.id),
+        ]),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Tiempo de espera agotado. Verifica tu conexión.')), 10_000)
+        ),
       ])
       if (adjResult.error) throw adjResult.error
       if (updResult.error) throw updResult.error
-
-      clearTimeout(slowTimer)
 
       // Dexie es solo caché local: no bloqueamos el flujo si falla
       db.product_variants.update(variant.id, {
@@ -145,9 +147,8 @@ function AdjustModal({ variant, userId, onClose, onDone }: AdjustModalProps) {
 
       onDone(variant.id, newStock, { cost_price: newCost, sale_price: newSale, wholesale_price: newWholesale })
     } catch (e: unknown) {
-      clearTimeout(slowTimer)
-      const msg = e instanceof Error ? e.message : 'Error desconocido al guardar'
-      setErr(msg)
+      setErr(e instanceof Error ? e.message : 'Error desconocido al guardar')
+    } finally {
       setSaving(false)
     }
   }
