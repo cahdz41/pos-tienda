@@ -231,42 +231,49 @@ export default function TurnosPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    // Buscar turno abierto
-    const { data: summary } = await supabase
-      .from('shift_summary')
-      .select('*')
-      .eq('status', 'open')
-      .order('opened_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (summary) {
-      setOpenShift(summary as ShiftSummary)
-      // Cargar movimientos del turno
-      const { data: movs } = await supabase
-        .from('cash_movements')
+    const ctrl = new AbortController()
+    const tid = setTimeout(() => ctrl.abort(), 8_000)
+    try {
+      const { data: summary } = await supabase
+        .from('shift_summary')
         .select('*')
-        .eq('shift_id', summary.shift_id)
-        .order('created_at', { ascending: false })
-      setMovements((movs as CashMovement[]) ?? [])
-    } else {
-      setOpenShift(null)
-      setMovements([])
+        .eq('status', 'open')
+        .order('opened_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+        .abortSignal(ctrl.signal)
+
+      if (summary) {
+        setOpenShift(summary as ShiftSummary)
+        const { data: movs } = await supabase
+          .from('cash_movements')
+          .select('*')
+          .eq('shift_id', summary.shift_id)
+          .order('created_at', { ascending: false })
+          .abortSignal(ctrl.signal)
+        setMovements((movs as CashMovement[]) ?? [])
+      } else {
+        setOpenShift(null)
+        setMovements([])
+      }
+
+      const { data: closed } = await supabase
+        .from('shifts')
+        .select('*, cashier:profiles(name)')
+        .eq('status', 'closed')
+        .order('closed_at', { ascending: false })
+        .limit(10)
+        .abortSignal(ctrl.signal)
+      setClosedShifts((closed ?? []).map((s: Record<string, unknown>) => ({
+        ...(s as unknown as Shift),
+        cashier_name: (s.cashier as { name?: string } | null)?.name,
+      })))
+    } catch (e: unknown) {
+      console.error('[Turnos loadData]', e)
+    } finally {
+      clearTimeout(tid)
+      setLoading(false)
     }
-
-    // Cargar últimos turnos cerrados
-    const { data: closed } = await supabase
-      .from('shifts')
-      .select('*, cashier:profiles(name)')
-      .eq('status', 'closed')
-      .order('closed_at', { ascending: false })
-      .limit(10)
-    setClosedShifts((closed ?? []).map((s: Record<string, unknown>) => ({
-      ...(s as unknown as Shift),
-      cashier_name: (s.cashier as { name?: string } | null)?.name,
-    })))
-
-    setLoading(false)
   }, [supabase])
 
   useEffect(() => { if (!authLoading) loadData() }, [loadData, authLoading])

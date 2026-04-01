@@ -442,17 +442,21 @@ export default function InventarioPage() {
 
   const loadInventory = useCallback(async () => {
     setLoadingList(true)
+    const ctrl = new AbortController()
+    const tid = setTimeout(() => ctrl.abort(), 8_000)
     try {
       const { data, error } = await supabase
         .from('product_variants')
         .select('*, product:products(id, name, brand, category, description, image_url, active, supplier_id, sale_type, created_at, updated_at)')
         .order('created_at', { ascending: false })
+        .abortSignal(ctrl.signal)
       if (error) throw error
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setVariants((data ?? []) as any)
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('[loadInventory]', e)
     } finally {
+      clearTimeout(tid)
       setLoadingList(false)
     }
   }, [supabase])
