@@ -33,7 +33,8 @@ export default function SessionRefresher() {
       // Si está colgado (ej. _refreshingDeferred atascado), getSession() cuelga.
       // El timeout de 8s detecta esto y fuerza reload limpio.
       const healthy = await Promise.race([
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.auth.getSession().then(({ data }) => {
+          const session = data.session
           // Si el token venció, intentar refresh antes de devolver sano
           if (session && session.expires_at && session.expires_at < Math.floor(Date.now() / 1000)) {
             return supabase.auth.refreshSession()
