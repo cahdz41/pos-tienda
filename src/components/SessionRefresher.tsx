@@ -29,22 +29,24 @@ export default function SessionRefresher() {
       if (!hiddenAt) return
       hiddenAt = 0
 
-      // Health check: verificar que el cliente Supabase responde
-      // Si está colgado (ej. _refreshingDeferred atascado), getSession() cuelga.
-      // El timeout de 8s detecta esto y fuerza reload limpio.
-      const healthy = await Promise.race([
-        supabase.auth.getSession().then(result => {
-          const session = result.data.session
-          // Si el token venció, intentar refresh antes de devolver sano
-          if (session && session.expires_at && session.expires_at < Math.floor(Date.now() / 1000)) {
-            return supabase.auth.refreshSession()
-              .then(r => !r.error)
-              .catch(() => false)
+      // Health check: si el cliente está colgado, getSession() nunca resuelve.
+      // El timeout de 8s lo detecta y fuerza reload limpio.
+      let healthy = false
+      const checkDone = Promise.race<boolean>([
+        (async () => {
+          const { data } = await supabase.auth.getSession()
+          const session = data.session
+          if (!session) return false
+          // Token vencido → intentar refresh
+          if (session.expires_at && session.expires_at < Math.floor(Date.now() / 1000)) {
+            const { error } = await supabase.auth.refreshSession()
+            return !error
           }
-          return !!session
-        }),
+          return true
+        })(),
         new Promise<false>(resolve => setTimeout(() => resolve(false), 8_000)),
-      ]).catch(() => false)
+      ])
+      healthy = await checkDone.catch(() => false)
 
       if (!healthy) {
         window.location.reload()
