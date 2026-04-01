@@ -36,10 +36,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setUser(session?.user ?? null)
-      if (session?.user) await fetchProfile(session.user.id)
-      setLoading(false)
+      try {
+        let { data: { session } } = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('auth-timeout')), 8_000)
+          ),
+        ])
+        // Con autoRefreshToken desactivado, el token puede estar vencido al montar.
+        // Lo refrescamos manualmente si expiresAt ya pasó.
+        if (session && session.expires_at && session.expires_at < Math.floor(Date.now() / 1000)) {
+          const { data: refreshed } = await supabase.auth.refreshSession().catch(() => ({ data: { session: null } }))
+          session = refreshed.session
+        }
+        setUser(session?.user ?? null)
+        if (session?.user) await fetchProfile(session.user.id)
+      } catch (e: unknown) {
+        if (e instanceof Error && e.message === 'auth-timeout') {
+          window.location.reload()
+          return
+        }
+        setUser(null)
+      } finally {
+        setLoading(false)
+      }
     }
 
     initAuth()

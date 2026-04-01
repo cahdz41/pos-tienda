@@ -43,7 +43,10 @@ const PAY_LABEL: Record<string, string> = {
 const fmt = (n: number) => `$${Number(n).toFixed(2)}`
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
-const todayStr = () => new Date().toISOString().slice(0, 10)
+const todayStr = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 export default function VentasPage() {
   const supabase = createClient()
@@ -72,66 +75,77 @@ export default function VentasPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSales = useCallback(async () => {
+    if (!date) return
+    const startDate = new Date(`${date}T00:00:00`)
+    if (isNaN(startDate.getTime())) return
     setLoading(true)
-    // Usar timezone local para el rango de fechas
-    const start = new Date(`${date}T00:00:00`).toISOString()
-    const end = new Date(`${date}T23:59:59`).toISOString()
+    const ctrl = new AbortController()
+    const tid = setTimeout(() => ctrl.abort(), 8_000)
+    try {
+      const start = startDate.toISOString()
+      const end = new Date(`${date}T23:59:59`).toISOString()
 
-    let q = supabase
-      .from('sales')
-      .select('id, total, payment_method, status, created_at, shift_id, cashier_id, customer_id')
-      .gte('created_at', start)
-      .lte('created_at', end)
-      .order('created_at', { ascending: false })
+      let q = supabase
+        .from('sales')
+        .select('id, total, payment_method, status, created_at, shift_id, cashier_id, customer_id')
+        .gte('created_at', start)
+        .lte('created_at', end)
+        .order('created_at', { ascending: false })
+        .abortSignal(ctrl.signal)
 
-    if (shiftFilter !== 'all') q = q.eq('shift_id', shiftFilter)
+      if (shiftFilter !== 'all') q = q.eq('shift_id', shiftFilter)
 
-    const { data, error } = await q
-    if (error) { console.error('[Ventas]', error); setLoading(false); return }
-    if (!data || data.length === 0) { setSales([]); setLoading(false); return }
+      const { data, error } = await q
+      if (error) throw error
+      if (!data || data.length === 0) { setSales([]); return }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ids = data.map((s: any) => s.id as string)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cashierIds = [...new Set(data.map((s: any) => s.cashier_id as string).filter(Boolean))]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const customerIds = [...new Set(data.map((s: any) => s.customer_id as string).filter(Boolean))]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ids = data.map((s: any) => s.id as string)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cashierIds = [...new Set(data.map((s: any) => s.cashier_id as string).filter(Boolean))]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const customerIds = [...new Set(data.map((s: any) => s.customer_id as string).filter(Boolean))]
 
-    // Queries en paralelo: items, cajeros, clientes
-    const [itemsRes, cashiersRes, customersRes] = await Promise.all([
-      supabase.from('sale_items').select('sale_id').in('sale_id', ids),
-      cashierIds.length > 0
-        ? supabase.from('profiles').select('id, name').in('id', cashierIds)
-        : Promise.resolve({ data: [] }),
-      customerIds.length > 0
-        ? supabase.from('customers').select('id, name').in('id', customerIds)
-        : Promise.resolve({ data: [] }),
-    ])
+      const [itemsRes, cashiersRes, customersRes] = await Promise.all([
+        supabase.from('sale_items').select('sale_id').in('sale_id', ids).abortSignal(ctrl.signal),
+        cashierIds.length > 0
+          ? supabase.from('profiles').select('id, name').in('id', cashierIds).abortSignal(ctrl.signal)
+          : Promise.resolve({ data: [] }),
+        customerIds.length > 0
+          ? supabase.from('customers').select('id, name').in('id', customerIds).abortSignal(ctrl.signal)
+          : Promise.resolve({ data: [] }),
+      ])
 
-    const countMap: Record<string, number> = {}
-    for (const r of itemsRes.data ?? []) {
-      const sid = (r as { sale_id: string }).sale_id
-      countMap[sid] = (countMap[sid] ?? 0) + 1
+      const countMap: Record<string, number> = {}
+      for (const r of itemsRes.data ?? []) {
+        const sid = (r as { sale_id: string }).sale_id
+        countMap[sid] = (countMap[sid] ?? 0) + 1
+      }
+      const cashierMap: Record<string, string> = {}
+      for (const c of cashiersRes.data ?? []) cashierMap[(c as { id: string; name: string }).id] = (c as { id: string; name: string }).name
+      const customerMap: Record<string, string> = {}
+      for (const c of customersRes.data ?? []) customerMap[(c as { id: string; name: string }).id] = (c as { id: string; name: string }).name
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setSales(data.map((s: any) => ({
+        id: s.id as string,
+        folio: `#${(s.id as string).slice(0, 8).toUpperCase()}`,
+        total: Number(s.total),
+        payment_method: s.payment_method as string,
+        status: s.status as 'completed' | 'cancelled',
+        created_at: s.created_at as string,
+        cashier_name: s.cashier_id ? (cashierMap[s.cashier_id as string] ?? null) : null,
+        customer_name: s.customer_id ? (customerMap[s.customer_id as string] ?? null) : null,
+        shift_id: s.shift_id as string | null,
+        items_count: countMap[s.id as string] ?? 0,
+      })))
+    } catch (e: unknown) {
+      console.error('[Ventas loadSales]', e)
+      setSales([])
+    } finally {
+      clearTimeout(tid)
+      setLoading(false)
     }
-    const cashierMap: Record<string, string> = {}
-    for (const c of cashiersRes.data ?? []) cashierMap[(c as { id: string; name: string }).id] = (c as { id: string; name: string }).name
-    const customerMap: Record<string, string> = {}
-    for (const c of customersRes.data ?? []) customerMap[(c as { id: string; name: string }).id] = (c as { id: string; name: string }).name
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setSales(data.map((s: any) => ({
-      id: s.id as string,
-      folio: `#${(s.id as string).slice(0, 8).toUpperCase()}`,
-      total: Number(s.total),
-      payment_method: s.payment_method as string,
-      status: s.status as 'completed' | 'cancelled',
-      created_at: s.created_at as string,
-      cashier_name: s.cashier_id ? (cashierMap[s.cashier_id as string] ?? null) : null,
-      customer_name: s.customer_id ? (customerMap[s.customer_id as string] ?? null) : null,
-      shift_id: s.shift_id as string | null,
-      items_count: countMap[s.id as string] ?? 0,
-    })))
-    setLoading(false)
   }, [date, shiftFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadSales() }, [loadSales])
@@ -193,12 +207,18 @@ export default function VentasPage() {
           </p>
         </div>
         <div className="ventas-filters">
-          <input
-            type="date"
-            className="filter-input"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-          />
+          <label className="date-picker-wrap">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            <input
+              type="date"
+              className="filter-input date-input"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+            />
+          </label>
           <select
             className="filter-input"
             value={shiftFilter}
@@ -373,6 +393,19 @@ export default function VentasPage() {
           align-items: center;
           flex-wrap: wrap;
         }
+        .date-picker-wrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: var(--bg-surface);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 7px 12px;
+          cursor: pointer;
+          color: var(--text-secondary);
+          transition: border-color 0.15s;
+        }
+        .date-picker-wrap:focus-within { border-color: var(--accent); }
         .filter-input {
           background: var(--bg-surface);
           border: 1px solid var(--border);
@@ -384,6 +417,16 @@ export default function VentasPage() {
           transition: border-color 0.15s;
         }
         .filter-input:focus { border-color: var(--accent); }
+        .date-input {
+          background: transparent;
+          border: none;
+          padding: 0;
+          color: var(--text-primary);
+          font-size: 13px;
+          outline: none;
+          color-scheme: dark;
+          cursor: pointer;
+        }
         .ventas-table-wrap {
           flex: 1;
           overflow-y: auto;

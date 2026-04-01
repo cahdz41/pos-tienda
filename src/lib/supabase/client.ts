@@ -1,26 +1,34 @@
 import { createBrowserClient } from '@supabase/ssr'
 
-let _client: ReturnType<typeof createBrowserClient> | null = null
-
-function debugFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-  const short = url.replace(/^https?:\/\/[^/]+/, '')
-  const start = Date.now()
-
-  return fetch(input, init).then(res => {
-    const ms = Date.now() - start
-    if (!res.ok) {
-      console.error(`[supabase] ❌ ${res.status} ${short} (${ms}ms)`)
-    } else {
-      console.debug(`[supabase] ✓ ${res.status} ${short} (${ms}ms)`)
+// When the browser throttles background-tab timers, Supabase's internal
+// _callRefreshToken sets _refreshingDeferred and then hangs on the network
+// call — blocking ALL subsequent auth operations forever.
+// Aborting the stuck fetch after 10s forces _refreshingDeferred to reject
+// and clear, so the next user action can trigger a fresh (successful) refresh.
+if (typeof window !== 'undefined') {
+  const _orig = window.fetch.bind(window)
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : (input as Request).url
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+    if (supabaseUrl && url.startsWith(supabaseUrl)) {
+      // Don't override if caller already passed a signal
+      if (init?.signal) return _orig(input, init)
+      const ctrl = new AbortController()
+      const tid = setTimeout(() => ctrl.abort(), 15_000)
+      return _orig(input, { ...init, signal: ctrl.signal }).finally(() =>
+        clearTimeout(tid)
+      )
     }
-    return res
-  }).catch(err => {
-    const ms = Date.now() - start
-    console.error(`[supabase] 💥 FETCH FAILED ${short} (${ms}ms)`, err)
-    throw err
-  })
+    return _orig(input, init)
+  }
 }
+
+let _client: ReturnType<typeof createBrowserClient> | null = null
 
 export function createClient() {
   if (_client) return _client
@@ -28,9 +36,12 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      global: { fetch: debugFetch },
       auth: {
-        // Desactiva el Web Lock para evitar bloqueos en POS de sesión única
+        // Desactiva el auto-refresh: el timer interno dispara cada 30s y,
+        // cuando el browser congela timers del background tab (~5min), varios
+        // callbacks acumulados se ejecutan juntos sin Web Lock → deadlock.
+        // SessionRefresher maneja el refresh manualmente cada 45min.
+        autoRefreshToken: false,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         lock: async (_name: string, _timeout: number, fn: () => Promise<any>) => fn(),
       },

@@ -359,7 +359,13 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error al procesar el pago')
+      const msg = err instanceof Error ? err.message : 'Error al procesar el pago'
+      setError(msg)
+      // Timeout de red: el cliente Supabase quedó en estado colgado.
+      // No hay forma de recuperarlo sin reiniciar la página — reload automático.
+      if (msg.startsWith('Sin respuesta')) {
+        setTimeout(() => window.location.reload(), 3_000)
+      }
     } finally {
       setProcessing(false)
     }

@@ -21,7 +21,7 @@ interface Props {
 const CATEGORY_ORDER = [
   'Proteinas',
   'Pre-entrenos',
-  'Creatinas',
+  'Creatina',
   'AMINOACIDOS Y BCAAS',
   'Farmaco',
   'CLA Y CARNITINA',
@@ -41,50 +41,65 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    // 1. Sacamos el controlador al nivel del useEffect para poder limpiarlo
+    const ctrl = new AbortController()
+    const tid = setTimeout(() => ctrl.abort(), 8_000)
+
     async function fetchAll() {
       try {
-        const { data, error } = await Promise.race([
-          supabase
-            .from('product_variants')
-            .select('*, product:products(id, name, brand, category, description, image_url, active, supplier_id, sale_type, created_at, updated_at)')
-            .eq('active', true),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Tiempo de espera agotado al cargar productos')), 15_000)
-          ),
-        ])
-        if (error) throw error
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setAllVariants((data ?? []) as any)
-      } catch (e) {
-        console.error('[POS load]', e)
-      } finally {
-        setLoading(false)
-      }
+        // 2. Disparamos ambas peticiones al mismo tiempo y AMBAS protegidas con abortSignal
+        const variantsPromise = supabase
+          .from('product_variants')
+          .select('*, product:products(id, name, brand, category, description, image_url, active, supplier_id, sale_type, created_at, updated_at)')
+          .eq('active', true)
+          .abortSignal(ctrl.signal)
 
-      // Combos: carga independiente, no bloquea el catálogo
-      supabase
+        const combosPromise = supabase
           .from('combos')
           .select('id, name, sale_price, items:combo_items(variant_id, quantity)')
           .eq('active', true)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .then(({ data }: { data: any }) => {
-            if (!data) return
-            setCombos(data.map((c: Record<string, unknown>) => ({
-              id: c.id as string,
-              name: c.name as string,
-              sale_price: Number(c.sale_price),
-              components: ((c.items as Array<{ variant_id: string; quantity: number }>) ?? []).map(i => ({
-                variantId: i.variant_id,
-                quantity: i.quantity,
-              })),
-            })))
-          })
+          .abortSignal(ctrl.signal)
+
+        // Esperamos a que ambas terminen (o fallen por el timeout de 8s)
+        const [variantsRes, combosRes] = await Promise.all([variantsPromise, combosPromise])
+
+        if (variantsRes.error) throw variantsRes.error
+        if (combosRes.error) throw combosRes.error
+
+        // Asignamos variantes
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setAllVariants((variantsRes.data ?? []) as any)
+
+        // Asignamos combos
+        if (combosRes.data) {
+          setCombos(combosRes.data.map((c: any) => ({
+            id: c.id as string,
+            name: c.name as string,
+            sale_price: Number(c.sale_price),
+            components: ((c.items as Array<{ variant_id: string; quantity: number }>) ?? []).map(i => ({
+              variantId: i.variant_id,
+              quantity: i.quantity,
+            })),
+          })))
+        }
+
+      } catch (e: unknown) {
+        console.error('[POS load] Error o Timeout:', e)
+      } finally {
+        clearTimeout(tid)
+        setLoading(false)
+      }
     }
 
-    fetchAll()
+    fetchAll();
+
+    // 3. Limpieza de seguridad: Si el componente se cierra, abortamos la petición de red
+    return () => {
+      clearTimeout(tid)
+      ctrl.abort()
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
   useSearchFocus(inputRef)
 
   // Categorías que existen en los datos, en el orden definido (comparación sin mayúsculas)
