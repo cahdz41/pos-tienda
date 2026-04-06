@@ -3,10 +3,9 @@
 import { useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
-// autoRefreshToken está desactivado para evitar que timers acumulados en
-// background-tab disparen refreshes concurrentes y deadloquen el cliente.
+// autoRefreshToken está desactivado (ver client.ts para el por qué).
 // Este componente asume esa responsabilidad de forma controlada:
-//   • Al restaurar el tab: health check inmediato (8s max) → reload si falla
+//   • Al restaurar el tab: health check con 8s de timeout → reload si falla
 //   • Cada 50 min activo: refresh proactivo antes de que expire el JWT de 1h
 const PROACTIVE_REFRESH_MS = 50 * 60 * 1000
 
@@ -29,18 +28,21 @@ export default function SessionRefresher() {
       if (!hiddenAt) return
       hiddenAt = 0
 
-      // Health check: si el cliente está colgado, getSession() nunca resuelve.
-      // El timeout de 8s lo detecta y fuerza reload limpio.
+      // getSession() con autoRefreshToken: false real: retorna la sesión del
+      // storage sin intentar refresh automático. Si el token venció, devuelve
+      // sesión expirada (o null si fue removida). Lo chequeamos manualmente.
       let healthy = false
       const checkDone = Promise.race<boolean>([
         (async () => {
-          const { data } = await supabase.auth.getSession()
-          const session = data.session
-          if (!session) return false
-          // Token vencido → intentar refresh
-          if (session.expires_at && session.expires_at < Math.floor(Date.now() / 1000)) {
-            const { error } = await supabase.auth.refreshSession()
-            return !error
+          const { data, error } = await supabase.auth.getSession()
+          if (error || !data.session) return false
+
+          const now = Math.floor(Date.now() / 1000)
+          const expiresAt = data.session.expires_at ?? 0
+          if (expiresAt < now) {
+            // Token vencido → refrescar
+            const { error: refreshError } = await supabase.auth.refreshSession()
+            return !refreshError
           }
           return true
         })(),

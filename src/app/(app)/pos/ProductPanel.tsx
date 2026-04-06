@@ -41,13 +41,16 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    // 1. Sacamos el controlador al nivel del useEffect para poder limpiarlo
     const ctrl = new AbortController()
-    const tid = setTimeout(() => ctrl.abort(), 8_000)
+    // Timeout de nivel HTTP (cancela el fetch de red)
+    const httpTid = setTimeout(() => ctrl.abort(), 12_000)
+    // Timeout de nivel alto: cubre la espera de auth + HTTP.
+    // El abortSignal solo cancela el HTTP; si getSession() se traba en el lock
+    // de auth, este timeout garantiza que loading nunca sea infinito.
+    const hardTid = setTimeout(() => setLoading(false), 14_000)
 
     async function fetchAll() {
       try {
-        // 2. Disparamos ambas peticiones al mismo tiempo y AMBAS protegidas con abortSignal
         const variantsPromise = supabase
           .from('product_variants')
           .select('*, product:products(id, name, brand, category, description, image_url, active, supplier_id, sale_type, created_at, updated_at)')
@@ -60,17 +63,14 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
           .eq('active', true)
           .abortSignal(ctrl.signal)
 
-        // Esperamos a que ambas terminen (o fallen por el timeout de 8s)
         const [variantsRes, combosRes] = await Promise.all([variantsPromise, combosPromise])
 
         if (variantsRes.error) throw variantsRes.error
         if (combosRes.error) throw combosRes.error
 
-        // Asignamos variantes
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         setAllVariants((variantsRes.data ?? []) as any)
 
-        // Asignamos combos
         if (combosRes.data) {
           setCombos(combosRes.data.map((c: any) => ({
             id: c.id as string,
@@ -86,16 +86,17 @@ export default function ProductPanel({ onAddToCart, onAddComboToCart, cart }: Pr
       } catch (e: unknown) {
         console.error('[POS load] Error o Timeout:', e)
       } finally {
-        clearTimeout(tid)
+        clearTimeout(httpTid)
+        clearTimeout(hardTid)
         setLoading(false)
       }
     }
 
     fetchAll();
 
-    // 3. Limpieza de seguridad: Si el componente se cierra, abortamos la petición de red
     return () => {
-      clearTimeout(tid)
+      clearTimeout(httpTid)
+      clearTimeout(hardTid)
       ctrl.abort()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

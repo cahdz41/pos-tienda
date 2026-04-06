@@ -286,3 +286,37 @@
 docker ps --format "table {{.Names}}\t{{.Ports}}"
 cat /docker/n8n/traefik-dynamic/pos.yml
 ```
+
+---
+
+## Sesión 8 — 2026-04-06
+
+### ✅ Fix crítico: cuelgue de datos tras inactividad (root cause encontrado)
+
+**Problema:** Después de varios minutos sin usar la app, al regresar el POS y otras pantallas se quedaban cargando indefinidamente (skeleton infinito). Solo se resolvía con F5. Se habían intentado múltiples workarounds sin éxito.
+
+**Root cause real (encontrado leyendo el source de `@supabase/ssr`):**
+
+`createBrowserClient` de `@supabase/ssr` sobreescribe `autoRefreshToken: true` en el browser **sin importar lo que se pase como opción**:
+
+```js
+// node_modules/@supabase/ssr/dist/main/createBrowserClient.js
+auth: {
+  ...options?.auth,                         // ← nuestro autoRefreshToken: false
+  autoRefreshToken: isBrowser(),            // ← SOBREESCRIBE a true
+}
+```
+
+Esto activaba el timer interno de Supabase (dispara cada 30 segundos). En background, el browser throttlea los timers. Al regresar al tab, se acumulaban 10-20 ticks concurrentes que formaban una cola en el lock interno (`lockAcquired`). Durante ese bloqueo (hasta 30 segundos), **todas las queries de DB quedaban paralizadas esperando en la cola**. El `AbortController` de 8s en `ProductPanel` no ayudaba porque solo cancela el HTTP fetch, no la espera en el lock de auth de Supabase.
+
+**Todos los workarounds anteriores** (SessionRefresher, fetch interceptor, custom lock, AbortController) operaban sobre una premisa falsa: que `autoRefreshToken: false` estaba funcionando.
+
+**Archivos modificados:**
+
+1. **`src/lib/supabase/client.ts`** — Cambiado de `createBrowserClient` (`@supabase/ssr`) a `createClient` directo (`@supabase/supabase-js`). Con `createClient`, la opción `autoRefreshToken: false` sí se respeta. Sin timer, sin pile-up, sin bloqueo de lock.
+
+2. **`src/components/SessionRefresher.tsx`** — Simplificado el health check. Ahora verifica correctamente si el token está expirado (con `autoRefreshToken: false` real, `getSession()` ya no intenta refresh automático internamente — solo lo hace si el token venció y `autoRefreshToken: true`).
+
+3. **`src/app/(app)/pos/ProductPanel.tsx`** — Agregado `hardTid` de 14 segundos como seguro de último recurso: si `fetchAll` se traba por cualquier razón en la capa de auth, `loading` se fuerza a `false` antes de que el usuario lo perciba como infinito.
+
+**Nota de migración:** Al hacer deploy, los usuarios necesitan hacer login de nuevo una sola vez. La sesión ahora se almacena en `localStorage` en lugar de cookies (ya que no hay middleware ni server components que requieran auth por cookies).

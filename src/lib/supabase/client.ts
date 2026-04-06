@@ -1,10 +1,18 @@
-import { createBrowserClient } from '@supabase/ssr'
+import { createClient as _createClient } from '@supabase/supabase-js'
 
-// When the browser throttles background-tab timers, Supabase's internal
-// _callRefreshToken sets _refreshingDeferred and then hangs on the network
-// call — blocking ALL subsequent auth operations forever.
-// Aborting the stuck fetch after 10s forces _refreshingDeferred to reject
-// and clear, so the next user action can trigger a fresh (successful) refresh.
+// ROOT-CAUSE FIX:
+// createBrowserClient de @supabase/ssr sobreescribe autoRefreshToken: true
+// sin importar lo que pases. Esto activaba el timer de 30s y causaba que al
+// regresar de inactividad, múltiples ticks acumulados formaran una cola en
+// el lock interno de Supabase, bloqueando TODAS las queries de DB por 30-60s.
+//
+// Usando createClient directamente, autoRefreshToken: false funciona de verdad:
+// no hay timer, no hay pile-up, SessionRefresher maneja el refresh manualmente.
+//
+// Nota: sesión almacenada en localStorage (no cookies). Requiere re-login una sola vez.
+
+// Timeout de red: si un request a Supabase tarda más de 15s, abortarlo.
+// Cubre casos de red lenta o servidor lento que podrían colgar la app.
 if (typeof window !== 'undefined') {
   const _orig = window.fetch.bind(window)
   window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
@@ -16,7 +24,6 @@ if (typeof window !== 'undefined') {
           : (input as Request).url
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
     if (supabaseUrl && url.startsWith(supabaseUrl)) {
-      // Don't override if caller already passed a signal
       if (init?.signal) return _orig(input, init)
       const ctrl = new AbortController()
       const tid = setTimeout(() => ctrl.abort(), 15_000)
@@ -28,20 +35,20 @@ if (typeof window !== 'undefined') {
   }
 }
 
-let _client: ReturnType<typeof createBrowserClient> | null = null
+let _client: ReturnType<typeof _createClient> | null = null
 
 export function createClient() {
   if (_client) return _client
-  _client = createBrowserClient(
+  _client = _createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       auth: {
-        // Desactiva el auto-refresh: el timer interno dispara cada 30s y,
-        // cuando el browser congela timers del background tab (~5min), varios
-        // callbacks acumulados se ejecutan juntos sin Web Lock → deadlock.
-        // SessionRefresher maneja el refresh manualmente cada 45min.
+        // Con createClient directo, este flag SÍ se respeta.
+        // Sin timer de 30s, no hay acumulación de ticks en background.
         autoRefreshToken: false,
+        persistSession: true,
+        // Bypass Web Lock — evita deadlocks en browsers sin soporte
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         lock: async (_name: string, _timeout: number, fn: () => Promise<any>) => fn(),
       },
