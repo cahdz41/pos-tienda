@@ -5,6 +5,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
+import Sidebar from '@/components/Sidebar'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -34,7 +35,14 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   // Sin sesión → no renderizar (la redirección ya está en marcha)
   if (!user) return null
 
-  return <>{children}</>
+  return (
+    <div className="flex h-full" style={{ background: 'var(--bg)' }}>
+      <Sidebar />
+      <main className="flex-1 min-w-0 overflow-auto">
+        {children}
+      </main>
+    </div>
+  )
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
