@@ -4,6 +4,7 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import ProductPanel from './ProductPanel'
 import CartPanel from './CartPanel'
+import PaymentModal from './PaymentModal'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { CartItem, ProductVariant, Shift } from '@/types'
@@ -15,6 +16,7 @@ export default function PosPage() {
 
   // Turno activo — undefined = cargando, null = sin turno, Shift = turno abierto
   const [activeShift, setActiveShift] = useState<Shift | null | undefined>(undefined)
+  const [showPayment, setShowPayment] = useState(false)
 
   useEffect(() => {
     if (authLoading || !user) return
@@ -53,8 +55,7 @@ export default function PosPage() {
   const clearCart = useCallback(() => setCart([]), [])
 
   function handlePay() {
-    // Fase 5: PaymentModal
-    alert('Pagos — Fase 5 próximamente')
+    if (activeShift) setShowPayment(true)
   }
 
   return (
@@ -68,6 +69,17 @@ export default function PosPage() {
         onClear={clearCart}
         onPay={handlePay}
       />
+
+      {/* Modal de pago */}
+      {showPayment && activeShift && (
+        <PaymentModal
+          cart={cart}
+          total={cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0)}
+          activeShift={activeShift}
+          onSuccess={clearCart}
+          onClose={() => setShowPayment(false)}
+        />
+      )}
 
       {/* Guard: sin turno activo */}
       {(authLoading || activeShift === undefined) ? null : activeShift === null && (

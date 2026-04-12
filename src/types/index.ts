@@ -66,10 +66,10 @@ export interface Customer {
 }
 
 export interface Sale {
-  id: number
-  shift_id: number
+  id: string
+  shift_id: string
   cashier_id: string
-  customer_id: number | null
+  customer_id: string | null
   total: number
   payment_method: 'cash' | 'card' | 'credit' | 'mixed'
   amount_paid: number
@@ -79,9 +79,9 @@ export interface Sale {
 }
 
 export interface SaleItem {
-  id: number
-  sale_id: number
-  variant_id: number
+  id: string
+  sale_id: string
+  variant_id: string
   quantity: number
   unit_price: number
   subtotal: number
