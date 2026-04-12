@@ -23,7 +23,7 @@ export default function PosPage() {
     })
   }, [])
 
-  const removeOne = useCallback((variantId: number) => {
+  const removeOne = useCallback((variantId: string) => {
     setCart(prev =>
       prev
         .map(i => i.variant.id === variantId ? { ...i, quantity: i.quantity - 1 } : i)
@@ -31,7 +31,7 @@ export default function PosPage() {
     )
   }, [])
 
-  const removeAll = useCallback((variantId: number) => {
+  const removeAll = useCallback((variantId: string) => {
     setCart(prev => prev.filter(i => i.variant.id !== variantId))
   }, [])
 

@@ -2,19 +2,19 @@ export type UserRole = 'owner' | 'cashier'
 
 export interface Profile {
   id: string
-  full_name: string
+  name: string       // columna real en Supabase (no full_name)
   role: UserRole
 }
 
 export interface Product {
-  id: number
+  id: string
   name: string
-  department: string | null
+  category: string | null   // columna real en Supabase (no department)
 }
 
 export interface ProductVariant {
-  id: number
-  product_id: number
+  id: string
+  product_id: string
   barcode: string
   flavor: string | null
   sale_price: number
