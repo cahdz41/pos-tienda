@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { CartItem, Shift } from '@/types'
+import { Receipt, printReceipt, type ReceiptData } from './Receipt'
 
 type Method = 'cash' | 'card'
 
@@ -27,7 +28,7 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   const [amountPaid, setAmountPaid] = useState('')
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<{ change: number; method: Method } | null>(null)
+  const [success, setSuccess] = useState<ReceiptData | null>(null)
 
   const paid = parseFloat(amountPaid) || 0
   const change = method === 'cash' ? paid - total : 0
@@ -80,7 +81,7 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
         throw new Error(`Error al guardar productos: ${itemsErr.message}`)
       }
 
-      // 3 — Decrementar stock (no-fatal: si falla, la venta ya quedó registrada)
+      // 3 — Decrementar stock (no-fatal)
       await Promise.allSettled(
         cart.map(item =>
           supabase
@@ -90,7 +91,20 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
         )
       )
 
-      setSuccess({ change: Math.max(0, change), method })
+      const receiptData: ReceiptData = {
+        cart,
+        total,
+        paymentMethod: method,
+        amountPaid: method === 'cash' ? paid : total,
+        change: Math.max(0, change),
+        date: new Date(),
+      }
+      setSuccess(receiptData)
+
+      // Auto-print si está habilitado
+      if (typeof window !== 'undefined' && localStorage.getItem('pos_autoprint') === 'true') {
+        printReceipt(receiptData)
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al procesar el pago.')
     } finally {
@@ -102,43 +116,49 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   if (success) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        style={{ background: 'rgba(0,0,0,0.85)' }}>
-        <div className="w-full max-w-sm rounded-2xl p-8 flex flex-col items-center gap-5"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        style={{ background: 'rgba(0,0,0,0.85)', overflowY: 'auto' }}>
+        <div className="w-full rounded-2xl flex flex-col"
+          style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            maxWidth: '460px', margin: 'auto',
+          }}>
 
-          <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl"
-            style={{ background: '#0D2B0D', border: '2px solid #4CAF50' }}>
-            ✓
-          </div>
-
-          <div className="text-center">
-            <p className="text-lg font-bold" style={{ color: 'var(--text)' }}>Venta registrada</p>
-            <p className="text-2xl font-black mt-1 font-mono" style={{ color: 'var(--accent)' }}>
-              {fmt(total)}
-            </p>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-              {success.method === 'cash' ? 'Efectivo' : 'Tarjeta'}
-            </p>
-          </div>
-
-          {success.method === 'cash' && success.change > 0 && (
-            <div className="w-full rounded-xl p-4 text-center"
-              style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Cambio a entregar</p>
-              <p className="text-3xl font-black mt-1 font-mono" style={{ color: '#4CAF50' }}>
-                {fmt(success.change)}
+          {/* Header */}
+          <div className="flex items-center gap-3 px-5 py-4"
+            style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0"
+              style={{ background: '#0D2B0D', border: '2px solid #4CAF50' }}>
+              ✓
+            </div>
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>Venta registrada</p>
+              <p className="text-xl font-black font-mono" style={{ color: 'var(--accent)' }}>
+                {fmt(total)}
               </p>
             </div>
-          )}
+          </div>
 
-          <button
-            onClick={() => { onSuccess(); onClose() }}
-            className="w-full py-3 rounded-xl text-sm font-bold"
-            style={{ background: 'var(--accent)', color: '#000' }}
-            autoFocus
-          >
-            Nueva venta
-          </button>
+          {/* Vista previa del ticket — tamaño natural, sin scroll interno */}
+          <div className="p-4">
+            <Receipt data={success} />
+          </div>
+
+          {/* Acciones */}
+          <div className="px-4 pb-4 flex gap-2">
+            <button
+              onClick={() => printReceipt(success)}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+              style={{ background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)' }}>
+              Imprimir
+            </button>
+            <button
+              onClick={() => { onSuccess(); onClose() }}
+              className="flex-1 py-3 rounded-xl text-sm font-bold"
+              style={{ background: 'var(--accent)', color: '#000' }}
+              autoFocus>
+              Nueva venta
+            </button>
+          </div>
         </div>
       </div>
     )
