@@ -17,6 +17,7 @@ export default function PosPage() {
   // Turno activo — undefined = cargando, null = sin turno, Shift = turno abierto
   const [activeShift, setActiveShift] = useState<Shift | null | undefined>(undefined)
   const [showPayment, setShowPayment] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     if (authLoading || !user) return
@@ -60,7 +61,7 @@ export default function PosPage() {
 
   return (
     <div className="flex h-full relative" onClick={() => searchRef.current?.focus()}>
-      <ProductPanel cart={cart} onAdd={addToCart} searchRef={searchRef} />
+      <ProductPanel cart={cart} onAdd={addToCart} searchRef={searchRef} refreshKey={refreshKey} />
       <CartPanel
         cart={cart}
         onAdd={addToCart}
@@ -76,7 +77,7 @@ export default function PosPage() {
           cart={cart}
           total={cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0)}
           activeShift={activeShift}
-          onSuccess={clearCart}
+          onSuccess={() => { clearCart(); setRefreshKey(k => k + 1) }}
           onClose={() => setShowPayment(false)}
         />
       )}

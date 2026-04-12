@@ -38,16 +38,18 @@ interface Props {
   cart: CartItem[]
   onAdd: (variant: ProductVariant) => void
   searchRef: React.RefObject<HTMLInputElement | null>
+  refreshKey?: number
 }
 
-export default function ProductPanel({ cart, onAdd, searchRef }: Props) {
+export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }: Props) {
   const [allVariants, setAllVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
 
-  useEffect(() => { loadProducts() }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadProducts() }, [refreshKey])
 
   async function loadProducts() {
     setLoading(true)
