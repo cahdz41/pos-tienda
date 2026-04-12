@@ -33,7 +33,7 @@ export interface CartItem {
 }
 
 export interface Shift {
-  id: number
+  id: string
   cashier_id: string
   opening_amount: number
   status: 'open' | 'closed'
@@ -41,6 +41,15 @@ export interface Shift {
   closed_at: string | null
   closing_amount: number | null
   cash_difference: number | null
+}
+
+export interface CashMovement {
+  id: string
+  shift_id: string
+  type: 'in' | 'out'
+  amount: number
+  reason: string
+  created_at: string
 }
 
 export interface Customer {
