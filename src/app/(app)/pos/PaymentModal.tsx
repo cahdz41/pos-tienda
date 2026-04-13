@@ -24,16 +24,45 @@ interface Props {
 
 export default function PaymentModal({ cart, total, activeShift, onSuccess, onClose }: Props) {
   const { user } = useAuth()
-  const [method, setMethod] = useState<Method>('cash')
-  const [amountPaid, setAmountPaid] = useState('')
+
+  // ── Métodos seleccionados (puede ser 1 o 2) ─────────────────────────────
+  const [methods, setMethods] = useState<Set<Method>>(new Set(['cash']))
+  const [cashAmount, setCashAmount] = useState('')
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<ReceiptData | null>(null)
 
-  const paid = parseFloat(amountPaid) || 0
-  const change = method === 'cash' ? paid - total : 0
-  const canPay = method === 'card' || (method === 'cash' && paid >= total)
+  // ── Valores derivados ────────────────────────────────────────────────────
+  const isMixed  = methods.has('cash') && methods.has('card')
+  const cashOnly = methods.has('cash') && !methods.has('card')
+  const cardOnly = methods.has('card') && !methods.has('cash')
 
+  const cashPaid = parseFloat(cashAmount) || 0
+  // En mixto: tarjeta cubre lo que no paga efectivo
+  const cardPaid = isMixed ? Math.max(0, total - cashPaid) : cardOnly ? total : 0
+  const totalPaid = cashPaid + cardPaid
+  const change = methods.has('cash') ? Math.max(0, totalPaid - total) : 0
+
+  const canPay = (() => {
+    if (isMixed)  return cashPaid > 0 && cashPaid < total   // efectivo parcial válido
+    if (cashOnly) return cashPaid >= total
+    if (cardOnly) return true
+    return false
+  })()
+
+  // ── Toggle de método ─────────────────────────────────────────────────────
+  function toggleMethod(m: Method) {
+    setMethods(prev => {
+      // No permitir deseleccionar el único método activo
+      if (prev.has(m) && prev.size === 1) return prev
+      const next = new Set(prev)
+      next.has(m) ? next.delete(m) : next.add(m)
+      return next
+    })
+    setCashAmount('')
+  }
+
+  // ── Pagar ────────────────────────────────────────────────────────────────
   async function handlePay() {
     if (!user || !canPay) return
     setProcessing(true)
@@ -42,19 +71,23 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
     const supabase = createClient()
     let saleId: string | null = null
 
+    const paymentMethod = isMixed ? 'mixed' : cashOnly ? 'cash' : 'card'
+    const amountPaid_db = isMixed ? totalPaid : cashOnly ? cashPaid : total
+    const changeGiven_db = cashOnly ? Math.max(0, change) : isMixed ? Math.max(0, cashPaid - (total - cardPaid)) : 0
+
     try {
       // 1 — Insertar venta
       const { data: sale, error: saleErr } = await supabase
         .from('sales')
         .insert({
-          shift_id: activeShift.id,
-          cashier_id: user.id,
-          customer_id: null,
+          shift_id:       activeShift.id,
+          cashier_id:     user.id,
+          customer_id:    null,
           total,
-          payment_method: method,
-          amount_paid: method === 'cash' ? paid : total,
-          change_given: method === 'cash' ? Math.max(0, change) : 0,
-          status: 'completed',
+          payment_method: paymentMethod,
+          amount_paid:    amountPaid_db,
+          change_given:   changeGiven_db,
+          status:         'completed',
         })
         .select('id')
         .single()
@@ -67,16 +100,15 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
         .from('sale_items')
         .insert(
           cart.map(item => ({
-            sale_id: saleId,
+            sale_id:    saleId,
             variant_id: item.variant.id,
-            quantity: item.quantity,
+            quantity:   item.quantity,
             unit_price: item.unitPrice,
-            subtotal: item.quantity * item.unitPrice,
+            subtotal:   item.quantity * item.unitPrice,
           }))
         )
 
       if (itemsErr) {
-        // Rollback: borrar la venta
         await supabase.from('sales').delete().eq('id', saleId)
         throw new Error(`Error al guardar productos: ${itemsErr.message}`)
       }
@@ -94,14 +126,15 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
       const receiptData: ReceiptData = {
         cart,
         total,
-        paymentMethod: method,
-        amountPaid: method === 'cash' ? paid : total,
-        change: Math.max(0, change),
-        date: new Date(),
+        paymentMethod,
+        amountPaid: amountPaid_db,
+        change:     changeGiven_db,
+        cashPaid:   methods.has('cash') ? cashPaid : undefined,
+        cardPaid:   methods.has('card') ? cardPaid : undefined,
+        date:       new Date(),
       }
       setSuccess(receiptData)
 
-      // Auto-print si está habilitado
       if (typeof window !== 'undefined' && localStorage.getItem('pos_autoprint') === 'true') {
         printReceipt(receiptData)
       }
@@ -118,12 +151,8 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
         style={{ background: 'rgba(0,0,0,0.85)', overflowY: 'auto' }}>
         <div className="w-full rounded-2xl flex flex-col"
-          style={{
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            maxWidth: '460px', margin: 'auto',
-          }}>
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxWidth: '460px', margin: 'auto' }}>
 
-          {/* Header */}
           <div className="flex items-center gap-3 px-5 py-4"
             style={{ borderBottom: '1px solid var(--border)' }}>
             <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0"
@@ -138,21 +167,17 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
             </div>
           </div>
 
-          {/* Vista previa del ticket — tamaño natural, sin scroll interno */}
           <div className="p-4">
             <Receipt data={success} />
           </div>
 
-          {/* Acciones */}
           <div className="px-4 pb-4 flex gap-2">
-            <button
-              onClick={() => printReceipt(success)}
+            <button onClick={() => printReceipt(success)}
               className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
               style={{ background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)' }}>
               Imprimir
             </button>
-            <button
-              onClick={() => { onSuccess(); onClose() }}
+            <button onClick={() => { onSuccess(); onClose() }}
               className="flex-1 py-3 rounded-xl text-sm font-bold"
               style={{ background: 'var(--accent)', color: '#000' }}
               autoFocus>
@@ -189,35 +214,40 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
 
         <div className="p-5 flex flex-col gap-4">
 
-          {/* Método de pago */}
-          <div className="grid grid-cols-2 gap-2">
-            {(['cash', 'card'] as Method[]).map(m => (
-              <button key={m} onClick={() => { setMethod(m); setAmountPaid('') }}
-                className="py-2.5 rounded-xl text-sm font-semibold transition-all"
-                style={{
-                  background: method === m ? 'var(--accent)' : 'var(--bg)',
-                  color: method === m ? '#000' : 'var(--text-muted)',
-                  border: `1px solid ${method === m ? 'var(--accent)' : 'var(--border)'}`,
-                }}>
-                {m === 'cash' ? '💵 Efectivo' : '💳 Tarjeta'}
-              </button>
-            ))}
+          {/* Métodos — toggleables, combinables */}
+          <div>
+            <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-muted)' }}>
+              Método de pago {isMixed && <span style={{ color: 'var(--accent)' }}>— Mixto</span>}
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {(['cash', 'card'] as Method[]).map(m => (
+                <button key={m} onClick={() => toggleMethod(m)}
+                  className="py-2.5 rounded-xl text-sm font-semibold transition-all"
+                  style={{
+                    background: methods.has(m) ? 'var(--accent)' : 'var(--bg)',
+                    color: methods.has(m) ? '#000' : 'var(--text-muted)',
+                    border: `1px solid ${methods.has(m) ? 'var(--accent)' : 'var(--border)'}`,
+                  }}>
+                  {m === 'cash' ? '💵 Efectivo' : '💳 Tarjeta'}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Efectivo */}
-          {method === 'cash' && (
+          {methods.has('cash') && (
             <div className="flex flex-col gap-3">
               <div>
                 <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
-                  Monto recibido
+                  {isMixed ? 'Monto en efectivo' : 'Monto recibido'}
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold"
                     style={{ color: 'var(--text-muted)' }}>$</span>
                   <input
                     type="number" min="0" step="0.01"
-                    value={amountPaid}
-                    onChange={e => setAmountPaid(e.target.value)}
+                    value={cashAmount}
+                    onChange={e => setCashAmount(e.target.value)}
                     placeholder="0.00"
                     autoFocus
                     className="w-full rounded-lg pl-8 pr-4 py-2.5 text-sm outline-none font-mono"
@@ -226,24 +256,39 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
                 </div>
               </div>
 
-              {/* Atajos */}
-              <div className="flex flex-wrap gap-1.5">
-                <button onClick={() => setAmountPaid(String(total))}
-                  className="px-2.5 py-1 rounded-lg text-xs font-semibold"
-                  style={{ background: 'var(--bg)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
-                  Exacto
-                </button>
-                {QUICK_AMOUNTS.filter(a => a >= total).slice(0, 4).map(a => (
-                  <button key={a} onClick={() => setAmountPaid(String(a))}
+              {/* Atajos — solo en cash puro */}
+              {cashOnly && (
+                <div className="flex flex-wrap gap-1.5">
+                  <button onClick={() => setCashAmount(String(total))}
                     className="px-2.5 py-1 rounded-lg text-xs font-semibold"
-                    style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
-                    {fmt(a)}
+                    style={{ background: 'var(--bg)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
+                    Exacto
                   </button>
-                ))}
-              </div>
+                  {QUICK_AMOUNTS.filter(a => a >= total).slice(0, 4).map(a => (
+                    <button key={a} onClick={() => setCashAmount(String(a))}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+                      style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                      {fmt(a)}
+                    </button>
+                  ))}
+                </div>
+              )}
 
-              {/* Cambio */}
-              {paid > 0 && (
+              {/* Info mixto: muestra cuánto va a tarjeta */}
+              {isMixed && cashPaid > 0 && (
+                <div className="flex justify-between items-center p-3 rounded-xl"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+                    Resto en tarjeta
+                  </span>
+                  <span className="text-sm font-black font-mono" style={{ color: 'var(--accent)' }}>
+                    {fmt(cardPaid)}
+                  </span>
+                </div>
+              )}
+
+              {/* Cambio (solo cash puro) */}
+              {cashOnly && cashPaid > 0 && (
                 <div className="flex justify-between items-center p-3 rounded-xl"
                   style={{
                     background: change >= 0 ? '#0D2B0D' : '#2D1010',
@@ -260,8 +305,8 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
             </div>
           )}
 
-          {/* Tarjeta */}
-          {method === 'card' && (
+          {/* Solo tarjeta */}
+          {cardOnly && (
             <div className="p-4 rounded-xl text-center"
               style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Cobrar con terminal</p>

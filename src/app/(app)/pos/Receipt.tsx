@@ -5,9 +5,11 @@ import type { CartItem } from '@/types'
 export interface ReceiptData {
   cart: CartItem[]
   total: number
-  paymentMethod: 'cash' | 'card'
+  paymentMethod: 'cash' | 'card' | 'mixed'
   amountPaid: number
   change: number
+  cashPaid?: number   // solo cuando method = 'mixed'
+  cardPaid?: number   // solo cuando method = 'mixed'
   date: Date
 }
 
@@ -98,7 +100,15 @@ export function Receipt({ data }: { data: ReceiptData }) {
 
       {/* Pago */}
       <div style={{ fontSize: '13px', marginTop: '8px', color: '#333', lineHeight: '1.6' }}>
-        <div>Pago: <strong>{data.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}</strong></div>
+        <div>Pago: <strong>
+          {data.paymentMethod === 'cash' ? 'Efectivo' : data.paymentMethod === 'card' ? 'Tarjeta' : 'Mixto'}
+        </strong></div>
+        {data.paymentMethod === 'mixed' && (
+          <>
+            {data.cashPaid != null && data.cashPaid > 0 && <div>Efectivo: {fmt(data.cashPaid)}</div>}
+            {data.cardPaid != null && data.cardPaid > 0 && <div>Tarjeta: {fmt(data.cardPaid)}</div>}
+          </>
+        )}
         {data.paymentMethod === 'cash' && (
           <>
             <div>Recibido: {fmt(data.amountPaid)}</div>
@@ -133,10 +143,15 @@ export function printReceipt(data: ReceiptData) {
     </tr>`
   }).join('')
 
-  const cashRows = data.paymentMethod === 'cash' ? `
-    <div>Recibido: ${fmt(data.amountPaid)}</div>
-    <div>Cambio: &nbsp; ${fmt(data.change)}</div>
-  ` : ''
+  const payLabel = data.paymentMethod === 'cash' ? 'Efectivo' : data.paymentMethod === 'card' ? 'Tarjeta' : 'Mixto'
+  const cashRows = data.paymentMethod === 'cash'
+    ? `<div>Recibido: ${fmt(data.amountPaid)}</div><div>Cambio: ${fmt(data.change)}</div>`
+    : data.paymentMethod === 'mixed'
+      ? [
+          data.cashPaid && data.cashPaid > 0 ? `<div>Efectivo: ${fmt(data.cashPaid)}</div>` : '',
+          data.cardPaid && data.cardPaid > 0 ? `<div>Tarjeta: ${fmt(data.cardPaid)}</div>` : '',
+        ].join('')
+      : ''
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -187,7 +202,7 @@ export function printReceipt(data: ReceiptData) {
   <div class="divider"></div>
   <div class="total-row"><span>TOTAL</span><span>${fmt(data.total)}</span></div>
   <div class="pay-info">
-    <div>Pago: ${data.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}</div>
+    <div>Pago: ${payLabel}</div>
     ${cashRows}
   </div>
   <div class="divider" style="margin-top:8px"></div>

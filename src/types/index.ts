@@ -29,7 +29,15 @@ export interface ProductVariant {
 export interface CartItem {
   variant: ProductVariant
   quantity: number
-  unitPrice: number  // puede ser sale_price o wholesale_price
+  unitPrice: number     // puede ser sale_price o wholesale_price
+  useWholesale?: boolean
+}
+
+export interface HeldTicket {
+  id: number
+  label: string
+  cart: CartItem[]
+  savedAt: number       // Date.now()
 }
 
 export interface Shift {

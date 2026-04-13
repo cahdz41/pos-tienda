@@ -9,6 +9,12 @@ interface Props {
   onRemoveAll: (variantId: string) => void
   onClear: () => void
   onPay: () => void
+  // Fase 8
+  onToggleWholesale: (variantId: string) => void
+  onHold: () => void
+  onShowHolds: () => void
+  heldCount: number
+  onVoid: () => void
 }
 
 export default function CartPanel({
@@ -18,6 +24,11 @@ export default function CartPanel({
   onRemoveAll,
   onClear,
   onPay,
+  onToggleWholesale,
+  onHold,
+  onShowHolds,
+  heldCount,
+  onVoid,
 }: Props) {
   const total = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
@@ -29,26 +40,50 @@ export default function CartPanel({
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-4 py-3 shrink-0"
+        className="px-4 py-3 shrink-0"
         style={{ borderBottom: '1px solid var(--border)' }}
       >
-        <div>
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
-            Carrito
-          </h2>
-          {itemCount > 0 && (
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              {itemCount} {itemCount === 1 ? 'producto' : 'productos'}
-            </p>
-          )}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Carrito</h2>
+            {itemCount > 0 && (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {itemCount} {itemCount === 1 ? 'producto' : 'productos'}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {/* Anular venta anterior */}
+            <button
+              onClick={onVoid}
+              className="px-2 py-1 rounded text-xs font-semibold"
+              style={{ background: '#2D1010', color: '#FF6B6B' }}
+              title="Anular venta"
+            >
+              Anular
+            </button>
+            {/* Vaciar carrito actual */}
+            {cart.length > 0 && (
+              <button
+                onClick={onClear}
+                className="px-2 py-1 rounded text-xs font-semibold"
+                style={{ color: '#FF6B6B', background: '#2D1010' }}
+              >
+                Vaciar
+              </button>
+            )}
+          </div>
         </div>
-        {cart.length > 0 && (
+
+        {/* Barra de tickets en espera */}
+        {heldCount > 0 && (
           <button
-            onClick={onClear}
-            className="text-xs px-2 py-1 rounded"
-            style={{ color: '#FF6B6B', background: '#2D1010' }}
+            onClick={onShowHolds}
+            className="mt-2 w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold"
+            style={{ background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--accent)' }}
           >
-            Vaciar
+            <span>⏸ {heldCount} ticket{heldCount > 1 ? 's' : ''} en espera</span>
+            <span style={{ opacity: 0.7 }}>Ver →</span>
           </button>
         )}
       </div>
@@ -64,80 +99,94 @@ export default function CartPanel({
           </div>
         ) : (
           <div className="p-2 flex flex-col gap-1">
-            {cart.map(item => (
-              <div
-                key={item.variant.id}
-                className="rounded-lg p-2.5"
-                style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}
-              >
-                {/* Nombre */}
-                <p className="text-xs font-semibold leading-tight" style={{ color: 'var(--text)' }}>
-                  {item.variant.product?.name}
-                  {item.variant.flavor ? ` — ${item.variant.flavor}` : ''}
-                </p>
+            {cart.map(item => {
+              const hasWholesale = item.variant.wholesale_price !== item.variant.sale_price
+              return (
+                <div
+                  key={item.variant.id}
+                  className="rounded-lg p-2.5"
+                  style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}
+                >
+                  {/* Nombre */}
+                  <p className="text-xs font-semibold leading-tight" style={{ color: 'var(--text)' }}>
+                    {item.variant.product?.name}
+                    {item.variant.flavor ? ` — ${item.variant.flavor}` : ''}
+                  </p>
 
-                {/* Precio unitario */}
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  ${item.unitPrice.toLocaleString('es-MX')} c/u
-                </p>
-
-                {/* Controles cantidad + subtotal */}
-                <div className="flex items-center justify-between mt-2">
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => onRemoveOne(item.variant.id)}
-                      className="w-6 h-6 rounded flex items-center justify-center text-sm font-bold"
-                      style={{ background: 'var(--border)', color: 'var(--text)' }}
-                    >
-                      −
-                    </button>
-                    <span
-                      className="w-7 text-center text-sm font-bold"
-                      style={{ color: 'var(--text)' }}
-                    >
-                      {item.quantity}
-                    </span>
-                    <button
-                      onClick={() => onAdd(item.variant)}
-                      className="w-6 h-6 rounded flex items-center justify-center text-sm font-bold"
-                      style={{ background: 'var(--border)', color: 'var(--text)' }}
-                    >
-                      +
-                    </button>
+                  {/* Precio unitario + toggle mayoreo */}
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      ${item.unitPrice.toLocaleString('es-MX')} c/u
+                    </p>
+                    {hasWholesale && (
+                      <button
+                        onClick={() => onToggleWholesale(item.variant.id)}
+                        className="px-1.5 py-0.5 rounded text-xs font-bold leading-none"
+                        style={{
+                          background: item.useWholesale ? 'var(--accent)' : 'var(--bg)',
+                          color: item.useWholesale ? '#000' : 'var(--text-muted)',
+                          border: `1px solid ${item.useWholesale ? 'var(--accent)' : 'var(--border)'}`,
+                        }}
+                        title={item.useWholesale ? 'Precio mayoreo activo' : 'Cambiar a precio mayoreo'}
+                      >
+                        May
+                      </button>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-bold" style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>
-                      ${(item.unitPrice * item.quantity).toLocaleString('es-MX')}
-                    </span>
-                    <button
-                      onClick={() => onRemoveAll(item.variant.id)}
-                      className="w-5 h-5 rounded flex items-center justify-center text-xs"
-                      style={{ color: '#FF6B6B', background: '#2D1010' }}
-                    >
-                      ✕
-                    </button>
+                  {/* Controles cantidad + subtotal */}
+                  <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => onRemoveOne(item.variant.id)}
+                        className="w-6 h-6 rounded flex items-center justify-center text-sm font-bold"
+                        style={{ background: 'var(--border)', color: 'var(--text)' }}
+                      >
+                        −
+                      </button>
+                      <span
+                        className="w-7 text-center text-sm font-bold"
+                        style={{ color: 'var(--text)' }}
+                      >
+                        {item.quantity}
+                      </span>
+                      <button
+                        onClick={() => onAdd(item.variant)}
+                        className="w-6 h-6 rounded flex items-center justify-center text-sm font-bold"
+                        style={{ background: 'var(--border)', color: 'var(--text)' }}
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-bold" style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>
+                        ${(item.unitPrice * item.quantity).toLocaleString('es-MX')}
+                      </span>
+                      <button
+                        onClick={() => onRemoveAll(item.variant.id)}
+                        className="w-5 h-5 rounded flex items-center justify-center text-xs"
+                        style={{ color: '#FF6B6B', background: '#2D1010' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
 
-      {/* Total + botón pagar */}
+      {/* Total + botones acción */}
       <div
         className="p-3 shrink-0 flex flex-col gap-2"
         style={{ borderTop: '1px solid var(--border)' }}
       >
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>
-            Total
-          </span>
-          <span
-            className="text-xl font-black"
-            style={{ color: 'var(--accent)', fontFamily: 'monospace' }}
-          >
+          <span className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>Total</span>
+          <span className="text-xl font-black" style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>
             ${total.toLocaleString('es-MX')}
           </span>
         </div>
@@ -150,6 +199,17 @@ export default function CartPanel({
         >
           Cobrar ${total.toLocaleString('es-MX')}
         </button>
+
+        {/* Poner en espera */}
+        {cart.length > 0 && (
+          <button
+            onClick={onHold}
+            className="w-full py-2 rounded-xl text-xs font-semibold"
+            style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+          >
+            ⏸ Poner en espera
+          </button>
+        )}
       </div>
     </div>
   )
