@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ProductVariant } from '@/types'
 import AdjustModal from './AdjustModal'
+import ImportModal from './ImportModal'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -67,8 +68,9 @@ export default function InventarioPage() {
   const [search, setSearch] = useState('')
   const [soloConExistencias, setSoloConExistencias] = useState(false)
 
-  // Modal de ajuste de stock
+  // Modales
   const [adjustVariant, setAdjustVariant] = useState<ProductVariant | null>(null)
+  const [showImport, setShowImport] = useState(false)
 
   // Edición inline de fecha de caducidad
   const [editingExpiry, setEditingExpiry] = useState<string | null>(null) // variant id
@@ -270,6 +272,15 @@ export default function InventarioPage() {
               {filtered.length} de {allVariants.length} variantes
             </p>
           </div>
+          {isOwner && (
+            <button
+              onClick={() => setShowImport(true)}
+              className="px-3 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: 'var(--surface)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+            >
+              Importar Excel
+            </button>
+          )}
         </div>
 
         {/* Búsqueda + filtros */}
@@ -451,6 +462,14 @@ export default function InventarioPage() {
           variant={adjustVariant}
           onClose={() => setAdjustVariant(null)}
           onSaved={handleStockSaved}
+        />
+      )}
+
+      {/* Modal importar Excel */}
+      {showImport && (
+        <ImportModal
+          onClose={() => setShowImport(false)}
+          onImported={() => { setShowImport(false); loadInventory() }}
         />
       )}
     </div>
