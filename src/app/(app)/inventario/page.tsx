@@ -75,6 +75,12 @@ export default function InventarioPage() {
   const [editingExpiryVal, setEditingExpiryVal] = useState('')
   const expiryInputRef = useRef<HTMLInputElement>(null)
 
+  // Edición inline de precios
+  type PriceField = 'sale_price' | 'cost_price' | 'wholesale_price'
+  const [editingPrice, setEditingPrice] = useState<{ id: string; field: PriceField } | null>(null)
+  const [editingPriceVal, setEditingPriceVal] = useState('')
+  const priceInputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => { loadInventory() }, [])
 
   async function loadInventory() {
@@ -145,6 +151,35 @@ export default function InventarioPage() {
     }
   }
 
+  function startEditPrice(variantId: string, field: PriceField, currentValue: number) {
+    setEditingPrice({ id: variantId, field })
+    setEditingPriceVal(String(currentValue))
+    setTimeout(() => priceInputRef.current?.focus(), 0)
+  }
+
+  async function savePrice(variantId: string, field: PriceField) {
+    const newValue = parseFloat(editingPriceVal)
+    setEditingPrice(null)
+
+    if (isNaN(newValue) || newValue < 0) return
+
+    const supabase = createClient()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from('product_variants')
+      .update({ [field]: newValue })
+      .eq('id', variantId)
+
+    if (error) {
+      console.error('[Inventario] Error guardando precio:', error.message)
+      return
+    }
+
+    setAllVariants(prev =>
+      prev.map(v => v.id === variantId ? { ...v, [field]: newValue } : v)
+    )
+  }
+
   function startEditExpiry(variantId: string, currentDate: string | null) {
     setEditingExpiry(variantId)
     setEditingExpiryVal(currentDate ?? '')
@@ -156,7 +191,8 @@ export default function InventarioPage() {
     setEditingExpiry(null)
 
     const supabase = createClient()
-    const { error } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
       .from('product_variants')
       .update({ expiration_date: newDate })
       .eq('id', variantId)
@@ -349,22 +385,48 @@ export default function InventarioPage() {
                     )}
                   </td>
 
-                  {/* Precios */}
-                  <td className="py-2.5 px-3">
-                    <span className="text-xs font-mono font-semibold" style={{ color: 'var(--accent)' }}>
-                      ${v.sale_price.toLocaleString('es-MX')}
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-3">
-                    <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
-                      ${v.cost_price.toLocaleString('es-MX')}
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-3">
-                    <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
-                      ${v.wholesale_price.toLocaleString('es-MX')}
-                    </span>
-                  </td>
+                  {/* Precios — editables inline para owner */}
+                  {(['sale_price', 'cost_price', 'wholesale_price'] as PriceField[]).map(field => {
+                    const value = v[field]
+                    const isEditing = isOwner && editingPrice?.id === v.id && editingPrice?.field === field
+                    const accentColor = field === 'sale_price' ? 'var(--accent)' : 'var(--text-muted)'
+                    return (
+                      <td key={field} className="py-2.5 px-3">
+                        {isEditing ? (
+                          <input
+                            ref={priceInputRef}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editingPriceVal}
+                            onChange={e => setEditingPriceVal(e.target.value)}
+                            onBlur={() => savePrice(v.id, field)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') savePrice(v.id, field)
+                              if (e.key === 'Escape') setEditingPrice(null)
+                            }}
+                            className="rounded px-2 py-0.5 text-xs font-mono outline-none"
+                            style={{
+                              background: 'var(--bg)', border: '1px solid var(--accent)',
+                              color: 'var(--text)', width: '80px',
+                            }}
+                          />
+                        ) : (
+                          <span
+                            className="text-xs font-mono font-semibold"
+                            style={{
+                              color: accentColor,
+                              cursor: isOwner ? 'pointer' : 'default',
+                            }}
+                            onClick={() => isOwner && startEditPrice(v.id, field, value)}
+                            title={isOwner ? 'Clic para editar' : undefined}
+                          >
+                            ${value.toLocaleString('es-MX')}
+                          </span>
+                        )}
+                      </td>
+                    )
+                  })}
 
                   {/* Acción ajuste de stock */}
                   <td className="py-2.5 px-3">

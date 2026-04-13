@@ -22,8 +22,8 @@ export default function Sidebar() {
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/')
 
-  const initials = profile?.full_name
-    ? profile.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  const initials = profile?.name
+    ? profile.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : '?'
 
   const items = [
@@ -89,7 +89,7 @@ export default function Sidebar() {
               className="text-xs font-semibold truncate"
               style={{ color: 'var(--text)' }}
             >
-              {profile?.full_name ?? 'Usuario'}
+              {profile?.name ?? 'Usuario'}
             </p>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {profile?.role === 'owner' ? 'Administrador' : 'Cajero'}
