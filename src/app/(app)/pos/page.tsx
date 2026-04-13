@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { CartItem, HeldTicket, ProductVariant, Shift } from '@/types'
 
 const HOLDS_KEY = 'pos_holds'
+const CART_KEY  = 'pos_cart'
 
 function formatElapsed(ts: number): string {
   const mins = Math.floor((Date.now() - ts) / 60_000)
@@ -21,7 +22,16 @@ function formatElapsed(ts: number): string {
 
 export default function PosPage() {
   const { user, loading: authLoading } = useAuth()
-  const [cart, setCart] = useState<CartItem[]>([])
+
+  // Cart persistente — lazy initializer para no perder el ticket activo al recargar
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const saved = localStorage.getItem(CART_KEY)
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Turno activo
@@ -49,10 +59,19 @@ export default function PosPage() {
     } catch { return [] }
   })
 
-  // Persistir holds cuando cambian (el save en mount es inofensivo: escribe el valor ya cargado)
+  // Persistir holds cuando cambian
   useEffect(() => {
     localStorage.setItem(HOLDS_KEY, JSON.stringify(heldTickets))
   }, [heldTickets])
+
+  // Persistir cart activo cuando cambia
+  useEffect(() => {
+    localStorage.setItem(CART_KEY, JSON.stringify(cart))
+  }, [cart])
+
+  // Modal de nombre al poner en espera
+  const [holdNameMode, setHoldNameMode] = useState(false)
+  const [holdNameInput, setHoldNameInput] = useState('')
 
   // Cargar turno activo
   useEffect(() => {
@@ -111,15 +130,23 @@ export default function PosPage() {
 
   function holdCart() {
     if (cart.length === 0) return
+    setHoldNameInput('')
+    setHoldNameMode(true)
+  }
+
+  function confirmHold() {
+    if (cart.length === 0) return
     holdCounter.current += 1
-    const newHeld: HeldTicket = {
+    const label = holdNameInput.trim() || `Ticket #${holdCounter.current}`
+    setHeldTickets(prev => [...prev, {
       id:      holdCounter.current,
-      label:   `Ticket #${holdCounter.current}`,
+      label,
       cart:    [...cart],
       savedAt: Date.now(),
-    }
-    setHeldTickets(prev => [...prev, newHeld])
+    }])
     clearCart()
+    setHoldNameMode(false)
+    setHoldNameInput('')
   }
 
   function recallTicket(id: number) {
@@ -162,7 +189,7 @@ export default function PosPage() {
 
   return (
     <div className="flex h-full relative"
-      onClick={() => { if (!showPayment && !showVoid && !showHolds) searchRef.current?.focus() }}>
+      onClick={() => { if (!showPayment && !showVoid && !showHolds && !holdNameMode) searchRef.current?.focus() }}>
 
       <ProductPanel cart={cart} onAdd={addToCart} searchRef={searchRef} refreshKey={refreshKey} />
 
@@ -197,6 +224,52 @@ export default function PosPage() {
           onClose={() => setShowVoid(false)}
           onVoided={handleVoided}
         />
+      )}
+
+      {/* Modal: nombre del ticket en espera */}
+      {holdNameMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={e => { e.stopPropagation(); if (e.target === e.currentTarget) setHoldNameMode(false) }}>
+          <div className="w-full max-w-xs rounded-2xl p-5 flex flex-col gap-3"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>Nombre del ticket</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Para identificar este ticket en espera
+              </p>
+            </div>
+            <input
+              autoFocus
+              type="text"
+              value={holdNameInput}
+              onChange={e => setHoldNameInput(e.target.value)}
+              placeholder={`Ticket #${holdCounter.current + 1}`}
+              maxLength={40}
+              onKeyDown={e => {
+                e.stopPropagation()
+                if (e.key === 'Enter') confirmHold()
+                if (e.key === 'Escape') setHoldNameMode(false)
+              }}
+              className="rounded-lg px-3 py-2.5 text-sm outline-none"
+              style={{ background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--text)' }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setHoldNameMode(false)}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                Cancelar
+              </button>
+              <button
+                onClick={confirmHold}
+                className="flex-1 py-2 rounded-xl text-sm font-bold"
+                style={{ background: 'var(--accent)', color: '#000' }}>
+                Poner en espera
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Panel de tickets en espera */}
