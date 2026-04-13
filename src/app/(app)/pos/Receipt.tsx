@@ -8,8 +8,10 @@ export interface ReceiptData {
   paymentMethod: 'cash' | 'card' | 'mixed'
   amountPaid: number
   change: number
-  cashPaid?: number   // solo cuando method = 'mixed'
-  cardPaid?: number   // solo cuando method = 'mixed'
+  cashPaid?: number      // solo cuando method = 'mixed'
+  cardPaid?: number      // solo cuando method = 'mixed'
+  walletPaid?: number    // monto pagado con monedero
+  loyaltyEarned?: number // monedero ganado en esta compra
   date: Date
 }
 
@@ -103,17 +105,25 @@ export function Receipt({ data }: { data: ReceiptData }) {
         <div>Pago: <strong>
           {data.paymentMethod === 'cash' ? 'Efectivo' : data.paymentMethod === 'card' ? 'Tarjeta' : 'Mixto'}
         </strong></div>
+        {data.walletPaid != null && data.walletPaid > 0 && (
+          <div>Monedero: <strong style={{ color: '#b07d00' }}>{fmt(data.walletPaid)}</strong></div>
+        )}
         {data.paymentMethod === 'mixed' && (
           <>
             {data.cashPaid != null && data.cashPaid > 0 && <div>Efectivo: {fmt(data.cashPaid)}</div>}
             {data.cardPaid != null && data.cardPaid > 0 && <div>Tarjeta: {fmt(data.cardPaid)}</div>}
           </>
         )}
-        {data.paymentMethod === 'cash' && (
+        {data.paymentMethod === 'cash' && !data.walletPaid && (
           <>
             <div>Recibido: {fmt(data.amountPaid)}</div>
             <div>Cambio: <strong style={{ color: '#1a7a1a' }}>{fmt(data.change)}</strong></div>
           </>
+        )}
+        {data.loyaltyEarned != null && data.loyaltyEarned > 0 && (
+          <div style={{ marginTop: '4px', color: '#b07d00', fontWeight: 'bold' }}>
+            Monedero ganado: +{fmt(data.loyaltyEarned)}
+          </div>
         )}
       </div>
 
@@ -144,7 +154,9 @@ export function printReceipt(data: ReceiptData) {
   }).join('')
 
   const payLabel = data.paymentMethod === 'cash' ? 'Efectivo' : data.paymentMethod === 'card' ? 'Tarjeta' : 'Mixto'
-  const cashRows = data.paymentMethod === 'cash'
+  const walletRow = data.walletPaid && data.walletPaid > 0
+    ? `<div>Monedero: ${fmt(data.walletPaid)}</div>` : ''
+  const cashRows = data.paymentMethod === 'cash' && !data.walletPaid
     ? `<div>Recibido: ${fmt(data.amountPaid)}</div><div>Cambio: ${fmt(data.change)}</div>`
     : data.paymentMethod === 'mixed'
       ? [
@@ -152,6 +164,8 @@ export function printReceipt(data: ReceiptData) {
           data.cardPaid && data.cardPaid > 0 ? `<div>Tarjeta: ${fmt(data.cardPaid)}</div>` : '',
         ].join('')
       : ''
+  const loyaltyRow = data.loyaltyEarned && data.loyaltyEarned > 0
+    ? `<div style="color:#b07d00;font-weight:bold">Monedero ganado: +${fmt(data.loyaltyEarned)}</div>` : ''
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -203,7 +217,9 @@ export function printReceipt(data: ReceiptData) {
   <div class="total-row"><span>TOTAL</span><span>${fmt(data.total)}</span></div>
   <div class="pay-info">
     <div>Pago: ${payLabel}</div>
+    ${walletRow}
     ${cashRows}
+    ${loyaltyRow}
   </div>
   <div class="divider" style="margin-top:8px"></div>
   <div class="center" style="font-size:11px;margin-top:4px">${footer}</div>

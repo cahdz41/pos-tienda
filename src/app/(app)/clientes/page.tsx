@@ -235,6 +235,13 @@ export default function ClientesPage() {
                       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{c.phone}</p>
                     )}
 
+                    {/* Monedero */}
+                    {c.loyalty_balance > 0 && (
+                      <p className="text-xs mt-0.5" style={{ color: '#F0B429' }}>
+                        Monedero: {fmt(c.loyalty_balance)}
+                      </p>
+                    )}
+
                     {/* Crédito */}
                     {c.credit_limit > 0 && (
                       <div className="mt-1">
