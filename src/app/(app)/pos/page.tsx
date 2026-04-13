@@ -34,22 +34,22 @@ export default function PosPage() {
   const [refreshKey, setRefreshKey]   = useState(0)
 
   // ── Venta en espera ──────────────────────────────────────────────────────
-  const [heldTickets, setHeldTickets] = useState<HeldTicket[]>([])
+  // holdCounter DEBE estar antes del useState para que el lazy initializer lo acceda
   const holdCounter = useRef(0)
 
-  // Cargar holds desde localStorage al montar (fix hydration)
-  useEffect(() => {
+  // Lazy initializer: lee localStorage una sola vez en el mount, sin condición de carrera
+  const [heldTickets, setHeldTickets] = useState<HeldTicket[]>(() => {
+    if (typeof window === 'undefined') return []
     try {
       const saved = localStorage.getItem(HOLDS_KEY)
-      if (saved) {
-        const parsed: HeldTicket[] = JSON.parse(saved)
-        setHeldTickets(parsed)
-        holdCounter.current = parsed.reduce((max, h) => Math.max(max, h.id), 0)
-      }
-    } catch { /* ignore */ }
-  }, [])
+      if (!saved) return []
+      const parsed: HeldTicket[] = JSON.parse(saved)
+      holdCounter.current = parsed.reduce((max, h) => Math.max(max, h.id), 0)
+      return parsed
+    } catch { return [] }
+  })
 
-  // Persistir holds en localStorage cuando cambian
+  // Persistir holds cuando cambian (el save en mount es inofensivo: escribe el valor ya cargado)
   useEffect(() => {
     localStorage.setItem(HOLDS_KEY, JSON.stringify(heldTickets))
   }, [heldTickets])
@@ -161,7 +161,8 @@ export default function PosPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full relative" onClick={() => searchRef.current?.focus()}>
+    <div className="flex h-full relative"
+      onClick={() => { if (!showPayment && !showVoid && !showHolds) searchRef.current?.focus() }}>
 
       <ProductPanel cart={cart} onAdd={addToCart} searchRef={searchRef} refreshKey={refreshKey} />
 
