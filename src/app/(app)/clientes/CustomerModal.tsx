@@ -15,6 +15,29 @@ const EMPTY: Omit<Customer, 'id' | 'loyalty_balance' | 'loyalty_spent'> = {
   address: null, credit_limit: 0, credit_balance: 0, notes: null,
 }
 
+function Field({ label, value, onChange, type = 'text', placeholder = '' }: {
+  label: string; value: string; onChange: (v: string) => void
+  type?: string; placeholder?: string
+}) {
+  return (
+    <div>
+      <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </label>
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
+        style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
+        onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+        onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+      />
+    </div>
+  )
+}
+
 export default function CustomerModal({ customer, onClose, onSaved }: Props) {
   const isNew = customer === 'new'
   const base  = isNew ? EMPTY : customer
@@ -65,29 +88,6 @@ export default function CustomerModal({ customer, onClose, onSaved }: Props) {
       if (err) { setError(err.message); setSaving(false); return }
       onSaved(data as Customer, false)
     }
-  }
-
-  function Field({ label, value, onChange, type = 'text', placeholder = '' }: {
-    label: string; value: string; onChange: (v: string) => void
-    type?: string; placeholder?: string
-  }) {
-    return (
-      <div>
-        <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
-          {label}
-        </label>
-        <input
-          type={type}
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
-          onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-          onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-        />
-      </div>
-    )
   }
 
   return (
