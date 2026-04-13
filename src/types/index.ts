@@ -61,7 +61,7 @@ export interface CashMovement {
 }
 
 export interface Customer {
-  id: number
+  id: string
   full_name: string
   phone: string | null
   email: string | null
@@ -71,6 +71,15 @@ export interface Customer {
   loyalty_balance: number
   loyalty_spent: number
   notes: string | null
+}
+
+export interface CreditPayment {
+  id: string
+  customer_id: string
+  amount: number
+  payment_method: 'cash' | 'card'
+  cashier_id: string | null
+  created_at: string
 }
 
 export interface Sale {
