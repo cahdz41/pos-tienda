@@ -39,30 +39,53 @@ https://github.com/cahdz41/pos-tienda
 **Acceso:** Terminal en hPanel de Hostinger  
 **Dominio:** `pos-storeonline.duckdns.org`
 
+### Flujo de tráfico real (cómo llega una petición a la app)
+
+```
+Navegador
+    │
+    ▼ puerto 443 (HTTPS)
+Traefik  [Docker: n8n-traefik-1]
+    │  lee: /docker/n8n/traefik-dynamic/pos.yml
+    │  regla: Host = pos-storeonline.duckdns.org
+    ▼
+172.17.0.1:3000  (IP del host desde Docker)
+    │
+    ▼
+Nginx  [puerto 8082]  ← /etc/nginx/sites-enabled/pos-v2
+    │  proxy_pass → localhost:3000
+    ▼
+Next.js app  [PM2: pos-v2, puerto 3000]
+```
+
+> `172.17.0.1` es la IP del host vista desde los contenedores Docker (bridge gateway). No cambiar.
+
 ### Servicios que NO debes tocar
 
-| Servicio | Cómo corre | No tocar |
-|---|---|---|
-| n8n | Docker (`n8n-n8n-1`) | `docker stop n8n-n8n-1` NUNCA |
-| Traefik (reverse proxy) | Docker (`n8n-traefik-1`) | Maneja todo el tráfico 80/443 |
-| OpenClaw bot | Docker (`openclaw-gateway`) | Puerto 6151 |
-| Dashboard Gym | Docker (`dashboard_gym-gym-dashboard-1`) | — |
-| Chocholand | Docker (`dashboard-chocholand-chocholand-1`) | Puerto 5000 interno |
-| bot-gym (WhatsApp) | PM2 id `0` (`bot-gym`) | Puerto 3001 |
+| Servicio | Cómo corre | Ubicación | Advertencia |
+|---|---|---|---|
+| n8n | Docker (`n8n-n8n-1`) | — | NUNCA `docker stop n8n-n8n-1` |
+| Traefik | Docker (`n8n-traefik-1`) | — | Maneja TODO el tráfico 80/443 |
+| OpenClaw bot | Docker (`openclaw-gateway`) | — | Puerto 6151 |
+| Dashboard Gym | Docker (`dashboard_gym-gym-dashboard-1`) | `/root/Dashboard_Gym` | — |
+| Chocholand | Docker (`dashboard-chocholand-chocholand-1`) | — | Puerto 5000 interno |
+| bot-gym (WhatsApp) | PM2 id `0` (`bot-gym`) | `/root/Dashboard_Gym` | Puerto 3001 — **MUY SENSIBLE** |
 
 ### Este servicio
 
-| Servicio | Cómo corre | Puerto interno | Nginx externo |
+| Servicio | Cómo corre | Puerto | Archivos clave |
 |---|---|---|---|
-| pos-v2 | PM2 (`pos-v2`) | **3000** | 8082 → 3000 |
+| pos-v2 | PM2 (`pos-v2`) | **3000** | `/var/www/pos-v2` |
 
-### Puertos reservados por otros servicios (NO USAR)
+### Puertos reservados (NO USAR)
 
 - `80`, `443` — Traefik (Docker)
-- `3001` — bot-gym (WhatsApp bot)
+- `3001` — bot-gym (WhatsApp — **no tocar bajo ninguna circunstancia**)
+- `3003` — fue el viejo pos-tienda (ya eliminado, no reutilizar)
 - `5678` — n8n (interno Docker)
 - `6151` — OpenClaw
 - `8080` — Nginx (gym-dashboard + chocholand)
+- `8082` — Nginx (pos-v2)
 
 ---
 
@@ -265,6 +288,49 @@ nginx -t && nginx -s reload
 
 ---
 
+## Traefik — configuración de rutas
+
+Traefik es el punto de entrada de todo el tráfico HTTPS. Su configuración dinámica vive en:
+
+```
+/docker/n8n/traefik-dynamic/
+├── pos.yml       ← ruta de pos-storeonline (ESTA app)
+└── whatsapp.yml  ← ruta del bot de WhatsApp — NO TOCAR
+```
+
+Traefik detecta cambios en estos archivos automáticamente (`--providers.file.watch=true`).  
+**No es necesario reiniciar Traefik** — el cambio aplica solo al guardar.
+
+### pos.yml — contenido actual
+
+```yaml
+http:
+  routers:
+    pos-router:
+      rule: "Host(`pos-storeonline.duckdns.org`)"
+      entrypoints:
+        - websecure
+      tls:
+        certresolver: mytlschallenge
+      service: pos-service
+
+  services:
+    pos-service:
+      loadBalancer:
+        servers:
+          - url: "http://172.17.0.1:3000"
+```
+
+> Si alguna vez cambias el puerto de la app, este es el único lugar donde actualizarlo.  
+> `172.17.0.1` es la IP fija del host desde Docker — no cambiar.
+
+### whatsapp.yml — NO MODIFICAR
+
+Este archivo controla el bot de WhatsApp del gimnasio. Es crítico y no tiene relación con pos-v2.  
+Ubicación: `/docker/n8n/traefik-dynamic/whatsapp.yml` — solo leer, nunca editar.
+
+---
+
 ## Comandos útiles
 
 ```bash
@@ -326,9 +392,11 @@ pm2 reload pos-v2
 
 1. **Nunca borrar ni modificar** `/etc/nginx/sites-enabled/mis_proyectos`
 2. **Nunca detener Docker** — n8n, traefik, openclaw, gym-dashboard y chocholand viven ahí
-3. **Nunca usar el puerto 3001** — es el bot de WhatsApp del gimnasio
+3. **Nunca tocar el puerto 3001 ni `/docker/n8n/traefik-dynamic/whatsapp.yml`** — es el bot de WhatsApp del gimnasio, crítico
 4. **Siempre correr `nginx -t` antes de `nginx -s reload`** — si hay error de sintaxis, no recargar
 5. **Siempre correr `pm2 save` después de agregar o quitar procesos** — para que PM2 recuerde el estado al reiniciar el servidor
-6. **Las variables de entorno nunca van a Git** — crearlas o editarlas directamente en el VPS
+6. **Las variables de entorno nunca van a Git** — crearlas o editarlas directamente en el VPS en `.env.production`
 7. **Verificar `pm2 list` y `docker ps` después de cada deploy** — confirmar que todo sigue `online`/`Up`
 8. **Usar `pm2 reload` (no `restart`)** para deploys en caliente sin interrumpir sesiones activas
+9. **Si la app carga en `:8082` pero no en el dominio** — revisar `/docker/n8n/traefik-dynamic/pos.yml` y verificar que el puerto sea `3000`
+10. **Nunca reutilizar el puerto 3003** — era el viejo pos-tienda, puede causar confusión
