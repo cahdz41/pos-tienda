@@ -1,10 +1,17 @@
 # Progreso del Proyecto — POS + Tienda Online
 
+## Repositorio
+
+**GitHub (ya existe, no crear nuevo):** https://github.com/cahdz41/pos-tienda  
+Rama principal: `main` — disponible en ambas PCs y en el VPS.
+
+---
+
 ## Stack
 - **Framework:** Next.js 16.2 (App Router, TypeScript, Tailwind)
 - **Base de datos:** Supabase (PostgreSQL + Auth + Realtime)
 - **Imágenes:** Cloudinary (pendiente de integrar)
-- **Deploy:** Hostinger VPS KVM2
+- **Deploy:** Hostinger VPS KVM2 — ver `DEPLOY.md` para el procedimiento completo
 - **Pago:** Por definir (Stripe o MercadoPago)
 
 ---
