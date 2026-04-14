@@ -7,6 +7,37 @@ Rama principal: `main` — disponible en ambas PCs y en el VPS.
 
 ---
 
+## Sincronización entre PCs — LEER ANTES DE EMPEZAR
+
+Este proyecto se trabaja desde **dos PCs distintas**. La rama activa es `main`.  
+**Nunca uses `master`** — esa rama quedó obsoleta en PC1.
+
+### Al empezar a trabajar (en cualquier PC):
+```bash
+git pull origin main
+```
+
+### Al terminar de trabajar (en cualquier PC):
+```bash
+git add -A
+git commit -m "descripción de lo que hiciste"
+git push origin main
+```
+
+### Si una PC no tiene remote configurado (caso nuevo o reinstalación):
+```bash
+git remote add origin https://github.com/cahdz41/pos-tienda.git
+git fetch origin
+git checkout -b main origin/main
+```
+
+### Notas importantes:
+- El error **"refusing to merge unrelated histories"** ocurre cuando una PC nunca estuvo conectada al remoto. Se resuelve con los comandos de arriba (no usar `--allow-unrelated-histories`).
+- Si hay archivos locales sin commitear antes de cambiar a `main`, hacer `git stash` primero y recuperarlos después con `git stash pop`.
+- Los warnings de **LF/CRLF** son normales en Windows y no afectan el código.
+
+---
+
 ## Stack
 - **Framework:** Next.js 16.2 (App Router, TypeScript, Tailwind)
 - **Base de datos:** Supabase (PostgreSQL + Auth + Realtime)
