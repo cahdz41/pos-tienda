@@ -1,56 +1,14 @@
-import { createServerClient } from '@supabase/ssr'
-import { NextResponse, type NextRequest } from 'next/server'
+// Next.js 16: el archivo se llama proxy.ts (middleware.ts está deprecado desde v16.0)
+// La función se llama proxy() no middleware()
+// La protección real de auth ocurre en el client-side layout (AuthContext).
+// Este proxy es minimal — solo para lógica server-side futura.
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
 
-export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  const user = session?.user ?? null
-
-  const { pathname } = request.nextUrl
-  const publicRoutes = ['/login']
-  const isPublicRoute = publicRoutes.includes(pathname)
-
-  if (!user && !isPublicRoute) {
-    const loginUrl = request.nextUrl.clone()
-    loginUrl.pathname = '/login'
-    return NextResponse.redirect(loginUrl)
-  }
-
-  if (user && pathname === '/login') {
-    const posUrl = request.nextUrl.clone()
-    posUrl.pathname = '/pos'
-    return NextResponse.redirect(posUrl)
-  }
-
-  return supabaseResponse
+export function proxy(request: NextRequest) {
+  return NextResponse.next()
 }
 
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|sw\\.js|manifest\\.webmanifest|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
+  matcher: ['/((?!_next|favicon.ico|login).*)'],
 }

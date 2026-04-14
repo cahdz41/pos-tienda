@@ -1,439 +1,338 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState } from 'react'
+import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
-import type { CartItem, Customer, SalePaymentMethod } from '@/types'
-import type { SaleReceipt } from './Receipt'
+import type { CartItem, Customer, Shift } from '@/types'
+import { Receipt, printReceipt, type ReceiptData } from './Receipt'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const withTimeout = (p: PromiseLike<any>, ms: number): Promise<any> =>
-  Promise.race([
-    Promise.resolve(p),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Sin respuesta del servidor (${ms / 1000}s). Intenta de nuevo.`)), ms)
-    ),
-  ])
+type Method = 'cash' | 'card'
+
+const QUICK_AMOUNTS = [50, 100, 200, 500, 1000]
+
+function fmt(n: number) {
+  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 interface Props {
   cart: CartItem[]
   total: number
+  activeShift: Shift
+  onSuccess: () => void
   onClose: () => void
-  onSuccess: (receipt: SaleReceipt) => void
 }
 
-const fmt = (n: number) => `$${n.toFixed(2)}`
+export default function PaymentModal({ cart, total, activeShift, onSuccess, onClose }: Props) {
+  const { user } = useAuth()
 
-const METHOD_CONFIG: Array<{ id: SalePaymentMethod; label: string; color: string }> = [
-  { id: 'cash',     label: 'Efectivo',      color: 'var(--success, #22C55E)' },
-  { id: 'card',     label: 'Tarjeta',        color: '#3B82F6' },
-  { id: 'transfer', label: 'Transferencia',  color: '#8B5CF6' },
-  { id: 'wallet',   label: 'Monedero',       color: 'var(--accent)' },
-  { id: 'credit',   label: 'Crédito',        color: '#818CF8' },
-]
-
-// Use a plain object instead of Set for React-friendly state updates
-type ActiveMethods = Partial<Record<SalePaymentMethod, boolean>>
-type Amounts = Record<SalePaymentMethod, string>
-
-export default function PaymentModal({ cart, total, onClose, onSuccess }: Props) {
-  const { user, profile } = useAuth()
-  const supabase = createClient()
-
-  // Customer search
-  const [customerQuery, setCustomerQuery] = useState('')
-  const [customerResults, setCustomerResults] = useState<Customer[]>([])
-  const [customer, setCustomer] = useState<Customer | null>(null)
-  const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Payment methods — plain object, no Set (avoids React stale-reference issues)
-  const [active, setActive] = useState<ActiveMethods>({ cash: true })
-  const [amounts, setAmounts] = useState<Amounts>({ cash: '', card: '', transfer: '', wallet: '', credit: '' })
-  const [mixedMode, setMixedMode] = useState(false)
-
+  // ── Métodos ───────────────────────────────────────────────────────────────
+  const [methods,    setMethods]    = useState<Set<Method>>(new Set(['cash']))
+  const [cashAmount, setCashAmount] = useState('')
   const [processing, setProcessing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [activeShiftId, setActiveShiftId] = useState<string | null>(null)
+  const [error,      setError]      = useState<string | null>(null)
+  const [success,    setSuccess]    = useState<ReceiptData | null>(null)
 
-  // ESC to close
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !processing) onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose, processing])
+  // ── Cliente + monedero ────────────────────────────────────────────────────
+  const [customerQuery,    setCustomerQuery]    = useState('')
+  const [customerResults,  setCustomerResults]  = useState<Customer[]>([])
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [walletAmount,     setWalletAmount]     = useState('')
 
-  // Load active shift
-  useEffect(() => {
-    supabase.from('shifts').select('id').eq('status', 'open')
-      .order('opened_at', { ascending: false }).limit(1).maybeSingle()
-      .then(({ data }: { data: { id: string } | null }) => { if (data) setActiveShiftId(data.id) })
-  }, [supabase])
-
-  // Search customers by WhatsApp or name
-  useEffect(() => {
-    if (searchRef.current) clearTimeout(searchRef.current)
-    const q = customerQuery.trim()
-    if (!q) { setCustomerResults([]); return }
-    searchRef.current = setTimeout(async () => {
-      let result = await supabase.from('customers').select('*')
-        .eq('active', true)
-        .or(`whatsapp.ilike.%${q}%,name.ilike.%${q}%`)
-        .order('name').limit(8)
-      if (result.error) {
-        result = await supabase.from('customers').select('*')
-          .eq('active', true).ilike('name', `%${q}%`).order('name').limit(8)
-      }
-      const results = (result.data as Customer[]) ?? []
-      setCustomerResults(results)
-      if (results.length === 1) {
-        setCustomer(results[0])
-        setCustomerQuery('')
-        setCustomerResults([])
-      }
-    }, 300)
-    return () => { if (searchRef.current) clearTimeout(searchRef.current) }
-  }, [customerQuery, supabase])
-
-  // When customer changes: auto-activate wallet if they have balance, remove if not
-  useEffect(() => {
-    const bal = customer?.loyalty_balance ?? 0
-    if (bal > 0) {
-      // Auto-activate wallet and pre-fill with min(balance, total)
-      setActive(prev => {
-        const next = { ...prev }
-        delete next.credit // credit is exclusive, clear it
-        next.wallet = true
-        return next
-      })
-      setAmounts(prev => ({ ...prev, wallet: Math.min(bal, total).toFixed(2), credit: '' }))
-    } else {
-      // Remove wallet if customer has no balance
-      setActive(prev => { const next = { ...prev }; delete next.wallet; return next })
-      setAmounts(prev => ({ ...prev, wallet: '' }))
-    }
-  }, [customer, total])
-
-  // Derived list of active method IDs (stable for the render)
-  const activeMethods = (Object.keys(active) as SalePaymentMethod[]).filter(k => !!active[k])
-
-  function toggleMixedMode() {
-    setMixedMode(prev => {
-      if (prev) {
-        // Saliendo de modo mixto: dejar solo un método principal activo
-        const main = (['cash', 'card', 'transfer'] as SalePaymentMethod[]).find(m => !!active[m]) ?? 'cash'
-        setActive(cur => {
-          const next: ActiveMethods = { [main]: true }
-          if (cur.wallet) next.wallet = true
-          return next
-        })
-        setAmounts(a => ({ ...a, cash: '', card: '', transfer: '', credit: '' }))
-      }
-      return !prev
-    })
+  // ── Búsqueda de clientes ──────────────────────────────────────────────────
+  async function searchCustomers(q: string) {
+    setCustomerQuery(q)
+    if (q.trim().length < 2) { setCustomerResults([]); return }
+    const supabase = createClient()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await (supabase as any)
+      .from('customers')
+      .select('*')
+      .ilike('full_name', `%${q.trim()}%`)
+      .limit(5)
+    setCustomerResults((data ?? []) as Customer[])
   }
 
-  function toggleMethod(m: SalePaymentMethod) {
-    // Crédito: exclusivo — limpia todo lo demás al activar; vuelve a efectivo al desactivar
-    if (m === 'credit') {
-      if (active.credit) {
-        setActive({ cash: true })
-        setAmounts(prev => ({ ...prev, credit: '' }))
-      } else {
-        setActive({ credit: true })
-        setAmounts(prev => ({ ...prev, credit: total.toFixed(2) }))
-      }
-      return
-    }
+  function selectCustomer(c: Customer) {
+    setSelectedCustomer(c)
+    setCustomerQuery(c.full_name)
+    setCustomerResults([])
+    setWalletAmount('')
+  }
 
-    // Monedero: siempre combinable, lógica propia
-    if (m === 'wallet') {
-      const isActive = !!active[m]
-      if (isActive && activeMethods.length <= 1) return
-      setActive(prev => {
-        const next = { ...prev }
-        delete next.credit
-        if (isActive) delete next.wallet
-        else next.wallet = true
-        return next
-      })
-      if (active.credit) setAmounts(prev => ({ ...prev, credit: '' }))
-      if (!active[m]) {
-        const bal = customer?.loyalty_balance ?? 0
-        if (bal > 0) setAmounts(prev => ({ ...prev, wallet: Math.min(bal, total).toFixed(2) }))
-      } else {
-        setAmounts(prev => ({ ...prev, wallet: '' }))
-      }
-      return
-    }
+  function clearCustomer() {
+    setSelectedCustomer(null)
+    setCustomerQuery('')
+    setCustomerResults([])
+    setWalletAmount('')
+  }
 
-    // Cash / card / transfer
-    if (!mixedMode) {
-      // Modo simple: un solo método principal, wallet puede coexistir
-      if (!!active[m]) return // ya está activo, no hacer nada
-      setActive(prev => {
-        const next: ActiveMethods = { [m]: true }
-        if (prev.wallet) next.wallet = true
-        return next
-      })
-      setAmounts(prev => ({ ...prev, cash: '', card: '', transfer: '', credit: '' }))
-      return
-    }
+  // ── Cálculos ──────────────────────────────────────────────────────────────
+  const walletUse      = Math.min(parseFloat(walletAmount) || 0, selectedCustomer?.loyalty_balance ?? 0, total)
+  const effectiveTotal = Math.max(0, total - walletUse)
+  const walletOnly     = walletUse >= total
 
-    // Modo mixto: multi-select libre
-    const isCurrentlyActive = !!active[m]
-    if (isCurrentlyActive && activeMethods.length <= 1) return
-    setActive(prev => {
-      const next = { ...prev }
-      delete next.credit
-      if (isCurrentlyActive) delete next[m]
-      else next[m] = true
+  const isMixed  = !walletOnly && methods.has('cash') && methods.has('card')
+  const cashOnly = !walletOnly && methods.has('cash') && !methods.has('card')
+  const cardOnly = !walletOnly && methods.has('card') && !methods.has('cash')
+
+  const cashPaid = parseFloat(cashAmount) || 0
+  const cardPaid = isMixed ? Math.max(0, effectiveTotal - cashPaid) : cardOnly ? effectiveTotal : 0
+  const change   = cashOnly ? Math.max(0, cashPaid - effectiveTotal) : 0
+
+  const canPay = (() => {
+    if (walletOnly)          return true
+    if (effectiveTotal <= 0) return true
+    if (isMixed)  return cashPaid > 0 && cashPaid < effectiveTotal
+    if (cashOnly) return cashPaid >= effectiveTotal
+    if (cardOnly) return true
+    return false
+  })()
+
+  function toggleMethod(m: Method) {
+    if (walletOnly) return
+    setMethods(prev => {
+      if (prev.has(m) && prev.size === 1) return prev
+      const next = new Set(prev)
+      next.has(m) ? next.delete(m) : next.add(m)
       return next
     })
-    if (active.credit) setAmounts(prev => ({ ...prev, credit: '' }))
-    if (isCurrentlyActive) setAmounts(prev => ({ ...prev, [m]: '' }))
+    setCashAmount('')
   }
 
-  function setAmount(m: SalePaymentMethod, val: string) {
-    setAmounts(prev => ({ ...prev, [m]: val }))
-  }
-
-  // Derived totals
-  const totalAssigned = activeMethods.reduce((sum, m) => sum + (parseFloat(amounts[m] || '0')), 0)
-  const cashAmt = parseFloat(amounts.cash || '0')
-  const change = !!active.cash && totalAssigned > total
-    ? Math.max(0, cashAmt - (total - (totalAssigned - cashAmt)))
-    : 0
-  const remaining = Math.max(0, total - totalAssigned + change)
-  const canConfirm = !processing && (
-    (!!active.credit && !!customer) ||
-    (!active.credit && Math.abs(totalAssigned - change - total) < 0.01)
-  )
-
-  function getSalePaymentMethod(): 'cash' | 'card' | 'credit' | 'transfer' | 'mixed' {
-    if (active.credit) return 'credit'
-    if (activeMethods.length === 1) return activeMethods[0] as 'cash' | 'card' | 'transfer'
-    return 'mixed'
-  }
-
-  const handleConfirm = async () => {
+  // ── Pagar ─────────────────────────────────────────────────────────────────
+  async function handlePay() {
+    if (!user || !canPay) return
     setProcessing(true)
     setError(null)
+
+    const supabase = createClient()
+    let saleId: string | null = null
+
+    const paymentMethod  = walletOnly ? 'cash' : isMixed ? 'mixed' : cashOnly ? 'cash' : 'card'
+    const amountPaid_db  = walletOnly ? total
+      : isMixed   ? cashPaid + cardPaid + walletUse
+      : cashOnly  ? cashPaid + walletUse
+      : total   // cardOnly
+    const changeGiven_db = cashOnly ? Math.max(0, cashPaid - effectiveTotal) : 0
+    // 3% por cada $1,000 acumulado en compras (rastreo con loyalty_spent)
+    const prevSpent      = selectedCustomer?.loyalty_spent ?? 0
+    const milestones     = Math.floor((prevSpent + total) / 1000) - Math.floor(prevSpent / 1000)
+    const loyaltyEarned  = selectedCustomer && milestones > 0 ? milestones * 1000 * 0.03 : 0
+
     try {
-      const expandedItems: Array<{ variant_id: string; quantity: number; unit_price: number; discount: number; subtotal: number }> = []
-      const customItemsNote: string[] = []
-      for (const i of cart) {
-        if (i.isCustom) {
-          // Artículo común: no se inserta en sale_items (no existe en DB), se guarda en notes
-          customItemsNote.push(`${i.quantity}x ${i.customName ?? 'Artículo'} $${i.unit_price.toFixed(2)}`)
-          continue
-        }
-        if (i.isCombo && i.comboComponents && i.comboComponents.length > 0) {
-          i.comboComponents.forEach((comp, idx) => {
-            const unitPrice = idx === 0 ? i.unit_price : 0
-            expandedItems.push({ variant_id: comp.variantId, quantity: i.quantity * comp.quantity, unit_price: unitPrice, discount: 0, subtotal: unitPrice * i.quantity })
-          })
-        } else {
-          expandedItems.push({ variant_id: i.variant.id, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount, subtotal: (i.unit_price - i.discount) * i.quantity })
-        }
+      // 1 — Insertar venta
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: sale, error: saleErr } = await (supabase as any)
+        .from('sales')
+        .insert({
+          shift_id:       activeShift.id,
+          cashier_id:     user.id,
+          customer_id:    selectedCustomer?.id ?? null,
+          total,
+          payment_method: paymentMethod,
+          amount_paid:    amountPaid_db,
+          change_given:   changeGiven_db,
+          status:         'completed',
+        })
+        .select('id')
+        .single()
+
+      if (saleErr) throw new Error(`Error al registrar venta: ${saleErr.message}`)
+      saleId = sale.id
+
+      // 2 — Insertar items
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: itemsErr } = await (supabase as any)
+        .from('sale_items')
+        .insert(
+          cart.map(item => ({
+            sale_id:    saleId,
+            variant_id: item.variant.id,
+            quantity:   item.quantity,
+            unit_price: item.unitPrice,
+            subtotal:   item.quantity * item.unitPrice,
+          }))
+        )
+
+      if (itemsErr) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any).from('sales').delete().eq('id', saleId)
+        throw new Error(`Error al guardar productos: ${itemsErr.message}`)
       }
 
-      const cashPaid = active.cash ? cashAmt : 0
-      const saleRow = {
-        total,
-        payment_method: getSalePaymentMethod(),
-        cashier_id: user?.id ?? null,
-        shift_id: activeShiftId,
-        customer_id: customer?.id ?? null,
-        amount_paid: cashPaid || total,
-        change_given: change,
-        discount: cart.reduce((acc, i) => acc + i.discount * i.quantity, 0),
-        notes: customItemsNote.length > 0 ? `Artículos comunes: ${customItemsNote.join(', ')}` : null,
-      }
-
-      const { data: sale, error: saleError } = await withTimeout(
-        supabase.from('sales').insert(saleRow).select('id').single(),
-        12_000
+      // 3 — Decrementar stock (no-fatal)
+      await Promise.allSettled(
+        cart.map(item =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (supabase as any)
+            .from('product_variants')
+            .update({ stock: Math.max(0, item.variant.stock - item.quantity) })
+            .eq('id', item.variant.id)
+        )
       )
 
-      if (saleError || !sale) throw new Error(saleError?.message ?? 'Error al crear la venta')
-
-      if (expandedItems.length > 0) {
-        const items = expandedItems.map(i => ({ ...i, sale_id: sale.id }))
-        const { error: itemsError } = await withTimeout(
-          supabase.from('sale_items').insert(items),
-          12_000
-        )
-        if (itemsError) throw new Error(itemsError.message)
+      // 4 — Actualizar monedero del cliente (no-fatal)
+      if (selectedCustomer) {
+        const newBalance = Math.max(0, selectedCustomer.loyalty_balance - walletUse + loyaltyEarned)
+        const newSpent   = selectedCustomer.loyalty_spent + total
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any)
+          .from('customers')
+          .update({ loyalty_balance: newBalance, loyalty_spent: newSpent })
+          .eq('id', selectedCustomer.id)
       }
 
-      // Decremento de stock — fire-and-forget, no bloquea el flujo
-      for (const item of expandedItems) {
-        supabase
-          .from('product_variants')
-          .select('stock')
-          .eq('id', item.variant_id)
-          .single()
-          .then(({ data: v }: { data: { stock: number } | null }) => {
-            if (!v) return
-            supabase.from('product_variants')
-              .update({ stock: Math.max(0, v.stock - item.quantity) })
-              .eq('id', item.variant_id)
-              .then(({ error }: { error: { message: string } | null }) => {
-                if (error) console.warn('[pos] stock update:', error.message)
-              })
-          })
-      }
-
-      const saleId = sale.id
-
-      // Loyalty math — aritmética pura, sin async
-      let loyaltyEarned = 0
-      let newLoyaltyBalance = customer?.loyalty_balance ?? 0
-      let newLoyaltySpent = customer?.loyalty_spent ?? 0
-      let walletUsed = 0
-
-      if (customer && !active.credit) {
-        walletUsed = active.wallet ? parseFloat(amounts.wallet || '0') : 0
-        const nonWalletPaid = total - walletUsed
-        const prevSpent = customer.loyalty_spent ?? 0
-        const newSpent = prevSpent + nonWalletPaid
-        const prevThresholds = Math.floor(prevSpent / 1000)
-        const newThresholds = Math.floor(newSpent / 1000)
-        loyaltyEarned = (newThresholds - prevThresholds) * 50
-        let newBalance = (customer.loyalty_balance ?? 0) - walletUsed + loyaltyEarned
-        if (newBalance < 0) newBalance = 0
-        newLoyaltyBalance = newBalance
-        newLoyaltySpent = newSpent
-      }
-
-      const loyaltyNextIn = newLoyaltySpent > 0 ? 1000 - (newLoyaltySpent % 1000) : 1000
-
-      // ✅ Éxito inmediato — no esperamos escrituras secundarias
-      onSuccess({
-        saleId,
-        date: new Date(),
-        cashierName: profile?.name ?? 'Cajero',
+      const receiptData: ReceiptData = {
         cart,
-        subtotal: cart.reduce((a, i) => a + i.unit_price * i.quantity, 0),
-        discount: cart.reduce((a, i) => a + i.discount * i.quantity, 0),
         total,
-        payments: activeMethods.map(m => ({ method: m, amount: parseFloat(amounts[m] || '0') })),
-        change,
-        customerName: customer?.name,
+        paymentMethod,
+        amountPaid:    amountPaid_db,
+        change:        changeGiven_db,
+        cashPaid:      methods.has('cash') && !walletOnly ? cashPaid : undefined,
+        cardPaid:      methods.has('card') && !walletOnly ? cardPaid : undefined,
+        walletPaid:    walletUse > 0 ? walletUse : undefined,
         loyaltyEarned: loyaltyEarned > 0 ? loyaltyEarned : undefined,
-        loyaltyBalance: customer ? newLoyaltyBalance : undefined,
-        loyaltyNextIn: customer && !active.credit ? loyaltyNextIn : undefined,
-      })
-
-      // 🔁 Fire-and-forget: pagos y lealtad (no bloquean el flujo de caja)
-      {
-        const paymentRows = activeMethods
-          .map(m => ({
-            sale_id: saleId,
-            method: m,
-            amount: parseFloat(amounts[m] || '0') - (m === 'cash' ? change : 0),
-          }))
-          .filter(r => r.amount > 0)
-
-        type PgResult = { error: { message: string } | null }
-
-        if (paymentRows.length > 0) {
-          supabase.from('sale_payments').insert(paymentRows)
-            .then((res: PgResult) => { if (res.error) console.warn('[pos] sale_payments:', res.error.message) })
-        }
-
-        if (customer && !active.credit) {
-          supabase.from('customers').update({
-            loyalty_spent: newLoyaltySpent,
-            loyalty_balance: newLoyaltyBalance,
-          }).eq('id', customer.id)
-            .then((res: PgResult) => { if (res.error) console.warn('[pos] customers update:', res.error.message) })
-
-          const txns: Array<{ customer_id: string; sale_id: string; type: string; amount: number }> = []
-          if (walletUsed > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'redeemed', amount: walletUsed })
-          if (loyaltyEarned > 0) txns.push({ customer_id: customer.id, sale_id: saleId, type: 'earned', amount: loyaltyEarned })
-          if (txns.length > 0) {
-            supabase.from('loyalty_transactions').insert(txns)
-              .then((res: PgResult) => { if (res.error) console.warn('[pos] loyalty_transactions:', res.error.message) })
-          }
-        }
+        date:          new Date(),
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al procesar el pago'
-      setError(msg)
-      // Timeout de red: el cliente Supabase quedó en estado colgado.
-      // No hay forma de recuperarlo sin reiniciar la página — reload automático.
-      if (msg.startsWith('Sin respuesta')) {
-        setTimeout(() => window.location.reload(), 3_000)
+      setSuccess(receiptData)
+
+      if (typeof window !== 'undefined' && localStorage.getItem('pos_autoprint') === 'true') {
+        printReceipt(receiptData)
       }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al procesar el pago.')
     } finally {
       setProcessing(false)
     }
   }
 
-  return (
-    <div className="pm-overlay">
-      <div className="pm-modal">
-        {/* Header */}
-        <div className="pm-header">
-          <div className="pm-header-left">
-            <h2 className="pm-title">Cobrar</h2>
-            <span className="pm-total-badge">{fmt(total)}</span>
+  // ── Pantalla de éxito ─────────────────────────────────────────────────────
+  if (success) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ background: 'rgba(0,0,0,0.85)', overflowY: 'auto' }}>
+        <div className="w-full rounded-2xl flex flex-col"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxWidth: '460px', margin: 'auto' }}>
+
+          <div className="flex items-center gap-3 px-5 py-4"
+            style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0"
+              style={{ background: '#0D2B0D', border: '2px solid #4CAF50' }}>
+              ✓
+            </div>
+            <div>
+              <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>Venta registrada</p>
+              <p className="text-xl font-black font-mono" style={{ color: 'var(--accent)' }}>
+                {fmt(total)}
+              </p>
+              {success.loyaltyEarned && (
+                <p className="text-xs mt-0.5" style={{ color: '#F0B429' }}>
+                  +{fmt(success.loyaltyEarned)} ganados en monedero
+                </p>
+              )}
+            </div>
           </div>
-          <button className="pm-close" onClick={onClose} disabled={processing}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
+
+          <div className="p-4">
+            <Receipt data={success} />
+          </div>
+
+          <div className="px-4 pb-4 flex gap-2">
+            <button onClick={() => printReceipt(success)}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+              style={{ background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)' }}>
+              Imprimir
+            </button>
+            <button onClick={() => { onSuccess(); onClose() }}
+              className="flex-1 py-3 rounded-xl text-sm font-bold"
+              style={{ background: 'var(--accent)', color: '#000' }}
+              autoFocus>
+              Nueva venta
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Modal de pago ─────────────────────────────────────────────────────────
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.85)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="w-full max-w-sm rounded-2xl flex flex-col overflow-hidden"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxHeight: '92vh' }}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 shrink-0"
+          style={{ borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Total a cobrar</p>
+            <p className="text-2xl font-black font-mono" style={{ color: 'var(--accent)' }}>
+              {fmt(total)}
+            </p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-sm"
+            style={{ background: 'var(--bg)', color: 'var(--text-muted)' }}>
+            ✕
           </button>
         </div>
 
-        <div className="pm-body">
-          {/* Customer search (optional) */}
-          <div className="pm-section">
-            <span className="pm-section-label">Cliente (opcional)</span>
-            {customer ? (
-              <div className="pm-customer-selected">
-                <div className="pm-customer-info">
-                  <span className="pm-customer-name">{customer.name}</span>
-                  <span className="pm-customer-wa">{customer.whatsapp ?? customer.phone ?? '—'}</span>
-                </div>
-                <div className="pm-customer-badges">
-                  {(customer.loyalty_balance ?? 0) > 0 && (
-                    <span className="pm-badge pm-badge--wallet">Monedero: {fmt(customer.loyalty_balance)}</span>
+        <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+
+          {/* ── Cliente (opcional) ──────────────────────────────── */}
+          <div>
+            <p className="text-xs font-medium mb-1.5" style={{ color: 'var(--text-muted)' }}>
+              Cliente (opcional)
+            </p>
+            {selectedCustomer ? (
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                style={{ background: 'var(--bg)', border: '1px solid var(--accent)' }}>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+                    {selectedCustomer.full_name}
+                  </p>
+                  {selectedCustomer.loyalty_balance > 0 && (
+                    <p className="text-xs mt-0.5" style={{ color: '#F0B429' }}>
+                      Monedero: {fmt(selectedCustomer.loyalty_balance)} disponible
+                    </p>
                   )}
-                  {customer.credit_limit > 0 && (
-                    <span className="pm-badge pm-badge--credit">Crédito disponible</span>
-                  )}
                 </div>
-                <button className="pm-customer-clear" onClick={() => { setCustomer(null); setCustomerQuery('') }} title="Quitar cliente">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
+                <button onClick={clearCustomer}
+                  className="w-6 h-6 rounded flex items-center justify-center text-xs"
+                  style={{ color: 'var(--text-muted)', background: 'var(--surface)' }}>
+                  ✕
                 </button>
               </div>
             ) : (
-              <div className="pm-customer-search">
+              <div className="relative">
                 <input
                   type="text"
                   value={customerQuery}
-                  onChange={e => setCustomerQuery(e.target.value)}
-                  placeholder="Buscar por WhatsApp o nombre…"
-                  className="pm-input"
+                  onChange={e => searchCustomers(e.target.value)}
+                  placeholder="Buscar cliente por nombre…"
+                  className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                  onBlur={e => {
+                    e.currentTarget.style.borderColor = 'var(--border)'
+                    setTimeout(() => setCustomerResults([]), 150)
+                  }}
                 />
                 {customerResults.length > 0 && (
-                  <div className="pm-dropdown">
-                    <div className="pm-dropdown-hint">Toca para seleccionar</div>
+                  <div className="absolute top-full left-0 right-0 mt-1 rounded-xl overflow-hidden z-10"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
                     {customerResults.map(c => (
-                      <button key={c.id} className="pm-dropdown-item" onClick={() => { setCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}>
-                        <div className="pm-dropdown-avatar">{c.name.charAt(0).toUpperCase()}</div>
-                        <div className="pm-dropdown-info">
-                          <span className="pm-dropdown-name">{c.name}</span>
-                          <span className="pm-dropdown-wa">{c.whatsapp ?? c.phone ?? '—'}</span>
-                        </div>
-                        {(c.loyalty_balance ?? 0) > 0 && <span className="pm-badge pm-badge--wallet">{fmt(c.loyalty_balance)}</span>}
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
-                          <polyline points="9 18 15 12 9 6"/>
-                        </svg>
+                      <button key={c.id}
+                        onMouseDown={() => selectCustomer(c)}
+                        className="w-full text-left px-3 py-2.5 text-sm"
+                        style={{ borderBottom: '1px solid var(--border)', color: 'var(--text)' }}>
+                        <span className="font-semibold">{c.full_name}</span>
+                        {c.loyalty_balance > 0 && (
+                          <span className="text-xs ml-2" style={{ color: '#F0B429' }}>
+                            {fmt(c.loyalty_balance)} monedero
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -442,409 +341,176 @@ export default function PaymentModal({ cart, total, onClose, onSuccess }: Props)
             )}
           </div>
 
-          {/* Method toggles */}
-          <div className="pm-section">
-            <div className="pm-section-header">
-              <span className="pm-section-label">Métodos de pago</span>
-              <button
-                className={`pm-mixed-toggle ${mixedMode ? 'pm-mixed-toggle--on' : ''}`}
-                onClick={toggleMixedMode}
-                type="button"
-              >
-                <span className={`pm-mixed-check ${mixedMode ? 'pm-mixed-check--on' : ''}`} />
-                Pago mixto
-              </button>
+          {/* ── Monedero ────────────────────────────────────────── */}
+          {selectedCustomer && selectedCustomer.loyalty_balance > 0 && (
+            <div className="rounded-xl p-3 flex flex-col gap-2"
+              style={{ background: '#1A1400', border: '1px solid #3D2E00' }}>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold" style={{ color: '#F0B429' }}>Monedero electrónico</p>
+                <span className="text-xs font-mono font-bold" style={{ color: '#F0B429' }}>
+                  {fmt(selectedCustomer.loyalty_balance)} disp.
+                </span>
+              </div>
+              <div className="flex gap-1.5">
+                {[
+                  { label: '25%', val: selectedCustomer.loyalty_balance * 0.25 },
+                  { label: '50%', val: selectedCustomer.loyalty_balance * 0.5 },
+                  { label: 'Todo', val: selectedCustomer.loyalty_balance },
+                ].map(s => (
+                  <button key={s.label}
+                    onClick={() => setWalletAmount(Math.min(s.val, total).toFixed(2))}
+                    className="flex-1 py-1 rounded-lg text-xs font-semibold"
+                    style={{ background: 'var(--bg)', color: '#F0B429', border: '1px solid #3D2E00' }}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold"
+                  style={{ color: '#F0B429' }}>$</span>
+                <input
+                  type="number" min="0" step="0.01"
+                  value={walletAmount}
+                  onChange={e => setWalletAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full rounded-lg pl-7 pr-3 py-2 text-sm outline-none font-mono"
+                  style={{ background: 'var(--bg)', border: '1px solid #3D2E00', color: '#F0B429' }}
+                />
+              </div>
+              {walletUse > 0 && (
+                <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+                  Resta:{' '}
+                  <strong style={{ color: effectiveTotal > 0 ? 'var(--text)' : '#4CAF50' }}>
+                    {effectiveTotal > 0 ? fmt(effectiveTotal) : 'Cubierto ✓'}
+                  </strong>
+                </p>
+              )}
             </div>
-            <div className="pm-method-grid">
-              {METHOD_CONFIG.filter(m => {
-                if (m.id === 'wallet') return !!customer && (customer.loyalty_balance ?? 0) > 0
-                if (m.id === 'credit') return !!customer && customer.credit_limit > 0
-                return true
-              }).map(m => (
-                <button
-                  key={m.id}
-                  className={`pm-method-btn ${!!active[m.id] ? 'pm-method-btn--active' : ''}`}
-                  style={!!active[m.id] ? { borderColor: m.color, color: m.color, background: `${m.color}14` } : {}}
-                  onClick={() => toggleMethod(m.id)}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
 
-          {/* Amount inputs per active method */}
-          <div className="pm-section pm-section--amounts">
-            {activeMethods.map(m => {
-              const cfg = METHOD_CONFIG.find(c => c.id === m)!
-              const isWallet = m === 'wallet'
-              const isCredit = m === 'credit'
-              return (
-                <div key={m} className="pm-amount-row">
-                  <span className="pm-amount-label" style={{ color: cfg.color }}>{cfg.label}</span>
-                  <div className="pm-amount-input-wrap" style={isWallet || isCredit ? { opacity: 0.7 } : {}}>
-                    <span className="pm-prefix">$</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.50"
-                      value={amounts[m]}
-                      onChange={e => !isWallet && !isCredit && setAmount(m, e.target.value)}
-                      readOnly={isWallet || isCredit}
-                      placeholder="0.00"
-                      className="pm-amount-input"
-                    />
-                  </div>
-                  {m === 'cash' && (
-                    <div className="pm-quick">
-                      {[50, 100, 200, 500].map(n => (
-                        <button key={n} className="pm-quick-btn" onClick={() => setAmount('cash', String(n))}>${n}</button>
-                      ))}
-                      <button className="pm-quick-btn" onClick={() => setAmount('cash', String(Math.ceil(remaining / 10) * 10))}>Exacto ↑</button>
-                    </div>
-                  )}
-                  {(m === 'card' || m === 'transfer') && (
-                    <div className="pm-quick">
-                      <button className="pm-quick-btn" onClick={() => setAmount(m, remaining.toFixed(2))}>Exacto</button>
-                    </div>
-                  )}
+          {/* ── Métodos (solo si monedero no cubre todo) ─────────── */}
+          {!walletOnly && effectiveTotal > 0 && (
+            <div>
+              <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-muted)' }}>
+                Método de pago {isMixed && <span style={{ color: 'var(--accent)' }}>— Mixto</span>}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {(['cash', 'card'] as Method[]).map(m => (
+                  <button key={m} onClick={() => toggleMethod(m)}
+                    className="py-2.5 rounded-xl text-sm font-semibold transition-all"
+                    style={{
+                      background: methods.has(m) ? 'var(--accent)' : 'var(--bg)',
+                      color: methods.has(m) ? '#000' : 'var(--text-muted)',
+                      border: `1px solid ${methods.has(m) ? 'var(--accent)' : 'var(--border)'}`,
+                    }}>
+                    {m === 'cash' ? '💵 Efectivo' : '💳 Tarjeta'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Efectivo ─────────────────────────────────────────── */}
+          {!walletOnly && methods.has('cash') && effectiveTotal > 0 && (
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                  {isMixed ? 'Monto en efectivo' : 'Monto recibido'}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold"
+                    style={{ color: 'var(--text-muted)' }}>$</span>
+                  <input
+                    type="number" min="0" step="0.01"
+                    value={cashAmount}
+                    onChange={e => setCashAmount(e.target.value)}
+                    placeholder="0.00"
+                    autoFocus={!selectedCustomer}
+                    className="w-full rounded-lg pl-8 pr-4 py-2.5 text-sm outline-none font-mono"
+                    style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  />
                 </div>
-              )
-            })}
-          </div>
+              </div>
 
-          {/* Total tracker */}
-          {!active.credit && (
-            <div className={`pm-tracker ${Math.abs(totalAssigned - change - total) < 0.01 ? 'pm-tracker--ok' : ''}`}>
-              <span>Asignado:</span>
-              <span className="pm-tracker-val">{fmt(totalAssigned - change)} / {fmt(total)}</span>
-              {change > 0 && <span className="pm-change">Cambio: {fmt(change)}</span>}
+              {cashOnly && (
+                <div className="flex flex-wrap gap-1.5">
+                  <button onClick={() => setCashAmount(effectiveTotal.toFixed(2))}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+                    style={{ background: 'var(--bg)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
+                    Exacto
+                  </button>
+                  {QUICK_AMOUNTS.filter(a => a >= effectiveTotal).slice(0, 4).map(a => (
+                    <button key={a} onClick={() => setCashAmount(String(a))}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+                      style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                      {fmt(a)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {isMixed && cashPaid > 0 && (
+                <div className="flex justify-between items-center p-3 rounded-xl"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+                    Resto en tarjeta
+                  </span>
+                  <span className="text-sm font-black font-mono" style={{ color: 'var(--accent)' }}>
+                    {fmt(cardPaid)}
+                  </span>
+                </div>
+              )}
+
+              {cashOnly && cashPaid > 0 && (
+                <div className="flex justify-between items-center p-3 rounded-xl"
+                  style={{
+                    background: change >= 0 ? '#0D2B0D' : '#2D1010',
+                    border: `1px solid ${change >= 0 ? '#2D4A2D' : '#4D1A1A'}`,
+                  }}>
+                  <span className="text-sm font-semibold" style={{ color: change >= 0 ? '#4CAF50' : '#FF6B6B' }}>
+                    {change >= 0 ? 'Cambio' : 'Faltan'}
+                  </span>
+                  <span className="text-lg font-black font-mono" style={{ color: change >= 0 ? '#4CAF50' : '#FF6B6B' }}>
+                    {fmt(Math.abs(change))}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
-          {active.credit && customer && (
-            <div className="pm-credit-info">
-              <div className="pm-credit-row">
-                <span>Límite de crédito</span><span>{fmt(customer.credit_limit)}</span>
-              </div>
-              <div className="pm-credit-row">
-                <span>Saldo actual</span><span className={customer.credit_balance > 0 ? 'pm-debt' : ''}>{fmt(customer.credit_balance)}</span>
-              </div>
-              <div className="pm-credit-row">
-                <span>Disponible</span><span>{fmt(Math.max(0, customer.credit_limit - customer.credit_balance))}</span>
-              </div>
+          {/* ── Solo tarjeta ─────────────────────────────────────── */}
+          {!walletOnly && cardOnly && (
+            <div className="p-4 rounded-xl text-center"
+              style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Cobrar con terminal</p>
+              <p className="text-2xl font-black mt-1 font-mono" style={{ color: 'var(--accent)' }}>
+                {fmt(effectiveTotal)}
+              </p>
             </div>
           )}
 
-          {error && (
-            <div className="pm-error">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
-              {error}
+          {/* ── Monedero cubre todo ───────────────────────────────── */}
+          {walletOnly && (
+            <div className="p-4 rounded-xl text-center"
+              style={{ background: '#1A1400', border: '1px solid #3D2E00' }}>
+              <p className="text-xs" style={{ color: '#F0B429' }}>Cubierto con monedero</p>
+              <p className="text-2xl font-black mt-1 font-mono" style={{ color: '#F0B429' }}>
+                {fmt(total)}
+              </p>
             </div>
           )}
-        </div>
 
-        {/* Actions */}
-        <div className="pm-actions">
-          <button className="pm-btn-cancel" onClick={onClose} disabled={processing}>Cancelar</button>
-          <button className="pm-btn-confirm" onClick={handleConfirm} disabled={!canConfirm}>
-            {processing ? (
-              <><span className="pm-spinner" />Procesando…</>
-            ) : (
-              <>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-                Confirmar cobro
-              </>
-            )}
+          {error && <p className="text-xs" style={{ color: '#FF6B6B' }}>{error}</p>}
+
+          <button
+            onClick={handlePay}
+            disabled={processing || !canPay}
+            className="w-full py-3 rounded-xl text-sm font-bold transition-all disabled:opacity-40"
+            style={{ background: 'var(--accent)', color: '#000' }}>
+            {processing ? 'Procesando…' : `Cobrar ${fmt(total)}`}
           </button>
         </div>
       </div>
-
-      <style>{`
-        .pm-overlay {
-          position: fixed; inset: 0;
-          background: rgba(0,0,0,0.7);
-          backdrop-filter: blur(4px);
-          display: flex; align-items: center; justify-content: center;
-          z-index: 100; padding: 20px;
-        }
-        .pm-modal {
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: 16px;
-          width: 100%; max-width: 460px;
-          max-height: 90vh;
-          display: flex; flex-direction: column;
-          box-shadow: 0 24px 64px rgba(0,0,0,0.6);
-          overflow: hidden;
-        }
-        .pm-header {
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 18px 20px;
-          border-bottom: 1px solid var(--border);
-          flex-shrink: 0;
-        }
-        .pm-header-left { display: flex; align-items: center; gap: 12px; }
-        .pm-title {
-          font-family: var(--font-syne, sans-serif);
-          font-size: 18px; font-weight: 700;
-          color: var(--text-primary); margin: 0;
-        }
-        .pm-total-badge {
-          font-family: var(--font-jetbrains, monospace);
-          font-size: 20px; font-weight: 700;
-          color: var(--accent);
-          background: var(--accent-glow);
-          padding: 4px 12px; border-radius: 8px;
-        }
-        .pm-close {
-          width: 28px; height: 28px;
-          display: flex; align-items: center; justify-content: center;
-          background: transparent; border: 1px solid var(--border);
-          border-radius: 6px; color: var(--text-muted); cursor: pointer;
-          transition: all 0.15s;
-        }
-        .pm-close:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
-        .pm-close:disabled { opacity: 0.4; cursor: not-allowed; }
-
-        .pm-body {
-          flex: 1; overflow-y: auto;
-          padding: 16px 20px;
-          display: flex; flex-direction: column; gap: 16px;
-        }
-        .pm-section { display: flex; flex-direction: column; gap: 8px; }
-        .pm-section-header { display: flex; align-items: center; justify-content: space-between; }
-        .pm-section-label {
-          font-size: 10px; font-weight: 600;
-          color: var(--text-muted);
-          text-transform: uppercase; letter-spacing: 0.08em;
-        }
-        .pm-mixed-toggle {
-          display: flex; align-items: center; gap: 6px;
-          font-size: 11px; font-weight: 500; color: var(--text-muted);
-          background: none; border: 1px solid var(--border);
-          border-radius: 6px; padding: 3px 8px; cursor: pointer;
-          transition: all 0.15s;
-        }
-        .pm-mixed-toggle--on { color: var(--accent); border-color: var(--accent); background: rgba(240,180,41,0.08); }
-        .pm-mixed-check {
-          width: 12px; height: 12px; border-radius: 3px;
-          border: 1px solid var(--border); background: transparent;
-          display: inline-flex; align-items: center; justify-content: center;
-          flex-shrink: 0; transition: all 0.15s;
-        }
-        .pm-mixed-check--on {
-          background: var(--accent); border-color: var(--accent);
-          background-image: url("data:image/svg+xml,%3Csvg width='8' height='8' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1.5 5L4 7.5L8.5 2.5' stroke='%230D0D12' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-          background-repeat: no-repeat; background-position: center;
-        }
-
-        /* Customer */
-        .pm-customer-search { position: relative; }
-        .pm-input {
-          width: 100%;
-          background: var(--bg-input); border: 1px solid var(--border);
-          border-radius: 8px; padding: 10px 12px;
-          font-size: 13px; color: var(--text-primary); outline: none;
-          transition: border-color 0.15s;
-        }
-        .pm-input:focus { border-color: var(--accent); }
-        .pm-input::placeholder { color: var(--text-muted); }
-
-        .pm-dropdown {
-          position: absolute; top: calc(100% + 4px); left: 0; right: 0;
-          background: var(--bg-card); border: 1px solid var(--border);
-          border-radius: 8px; overflow: hidden;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 10;
-        }
-        .pm-dropdown-hint {
-          padding: 5px 12px;
-          font-size: 10px; color: var(--text-muted);
-          border-bottom: 1px solid var(--border);
-          text-transform: uppercase; letter-spacing: 0.06em;
-        }
-        .pm-dropdown-item {
-          display: flex; align-items: center; gap: 10px;
-          width: 100%; padding: 10px 12px;
-          background: transparent; border: none;
-          cursor: pointer; text-align: left;
-          transition: background 0.1s;
-        }
-        .pm-dropdown-item:hover { background: var(--bg-hover); }
-        .pm-dropdown-avatar {
-          width: 28px; height: 28px; border-radius: 7px;
-          background: var(--accent-glow); border: 1px solid rgba(240,180,41,0.2);
-          color: var(--accent); font-family: var(--font-syne, sans-serif);
-          font-weight: 700; font-size: 11px;
-          display: flex; align-items: center; justify-content: center;
-          flex-shrink: 0;
-        }
-        .pm-dropdown-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-        .pm-dropdown-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-        .pm-dropdown-wa { font-size: 11px; color: var(--text-muted); }
-
-        .pm-customer-selected {
-          display: flex; align-items: center; gap: 10px;
-          background: var(--accent-glow);
-          border: 1px solid rgba(240,180,41,0.25);
-          border-radius: 8px; padding: 10px 12px;
-        }
-        .pm-customer-info { flex: 1; min-width: 0; }
-        .pm-customer-name { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); }
-        .pm-customer-wa { display: block; font-size: 11px; color: var(--text-muted); }
-        .pm-customer-badges { display: flex; gap: 6px; flex-wrap: wrap; }
-        .pm-customer-clear {
-          width: 26px; height: 26px;
-          display: flex; align-items: center; justify-content: center;
-          background: transparent; border: 1px solid transparent;
-          border-radius: 6px; color: var(--text-muted); cursor: pointer;
-          transition: all 0.15s; flex-shrink: 0;
-        }
-        .pm-customer-clear:hover { background: var(--danger-dim); color: var(--danger); border-color: rgba(239,68,68,0.3); }
-
-        .pm-badge {
-          font-size: 10px; font-weight: 600;
-          padding: 2px 7px; border-radius: 4px;
-          letter-spacing: 0.03em;
-        }
-        .pm-badge--wallet { background: rgba(240,180,41,0.15); color: var(--accent); border: 1px solid rgba(240,180,41,0.3); }
-        .pm-badge--credit { background: rgba(129,140,248,0.1); color: #818CF8; border: 1px solid rgba(129,140,248,0.3); }
-
-
-        /* Methods */
-        .pm-method-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-        .pm-method-btn {
-          padding: 7px 14px;
-          background: var(--bg-hover); border: 1px solid var(--border);
-          border-radius: 7px; font-size: 12px; font-weight: 600;
-          color: var(--text-secondary); cursor: pointer;
-          transition: all 0.15s;
-        }
-        .pm-method-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
-        .pm-method-btn--active { font-weight: 700; }
-
-        /* Amount inputs */
-        .pm-section--amounts { gap: 10px; }
-        .pm-amount-row { display: flex; flex-direction: column; gap: 6px; }
-        .pm-amount-label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
-        .pm-amount-input-wrap {
-          display: flex; align-items: center;
-          background: var(--bg-input); border: 1px solid var(--border);
-          border-radius: 8px; overflow: hidden;
-          transition: border-color 0.15s;
-        }
-        .pm-amount-input-wrap:focus-within { border-color: var(--accent); }
-        .pm-prefix {
-          padding: 0 12px;
-          font-family: var(--font-jetbrains, monospace); font-size: 15px;
-          color: var(--text-muted); border-right: 1px solid var(--border);
-        }
-        .pm-amount-input {
-          flex: 1; background: transparent; border: none; outline: none;
-          padding: 10px 12px;
-          font-family: var(--font-jetbrains, monospace);
-          font-size: 20px; font-weight: 600; color: var(--text-primary);
-        }
-        .pm-quick { display: flex; gap: 5px; flex-wrap: wrap; }
-        .pm-quick-btn {
-          padding: 5px 10px;
-          background: var(--bg-hover); border: 1px solid var(--border);
-          border-radius: 6px; font-size: 11px;
-          font-family: var(--font-jetbrains, monospace);
-          color: var(--text-secondary); cursor: pointer;
-          transition: all 0.15s;
-        }
-        .pm-quick-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-        /* Tracker */
-        .pm-tracker {
-          display: flex; align-items: center; gap: 10px;
-          padding: 10px 14px;
-          background: rgba(239,68,68,0.08);
-          border: 1px solid rgba(239,68,68,0.25);
-          border-radius: 8px;
-          font-size: 13px; color: var(--text-secondary);
-          transition: all 0.2s;
-        }
-        .pm-tracker--ok {
-          background: rgba(34,197,94,0.08);
-          border-color: rgba(34,197,94,0.25);
-        }
-        .pm-tracker-val {
-          flex: 1;
-          font-family: var(--font-jetbrains, monospace);
-          font-weight: 700; color: var(--text-primary);
-        }
-        .pm-change {
-          font-family: var(--font-jetbrains, monospace);
-          font-size: 12px; color: var(--success, #22C55E); font-weight: 600;
-        }
-
-        /* Credit info */
-        .pm-credit-info {
-          background: var(--bg-surface); border: 1px solid var(--border);
-          border-radius: 8px; padding: 12px 14px;
-          display: flex; flex-direction: column; gap: 6px;
-        }
-        .pm-credit-row {
-          display: flex; justify-content: space-between;
-          font-size: 12px; color: var(--text-secondary);
-        }
-        .pm-credit-row span:last-child {
-          font-family: var(--font-jetbrains, monospace);
-          font-weight: 600; color: var(--text-primary);
-        }
-        .pm-debt { color: var(--danger, #EF4444) !important; }
-
-        /* Error */
-        .pm-error {
-          display: flex; align-items: center; gap: 8px;
-          background: var(--danger-dim, rgba(239,68,68,0.1));
-          border: 1px solid rgba(239,68,68,0.3);
-          border-radius: 8px; padding: 10px 12px;
-          font-size: 13px; color: var(--danger, #EF4444);
-        }
-
-        /* Actions */
-        .pm-actions {
-          display: flex; gap: 10px;
-          padding: 16px 20px;
-          border-top: 1px solid var(--border);
-          flex-shrink: 0;
-        }
-        .pm-btn-cancel {
-          flex: 1; padding: 12px;
-          background: transparent; border: 1px solid var(--border);
-          border-radius: 8px; font-size: 13px; font-weight: 600;
-          color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
-        }
-        .pm-btn-cancel:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
-        .pm-btn-cancel:disabled { opacity: 0.4; cursor: not-allowed; }
-        .pm-btn-confirm {
-          flex: 2; padding: 12px;
-          background: var(--accent); border: none;
-          border-radius: 8px;
-          font-family: var(--font-syne, sans-serif);
-          font-size: 14px; font-weight: 700; color: #0D0D12;
-          cursor: pointer;
-          display: flex; align-items: center; justify-content: center; gap: 8px;
-          transition: all 0.15s;
-        }
-        .pm-btn-confirm:hover:not(:disabled) { background: #F5C233; transform: translateY(-1px); }
-        .pm-btn-confirm:disabled { background: var(--text-muted); cursor: not-allowed; opacity: 0.5; transform: none; }
-        .pm-spinner {
-          width: 14px; height: 14px;
-          border: 2px solid rgba(13,13,18,0.3);
-          border-top-color: #0D0D12;
-          border-radius: 50%;
-          animation: pm-spin 0.7s linear infinite;
-        }
-        @keyframes pm-spin { to { transform: rotate(360deg); } }
-      `}</style>
     </div>
   )
 }

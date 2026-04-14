@@ -1,821 +1,417 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase'
 
-const fmt = (n: number) =>
-  '$' + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+type Period = 'today' | '7days' | 'month' | '30days'
 
-const fmtPct = (n: number) => n.toFixed(2) + '%'
+interface SaleRow {
+  id: string
+  total: number
+  payment_method: string
+  created_at: string
+}
 
-type Period = 'today' | 'week' | 'month' | 'last30'
+interface ItemRow {
+  sale_id: string
+  quantity: number
+  subtotal: number
+  product_variants: {
+    cost_price: number
+    products: { name: string; category: string | null } | null
+  } | null
+}
 
-const PERIODS: { key: Period; label: string }[] = [
-  { key: 'today', label: 'Hoy' },
-  { key: 'week', label: '7 días' },
-  { key: 'month', label: 'Este mes' },
-  { key: 'last30', label: '30 días' },
-]
+function fmt(n: number) {
+  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
-// Distinct colors for department segments
-const DEPT_COLORS = [
-  '#F0B429', '#10B981', '#3B82F6', '#8B5CF6',
-  '#EF4444', '#F59E0B', '#06B6D4', '#EC4899', '#6B7280', '#84CC16',
-]
-
-function getPeriodDates(p: Period): { start: Date; end: Date } {
+function getStart(period: Period): Date {
   const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const endOfToday = new Date(today.getTime() + 86400000 - 1)
-  if (p === 'today') return { start: today, end: endOfToday }
-  if (p === 'week') {
-    const s = new Date(today); s.setDate(today.getDate() - 6)
-    return { start: s, end: endOfToday }
+  switch (period) {
+    case 'today':  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    case '7days':  return new Date(Date.now() - 7  * 86_400_000)
+    case 'month':  return new Date(now.getFullYear(), now.getMonth(), 1)
+    case '30days': return new Date(Date.now() - 30 * 86_400_000)
   }
-  if (p === 'month') return { start: new Date(today.getFullYear(), today.getMonth(), 1), end: endOfToday }
-  const s = new Date(today); s.setDate(today.getDate() - 29)
-  return { start: s, end: endOfToday }
 }
 
-interface DaySale { date: string; label: string; total: number; count: number }
-interface TopProduct { name: string; brand: string | null; flavor: string | null; units: number; revenue: number }
-interface DeptStat {
-  name: string
-  revenue: number
-  cost: number
-  profit: number
-  units: number
-}
-interface Stats {
-  totalRevenue: number
-  totalCost: number
-  totalProfit: number
-  profitMargin: number
-  totalTransactions: number
-  avgTicket: number
-  cashTotal: number
-  cardTotal: number
-  creditTotal: number
-  daySales: DaySale[]
-  topProducts: TopProduct[]
-  deptStats: DeptStat[]
-}
+// ── Gráfica de barras SVG ─────────────────────────────────────────────────
 
-/* ─── Bar Chart ─── */
-function BarChart({ data }: { data: DaySale[] }) {
-  const [hov, setHov] = useState<number | null>(null)
-  const max = Math.max(...data.map(d => d.total), 1)
-  const W = 560, H = 130, gap = 3
-  const bw = data.length > 0 ? Math.max(4, Math.floor((W - gap * (data.length + 1)) / data.length)) : 20
+const CW      = 500
+const CH      = 150
+const PAD_TOP = 36   // espacio para tooltip de 2 líneas
+const PAD_BOT = 20
 
-  if (!data.length) return <div className="empty-state">Sin datos en este período</div>
+interface ChartBar { label: string; revenue: number; profit: number }
+
+function BarChart({ data }: { data: ChartBar[] }) {
+  const [hovered, setHovered] = useState<number | null>(null)
+
+  if (data.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-24"
+        style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+        Sin ventas en el período
+      </div>
+    )
+  }
+
+  const maxVal = Math.max(...data.map(d => d.revenue), 1)
+  const n      = data.length
+  const barW   = Math.max(6, (CW - 20) / n * 0.6)
+  const gap    = (CW - 20 - barW * n) / (n + 1)
+  const totalH = CH + PAD_TOP + PAD_BOT
+  const step   = n <= 15 ? 1 : Math.ceil(n / 10)
 
   return (
-    <div style={{ position: 'relative' }}>
-      <svg viewBox={`0 0 ${W} ${H + 28}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-        {[0.25, 0.5, 0.75, 1].map(f => (
-          <line key={f} x1={0} y1={H * (1 - f)} x2={W} y2={H * (1 - f)}
-            stroke="#2A2A3A" strokeWidth="1" />
-        ))}
-        {data.map((d, i) => {
-          const bh = Math.max(3, (d.total / max) * H)
-          const x = gap + i * (bw + gap)
-          const isHov = hov === i
-          const skipLabel = data.length > 14 && i % Math.ceil(data.length / 14) !== 0
-          return (
-            <g key={d.date} onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)}>
-              <rect x={x} y={H - bh} width={bw} height={bh}
-                fill={isHov ? '#F0B429' : 'rgba(240,180,41,0.5)'} rx="2"
-                style={{ transition: 'fill 0.1s', cursor: 'default' }} />
-              {!skipLabel && (
-                <text x={x + bw / 2} y={H + 17} textAnchor="middle"
-                  fill={isHov ? '#F0F0F8' : '#5A5A72'}
-                  fontSize={data.length > 20 ? 8 : 9}>
-                  {data.length <= 10 ? d.label : d.date.slice(8)}
+    <svg viewBox={`0 0 ${CW} ${totalH}`} style={{ width: '100%', height: 'auto' }}>
+      {data.map((d, i) => {
+        const barH  = Math.max(2, (d.revenue / maxVal) * CH)
+        const x     = 10 + gap + i * (barW + gap)
+        const y     = PAD_TOP + CH - barH
+        const cx    = x + barW / 2
+        const isHov = hovered === i
+
+        return (
+          <g key={i}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered(null)}>
+            {/* Área hover */}
+            <rect x={x - gap / 2} y={PAD_TOP} width={barW + gap} height={CH}
+              fill="transparent" style={{ cursor: 'default' }} />
+            {/* Barra */}
+            <rect x={x} y={y} width={barW} height={barH} rx={2}
+              style={{ fill: isHov ? 'var(--accent)' : '#7A6800', transition: 'fill 0.1s' }} />
+            {/* Etiqueta de día */}
+            {i % step === 0 && (
+              <text x={cx} y={PAD_TOP + CH + PAD_BOT - 2} textAnchor="middle"
+                style={{ fontSize: n > 20 ? 6 : 8, fill: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                {d.label}
+              </text>
+            )}
+            {/* Tooltip: venta (ámbar) + ganancia (verde) */}
+            {isHov && (
+              <>
+                <text x={cx} y={y - 14} textAnchor="middle"
+                  style={{ fontSize: 9, fontWeight: 'bold', fontFamily: 'monospace', fill: 'var(--accent)' }}>
+                  {fmt(d.revenue)}
                 </text>
-              )}
-            </g>
-          )
-        })}
-        <line x1={0} y1={H} x2={W} y2={H} stroke="#2A2A3A" strokeWidth="1" />
-      </svg>
-      {hov !== null && data[hov] && (
-        <div style={{
-          position: 'absolute',
-          bottom: 32,
-          left: `${Math.min(80, Math.max(10, (hov / data.length) * 100))}%`,
-          transform: 'translateX(-50%)',
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-          padding: '6px 10px',
-          pointerEvents: 'none',
-          whiteSpace: 'nowrap',
-          zIndex: 10,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-        }}>
-          <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>{data[hov].label}</div>
-          <div style={{ color: 'var(--accent)', fontFamily: 'var(--font-jetbrains)', fontSize: 13, fontWeight: 600 }}>
-            {fmt(data[hov].total)}
-          </div>
-          <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>
-            {data[hov].count} venta{data[hov].count !== 1 ? 's' : ''}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ─── Payment Breakdown ─── */
-function PaymentBreakdown({ cash, card, credit, total }: {
-  cash: number; card: number; credit: number; total: number
-}) {
-  const items = [
-    { label: 'Efectivo', value: cash, color: 'var(--success)' },
-    { label: 'Tarjeta', value: card, color: 'var(--info)' },
-    { label: 'Crédito', value: credit, color: 'var(--accent)' },
-  ]
-  if (total === 0) return <div className="empty-state">Sin ventas en este período</div>
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {items.map(item => {
-        const pct = total > 0 ? (item.value / total) * 100 : 0
-        return (
-          <div key={item.label}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5, alignItems: 'baseline' }}>
-              <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{item.label}</span>
-              <div>
-                <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-jetbrains)', fontSize: 13, fontWeight: 500 }}>
-                  {fmt(item.value)}
-                </span>
-                <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 6 }}>
-                  {pct.toFixed(0)}%
-                </span>
-              </div>
-            </div>
-            <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{
-                width: `${pct}%`, height: '100%', background: item.color, borderRadius: 3,
-                transition: 'width 0.6s cubic-bezier(0.34,1.56,0.64,1)',
-              }} />
-            </div>
-          </div>
+                <text x={cx} y={y - 3} textAnchor="middle"
+                  style={{ fontSize: 8, fontFamily: 'monospace', fill: '#4CAF50' }}>
+                  {fmt(d.profit)}
+                </text>
+              </>
+            )}
+          </g>
         )
       })}
-    </div>
-  )
-}
-
-/* ─── Donut Chart ─── */
-function DonutChart({ segments }: { segments: { value: number; color: string; label: string }[] }) {
-  const [hov, setHov] = useState<number | null>(null)
-  const r = 36, cx = 50, cy = 50
-  const C = 2 * Math.PI * r
-  const total = segments.reduce((a, s) => a + s.value, 0)
-  if (!total) return null
-
-  let cumulative = 0
-  return (
-    <svg viewBox="0 0 100 100" style={{ width: '100%', maxWidth: 180, height: 'auto', display: 'block' }}>
-      {segments.map((seg, i) => {
-        const fraction = seg.value / total
-        const dash = fraction * C
-        const rotation = -90 + (cumulative / total) * 360
-        cumulative += seg.value
-        return (
-          <circle key={i} cx={cx} cy={cy} r={r}
-            fill="none"
-            stroke={hov === i ? '#fff' : seg.color}
-            strokeWidth={hov === i ? 20 : 17}
-            strokeDasharray={`${dash} ${C - dash}`}
-            transform={`rotate(${rotation}, ${cx}, ${cy})`}
-            style={{ transition: 'stroke-width 0.15s', cursor: 'default' }}
-            onMouseEnter={() => setHov(i)}
-            onMouseLeave={() => setHov(null)}
-          />
-        )
-      })}
-      {/* Center hole */}
-      <circle cx={cx} cy={cy} r={r - 10} fill="var(--bg-surface)" />
-      {/* Center label */}
-      {hov !== null ? (
-        <>
-          <text x={cx} y={cy - 3} textAnchor="middle" fill="#F0F0F8" fontSize="7" fontWeight="600">
-            {((segments[hov].value / total) * 100).toFixed(0)}%
-          </text>
-          <text x={cx} y={cy + 7} textAnchor="middle" fill="#5A5A72" fontSize="5">
-            {segments[hov].label.length > 10 ? segments[hov].label.slice(0, 10) + '…' : segments[hov].label}
-          </text>
-        </>
-      ) : (
-        <text x={cx} y={cy + 3} textAnchor="middle" fill="#5A5A72" fontSize="6">
-          {segments.length} depts
-        </text>
-      )}
     </svg>
   )
 }
 
-/* ─── Department Section ─── */
-function DepartmentSection({ depts, totalRevenue }: { depts: DeptStat[]; totalRevenue: number }) {
-  const [view, setView] = useState<'ventas' | 'ganancia'>('ventas')
-  if (!depts.length) return <div className="empty-state">Sin datos de departamentos</div>
+// ── Barra horizontal ──────────────────────────────────────────────────────
 
-  const maxRevenue = depts[0]?.revenue ?? 1
-  const maxProfit = Math.max(...depts.map(d => d.profit), 1)
-  const segments = depts.map((d, i) => ({ value: d.revenue, color: DEPT_COLORS[i % DEPT_COLORS.length], label: d.name }))
-
-  return (
-    <div className="dept-wrap">
-      {/* Donut + Legend */}
-      <div className="dept-chart-col">
-        <DonutChart segments={segments} />
-        <div className="dept-legend">
-          {depts.map((d, i) => (
-            <div key={d.name} className="legend-item">
-              <span className="legend-dot" style={{ background: DEPT_COLORS[i % DEPT_COLORS.length] }} />
-              <span className="legend-name">{d.name}</span>
-              <span className="legend-val">{fmt(d.revenue)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="dept-table-col">
-        <div className="view-toggle">
-          <button className={`vt-btn${view === 'ventas' ? ' vt-btn--on' : ''}`} onClick={() => setView('ventas')}>
-            Ventas
-          </button>
-          <button className={`vt-btn${view === 'ganancia' ? ' vt-btn--on' : ''}`} onClick={() => setView('ganancia')}>
-            Ganancia
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
-          {depts.map((d, i) => {
-            const isGanancia = view === 'ganancia'
-            const value = isGanancia ? d.profit : d.revenue
-            const max = isGanancia ? maxProfit : maxRevenue
-            const pct = totalRevenue > 0 ? (d.revenue / totalRevenue) * 100 : 0
-            const margin = d.revenue > 0 ? (d.profit / d.revenue) * 100 : 0
-            return (
-              <div key={d.name} className="dept-row">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span className="legend-dot" style={{ background: DEPT_COLORS[i % DEPT_COLORS.length], flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>{d.name}</span>
-                  <span style={{ fontFamily: 'var(--font-jetbrains)', fontSize: 12, color: isGanancia ? 'var(--success)' : 'var(--text-primary)', fontWeight: 600 }}>
-                    {fmt(value)}
-                  </span>
-                  {isGanancia && (
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 38, textAlign: 'right' }}>
-                      {fmtPct(margin)}
-                    </span>
-                  )}
-                  {!isGanancia && (
-                    <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 32, textAlign: 'right' }}>
-                      {pct.toFixed(0)}%
-                    </span>
-                  )}
-                </div>
-                <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginLeft: 18 }}>
-                  <div style={{
-                    width: `${max > 0 ? (value / max) * 100 : 0}%`,
-                    height: '100%',
-                    background: isGanancia ? 'var(--success)' : DEPT_COLORS[i % DEPT_COLORS.length],
-                    borderRadius: 2,
-                    transition: 'width 0.5s cubic-bezier(0.34,1.56,0.64,1)',
-                  }} />
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ─── Top Products Table ─── */
-function TopProductsTable({ products }: { products: TopProduct[] }) {
-  const maxRev = products[0]?.revenue ?? 1
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th className="tbl-th" style={{ width: 32, textAlign: 'center' }}>#</th>
-            <th className="tbl-th">Producto</th>
-            <th className="tbl-th" style={{ textAlign: 'right' }}>Unidades</th>
-            <th className="tbl-th" style={{ textAlign: 'right' }}>Ingresos</th>
-            <th className="tbl-th" style={{ width: 120 }}>Participación</th>
-          </tr>
-        </thead>
-        <tbody>
-          {products.map((p, i) => (
-            <tr key={i} className="tbl-row">
-              <td style={{
-                textAlign: 'center',
-                color: i < 3 ? 'var(--accent)' : 'var(--text-muted)',
-                fontWeight: i < 3 ? 700 : 400,
-                fontSize: 12,
-              }}>
-                {i + 1}
-              </td>
-              <td>
-                <div style={{ fontWeight: 500, color: 'var(--text-primary)', fontSize: 13 }}>
-                  {p.name}{p.flavor ? ` — ${p.flavor}` : ''}
-                </div>
-                {p.brand && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{p.brand}</div>}
-              </td>
-              <td style={{ textAlign: 'right', fontFamily: 'var(--font-jetbrains)', fontSize: 13, color: 'var(--text-secondary)' }}>
-                {p.units}
-              </td>
-              <td style={{ textAlign: 'right', fontFamily: 'var(--font-jetbrains)', fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>
-                {fmt(p.revenue)}
-              </td>
-              <td style={{ paddingRight: 8 }}>
-                <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{
-                    width: `${(p.revenue / maxRev) * 100}%`, height: '100%',
-                    background: i === 0 ? 'var(--accent)' : 'rgba(240,180,41,0.4)',
-                    borderRadius: 2,
-                  }} />
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-/* ─── KPI Card ─── */
-function KpiCard({ label, value, sub, accent, green }: {
-  label: string; value: string; sub?: string; accent?: boolean; green?: boolean
+function HBar({ label, value, maxVal, color, suffix = '' }: {
+  label: string; value: number; maxVal: number; color: string; suffix?: string
 }) {
+  const pct = maxVal > 0 ? (value / maxVal) * 100 : 0
   return (
-    <div className={`kpi-card${accent ? ' kpi-card--accent' : green ? ' kpi-card--green' : ''}`}>
-      <div className="kpi-label">{label}</div>
-      <div className="kpi-value">{value}</div>
-      {sub && <div className="kpi-sub">{sub}</div>}
+    <div className="flex items-center gap-3">
+      <span className="text-xs shrink-0 w-24 truncate text-right" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </span>
+      <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <span className="text-xs font-mono shrink-0 w-20 text-right" style={{ color: 'var(--text)' }}>
+        {suffix}
+      </span>
     </div>
   )
 }
 
-/* ─── Page ─── */
+// ── Página ────────────────────────────────────────────────────────────────
+
+const PERIODS: { key: Period; label: string }[] = [
+  { key: 'today',  label: 'Hoy'      },
+  { key: '7days',  label: '7 días'   },
+  { key: 'month',  label: 'Este mes' },
+  { key: '30days', label: '30 días'  },
+]
+
+const METHOD_META: Record<string, { label: string; color: string }> = {
+  cash:   { label: 'Efectivo', color: '#4CAF50' },
+  card:   { label: 'Tarjeta',  color: '#2196F3' },
+  mixed:  { label: 'Mixto',    color: '#9C27B0' },
+  credit: { label: 'Crédito',  color: '#FF6B6B' },
+}
+
 export default function ReportesPage() {
-  const [period, setPeriod] = useState<Period>('week')
-  const [stats, setStats] = useState<Stats | null>(null)
+  const [period,  setPeriod]  = useState<Period>('7days')
   const [loading, setLoading] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
+  const [sales,   setSales]   = useState<SaleRow[]>([])
+  const [items,   setItems]   = useState<ItemRow[]>([])
 
-  const load = useCallback(async () => {
+  useEffect(() => { loadData() }, [period])
+
+  async function loadData() {
+    setLoading(true)
     const supabase = createClient()
-    setLoading(true); setErr(null)
-    const { start, end } = getPeriodDates(period)
+    const start    = getStart(period)
 
-    try {
-      // 1. Sales in period
-      const { data: sales, error: sErr } = await supabase
-        .from('sales')
-        .select('id, created_at, total, payment_method')
-        .gte('created_at', start.toISOString())
-        .lte('created_at', end.toISOString())
-        .order('created_at')
-      if (sErr) throw sErr
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: salesData } = await (supabase as any)
+      .from('sales')
+      .select('id, total, payment_method, created_at')
+      .eq('status', 'completed')
+      .gte('created_at', start.toISOString())
+      .order('created_at')
 
+    const salesList = (salesData ?? []) as SaleRow[]
+    setSales(salesList)
+
+    if (salesList.length > 0) {
+      const ids = salesList.map(s => s.id)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const totalRevenue = sales?.reduce((a: number, s: any) => a + s.total, 0) ?? 0
-      const totalTransactions = sales?.length ?? 0
-      const avgTicket = totalTransactions > 0 ? totalRevenue / totalTransactions : 0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cashTotal = sales?.filter((s: any) => s.payment_method === 'cash').reduce((a: number, s: any) => a + s.total, 0) ?? 0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cardTotal = sales?.filter((s: any) => s.payment_method === 'card').reduce((a: number, s: any) => a + s.total, 0) ?? 0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const creditTotal = sales?.filter((s: any) => s.payment_method === 'credit').reduce((a: number, s: any) => a + s.total, 0) ?? 0
-
-      // Daily grouping
-      const dayMap = new Map<string, { total: number; count: number }>()
-      for (const s of sales ?? []) {
-        const key = new Date(s.created_at).toLocaleDateString('sv-SE')
-        const ex = dayMap.get(key) ?? { total: 0, count: 0 }
-        dayMap.set(key, { total: ex.total + s.total, count: ex.count + 1 })
-      }
-      const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
-      const daySales: DaySale[] = []
-      const cur = new Date(start)
-      while (cur <= end) {
-        const key = cur.toLocaleDateString('sv-SE')
-        const d = dayMap.get(key) ?? { total: 0, count: 0 }
-        daySales.push({ date: key, label: `${DAY_NAMES[cur.getDay()]} ${cur.getDate()}`, ...d })
-        cur.setDate(cur.getDate() + 1)
-      }
-
-      // 2. Sale items — includes cost_price and category for profit/dept calculations
-      let topProducts: TopProduct[] = []
-      let deptStats: DeptStat[] = []
-      let totalCost = 0
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const saleIds = (sales ?? []).map((s: any) => s.id)
-
-      if (saleIds.length > 0) {
-        const { data: items, error: iErr } = await supabase
-          .from('sale_items')
-          .select('quantity, subtotal, variant:product_variants!inner(cost_price, flavor, product:products!inner(name, brand, category))')
-          .in('sale_id', saleIds)
-        if (iErr) throw iErr
-
-        const pMap = new Map<string, TopProduct>()
-        const dMap = new Map<string, DeptStat>()
-
-        for (const item of items ?? []) {
-          const v = item.variant as unknown as {
-            cost_price: number
-            flavor: string | null
-            product: { name: string; brand: string | null; category: string | null }
-          }
-          const revenue = item.subtotal ?? 0
-          const cost = (v.cost_price ?? 0) * item.quantity
-          totalCost += cost
-
-          // Top products aggregate
-          const pKey = `${v.product.name}||${v.flavor ?? ''}`
-          const pEx = pMap.get(pKey) ?? { name: v.product.name, brand: v.product.brand, flavor: v.flavor, units: 0, revenue: 0 }
-          pMap.set(pKey, { ...pEx, units: pEx.units + item.quantity, revenue: pEx.revenue + revenue })
-
-          // Department aggregate
-          const dept = v.product.category ?? 'Sin categoría'
-          const dEx = dMap.get(dept) ?? { name: dept, revenue: 0, cost: 0, profit: 0, units: 0 }
-          dMap.set(dept, {
-            ...dEx,
-            revenue: dEx.revenue + revenue,
-            cost: dEx.cost + cost,
-            profit: dEx.profit + (revenue - cost),
-            units: dEx.units + item.quantity,
-          })
-        }
-
-        topProducts = [...pMap.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 10)
-        deptStats = [...dMap.values()].sort((a, b) => b.revenue - a.revenue)
-      }
-
-      const totalProfit = totalRevenue - totalCost
-      const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
-
-      setStats({
-        totalRevenue, totalCost, totalProfit, profitMargin,
-        totalTransactions, avgTicket,
-        cashTotal, cardTotal, creditTotal,
-        daySales, topProducts, deptStats,
-      })
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error cargando datos')
-    } finally {
-      setLoading(false)
+      const { data: itemsData } = await (supabase as any)
+        .from('sale_items')
+        .select('sale_id, quantity, subtotal, product_variants(cost_price, products(name, category))')
+        .in('sale_id', ids)
+      setItems((itemsData ?? []) as ItemRow[])
+    } else {
+      setItems([])
     }
-  }, [period])
 
-  useEffect(() => { load() }, [load])
+    setLoading(false)
+  }
 
-  const periodLabel = PERIODS.find(p => p.key === period)?.label ?? ''
+  // ── KPIs ──────────────────────────────────────────────────────────────
+  const totalRevenue = sales.reduce((s, x) => s + x.total, 0)
+  const txCount      = sales.length
+  const avgTicket    = txCount > 0 ? totalRevenue / txCount : 0
+  const cashTx       = sales.filter(s => s.payment_method === 'cash' || s.payment_method === 'mixed').length
+  const pctCash      = txCount > 0 ? (cashTx / txCount) * 100 : 0
 
+  const totalProfit  = items.reduce((s, item) => {
+    const cost = item.product_variants?.cost_price ?? 0
+    return s + item.subtotal - cost * item.quantity
+  }, 0)
+
+  // ── Ventas + ganancia por día ─────────────────────────────────────────
+  const saleDateMap: Record<string, string> = {}
+  for (const s of sales) saleDateMap[s.id] = s.created_at.substring(0, 10)
+
+  const byDay: Record<string, { revenue: number; profit: number }> = {}
+  for (const s of sales) {
+    const day = s.created_at.substring(0, 10)
+    if (!byDay[day]) byDay[day] = { revenue: 0, profit: 0 }
+    byDay[day].revenue += s.total
+  }
+  for (const item of items) {
+    const day = saleDateMap[item.sale_id]
+    if (!day || !byDay[day]) continue
+    const cost = item.product_variants?.cost_price ?? 0
+    byDay[day].profit += item.subtotal - cost * item.quantity
+  }
+
+  const chartData: ChartBar[] = Object.entries(byDay)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({
+      label: new Date(date + 'T12:00:00').toLocaleDateString('es-MX', {
+        day: '2-digit', month: '2-digit',
+      }),
+      revenue: v.revenue,
+      profit:  v.profit,
+    }))
+
+  // ── Desglose por método ───────────────────────────────────────────────
+  const methodCount: Record<string, number> = {}
+  for (const s of sales) {
+    methodCount[s.payment_method] = (methodCount[s.payment_method] || 0) + 1
+  }
+
+  // ── Ventas por departamento ───────────────────────────────────────────
+  const catMap: Record<string, number> = {}
+  for (const item of items) {
+    const cat = item.product_variants?.products?.category ?? 'Sin categoría'
+    catMap[cat] = (catMap[cat] || 0) + item.subtotal
+  }
+  const catData = Object.entries(catMap)
+    .map(([name, revenue]) => ({ name, revenue }))
+    .sort((a, b) => b.revenue - a.revenue)
+  const maxCatRevenue = catData[0]?.revenue ?? 1
+
+  // ── Top 10 productos ──────────────────────────────────────────────────
+  const productMap: Record<string, { units: number; revenue: number }> = {}
+  for (const item of items) {
+    const name = item.product_variants?.products?.name ?? 'Sin nombre'
+    if (!productMap[name]) productMap[name] = { units: 0, revenue: 0 }
+    productMap[name].units   += item.quantity
+    productMap[name].revenue += item.subtotal
+  }
+  const top10 = Object.entries(productMap)
+    .map(([name, d]) => ({ name, ...d }))
+    .sort((a, b) => b.units - a.units)
+    .slice(0, 10)
+
+  // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div className="rpt-page">
+    <div className="flex flex-col h-full min-h-0">
+
       {/* Header */}
-      <div className="rpt-header">
-        <div>
-          <h1 className="rpt-title">Reportes</h1>
-          <p className="rpt-sub">Análisis de ventas y rentabilidad</p>
-        </div>
-        <div className="period-tabs">
-          {PERIODS.map(p => (
-            <button key={p.key}
-              className={`period-tab${period === p.key ? ' period-tab--on' : ''}`}
-              onClick={() => setPeriod(p.key)}>
-              {p.label}
-            </button>
-          ))}
+      <div className="px-5 pt-5 pb-3 shrink-0">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold" style={{ color: 'var(--text)' }}>Reportes</h1>
+          <div className="flex gap-0.5 p-1 rounded-xl"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            {PERIODS.map(p => (
+              <button key={p.key} onClick={() => setPeriod(p.key)}
+                className="px-3 py-1 rounded-lg text-xs font-semibold"
+                style={{
+                  background: period === p.key ? 'var(--accent)' : 'transparent',
+                  color:      period === p.key ? '#000' : 'var(--text-muted)',
+                }}>
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {err && <div className="err-bar">{err}</div>}
-
-      {loading ? (
-        <div className="loading-wrap">
-          <div className="spinner" />
-          <span>Cargando reportes…</span>
-        </div>
-      ) : !stats ? null : (
-        <div className="rpt-body">
-
-          {/* KPI row 1 — Ventas */}
-          <div className="section-label">Ventas</div>
-          <div className="kpi-row">
-            <KpiCard label="Ingresos totales" value={fmt(stats.totalRevenue)} accent />
-            <KpiCard label="Transacciones" value={stats.totalTransactions.toLocaleString('es-MX')} />
-            <KpiCard label="Ticket promedio" value={fmt(stats.avgTicket)} />
-            <KpiCard
-              label="Efectivo cobrado"
-              value={fmt(stats.cashTotal)}
-              sub={stats.totalRevenue > 0 ? `${((stats.cashTotal / stats.totalRevenue) * 100).toFixed(0)}% del total` : undefined}
-            />
+      <div className="flex-1 overflow-auto px-5 pb-5">
+        {loading ? (
+          <div className="flex items-center justify-center h-40">
+            <div className="w-7 h-7 rounded-full border-2 animate-spin"
+              style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
           </div>
+        ) : (
+          <div className="flex flex-col gap-4">
 
-          {/* KPI row 2 — Rentabilidad */}
-          <div className="section-label" style={{ marginTop: 4 }}>Rentabilidad</div>
-          <div className="kpi-row kpi-row--2">
-            <KpiCard label="Ganancia neta" value={fmt(stats.totalProfit)} green
-              sub={stats.totalRevenue > 0 ? `Costo total: ${fmt(stats.totalCost)}` : undefined} />
-            <KpiCard label="Margen de utilidad" value={fmtPct(stats.profitMargin)} green
-              sub={stats.profitMargin >= 20 ? 'Margen saludable' : 'Margen bajo'} />
-          </div>
+            {/* ── KPIs ── */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+              {[
+                { label: 'Ingresos',      value: fmt(totalRevenue), color: 'var(--accent)' },
+                { label: 'Ganancia',      value: fmt(totalProfit),  color: '#4CAF50'       },
+                { label: 'Transacciones', value: String(txCount),    color: 'var(--text)'   },
+                { label: 'Ticket prom.',  value: fmt(avgTicket),    color: '#F0B429'       },
+                { label: '% Efectivo',    value: `${pctCash.toFixed(0)}%`, color: '#2196F3' },
+              ].map(k => (
+                <div key={k.label} className="rounded-xl p-3 text-center"
+                  style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                  <p className="text-lg font-black font-mono" style={{ color: k.color }}>{k.value}</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{k.label}</p>
+                </div>
+              ))}
+            </div>
 
-          {/* Charts row */}
-          <div className="charts-row">
-            <div className="chart-card">
-              <div className="card-hdr">
-                <span className="card-ttl">Ventas por día</span>
-                <span className="card-badge">{periodLabel}</span>
+            {/* ── Gráfica de barras ── */}
+            <div className="rounded-xl p-4"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <div className="flex items-center gap-4 mb-3">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Ventas por día</p>
+                <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  <span><span style={{ color: 'var(--accent)' }}>■</span> Venta</span>
+                  <span><span style={{ color: '#4CAF50' }}>■</span> Ganancia</span>
+                </div>
               </div>
-              <BarChart data={stats.daySales} />
+              <BarChart data={chartData} />
             </div>
-            <div className="chart-card">
-              <div className="card-hdr">
-                <span className="card-ttl">Método de pago</span>
-              </div>
-              <PaymentBreakdown
-                cash={stats.cashTotal}
-                card={stats.cardTotal}
-                credit={stats.creditTotal}
-                total={stats.totalRevenue}
-              />
+
+            {/* ── Departamentos ── */}
+            <div className="rounded-xl p-4"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <p className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+                Ventas por departamento
+              </p>
+              {catData.length === 0 ? (
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Sin datos en el período</p>
+              ) : (
+                <div className="flex flex-col gap-2.5">
+                  {catData.map(c => (
+                    <HBar key={c.name}
+                      label={c.name}
+                      value={c.revenue}
+                      maxVal={maxCatRevenue}
+                      color="var(--accent)"
+                      suffix={fmt(c.revenue)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* ── Método de pago ── */}
+            <div className="rounded-xl p-4"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <p className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+                Método de pago
+              </p>
+              {txCount === 0 ? (
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Sin datos en el período</p>
+              ) : (
+                <div className="flex flex-col gap-2.5">
+                  {Object.entries(METHOD_META).map(([key, { label, color }]) => {
+                    const count = methodCount[key] || 0
+                    const pct   = txCount > 0 ? (count / txCount) * 100 : 0
+                    return (
+                      <HBar key={key}
+                        label={label}
+                        value={count}
+                        maxVal={txCount}
+                        color={color}
+                        suffix={`${pct.toFixed(0)}%  (${count})`}
+                      />
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── Top 10 productos ── */}
+            <div className="rounded-xl p-4"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              <p className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>
+                Top 10 productos
+              </p>
+              {top10.length === 0 ? (
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Sin datos en el período</p>
+              ) : (
+                <div className="flex flex-col">
+                  <div className="grid px-2 mb-1 text-xs font-semibold"
+                    style={{ gridTemplateColumns: '24px 1fr 52px 88px', color: 'var(--text-muted)' }}>
+                    <span>#</span>
+                    <span>Producto</span>
+                    <span className="text-right">Uds.</span>
+                    <span className="text-right">Ingresos</span>
+                  </div>
+                  {top10.map((p, i) => (
+                    <div key={p.name}
+                      className="grid items-center px-2 py-1.5 rounded-lg text-xs"
+                      style={{
+                        gridTemplateColumns: '24px 1fr 52px 88px',
+                        background: i % 2 === 0 ? 'var(--bg)' : 'transparent',
+                      }}>
+                      <span className="font-bold"
+                        style={{ color: i < 3 ? 'var(--accent)' : 'var(--text-muted)' }}>
+                        {i + 1}
+                      </span>
+                      <span className="truncate" style={{ color: 'var(--text)' }}>{p.name}</span>
+                      <span className="text-right font-mono" style={{ color: 'var(--text-muted)' }}>
+                        {p.units}
+                      </span>
+                      <span className="text-right font-mono font-semibold" style={{ color: 'var(--text)' }}>
+                        {fmt(p.revenue)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
           </div>
-
-          {/* Department breakdown */}
-          <div className="chart-card">
-            <div className="card-hdr">
-              <span className="card-ttl">Ventas por Departamento</span>
-              <span className="card-badge">{stats.deptStats.length} departamentos</span>
-            </div>
-            <DepartmentSection depts={stats.deptStats} totalRevenue={stats.totalRevenue} />
-          </div>
-
-          {/* Top products */}
-          <div className="chart-card">
-            <div className="card-hdr">
-              <span className="card-ttl">Productos más vendidos</span>
-              <span className="card-badge">Top {Math.min(stats.topProducts.length, 10)} por ingresos</span>
-            </div>
-            {stats.topProducts.length === 0
-              ? <div className="empty-state">Sin ventas registradas en este período</div>
-              : <TopProductsTable products={stats.topProducts} />
-            }
-          </div>
-
-        </div>
-      )}
-
-      <style>{`
-        .rpt-page {
-          display: flex;
-          flex-direction: column;
-          height: 100vh;
-          overflow-y: auto;
-          background: var(--bg-base);
-          padding: 24px;
-          gap: 16px;
-        }
-
-        /* Header */
-        .rpt-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 12px;
-        }
-        .rpt-title {
-          font-family: var(--font-syne, sans-serif);
-          font-size: 22px;
-          font-weight: 800;
-          color: var(--text-primary);
-          margin: 0;
-          letter-spacing: -0.02em;
-        }
-        .rpt-sub { color: var(--text-muted); font-size: 13px; margin: 3px 0 0; }
-
-        .section-label {
-          font-size: 10px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-          color: var(--text-muted);
-          padding: 0 2px;
-        }
-
-        /* Period selector */
-        .period-tabs {
-          display: flex;
-          gap: 4px;
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 10px;
-          padding: 3px;
-        }
-        .period-tab {
-          padding: 6px 14px;
-          border-radius: 7px;
-          border: none;
-          background: transparent;
-          color: var(--text-secondary);
-          font-size: 12px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.15s;
-        }
-        .period-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
-        .period-tab--on { background: var(--accent-glow); color: var(--accent); font-weight: 600; }
-
-        /* Error / Loading */
-        .err-bar {
-          background: var(--danger-dim);
-          border: 1px solid rgba(239,68,68,0.3);
-          color: var(--danger);
-          border-radius: 8px;
-          padding: 10px 16px;
-          font-size: 13px;
-        }
-        .loading-wrap {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          color: var(--text-muted);
-          padding: 80px 0;
-          font-size: 13px;
-        }
-        .spinner {
-          width: 20px; height: 20px;
-          border: 2px solid var(--border);
-          border-top-color: var(--accent);
-          border-radius: 50%;
-          animation: spin 0.7s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .rpt-body { display: flex; flex-direction: column; gap: 14px; }
-
-        /* KPI cards */
-        .kpi-row {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 12px;
-        }
-        .kpi-row--2 { grid-template-columns: repeat(2, 1fr); }
-        @media (max-width: 900px) {
-          .kpi-row { grid-template-columns: repeat(2, 1fr); }
-          .kpi-row--2 { grid-template-columns: repeat(2, 1fr); }
-        }
-
-        .kpi-card {
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          padding: 16px 18px;
-        }
-        .kpi-card--accent { background: var(--accent-glow); border-color: rgba(240,180,41,0.3); }
-        .kpi-card--green  { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3); }
-        .kpi-label {
-          font-size: 10px; font-weight: 600;
-          text-transform: uppercase; letter-spacing: 0.07em;
-          color: var(--text-muted); margin-bottom: 8px;
-        }
-        .kpi-value {
-          font-family: var(--font-jetbrains, monospace);
-          font-size: 22px; font-weight: 600;
-          color: var(--text-primary); line-height: 1;
-        }
-        .kpi-card--accent .kpi-value { color: var(--accent); }
-        .kpi-card--green  .kpi-value { color: var(--success); }
-        .kpi-sub { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
-
-        /* Charts */
-        .charts-row {
-          display: grid;
-          grid-template-columns: 1fr 280px;
-          gap: 12px;
-        }
-        @media (max-width: 900px) { .charts-row { grid-template-columns: 1fr; } }
-
-        .chart-card {
-          background: var(--bg-surface);
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          padding: 16px 18px;
-        }
-        .card-hdr {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 14px;
-        }
-        .card-ttl { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-        .card-badge {
-          font-size: 10px;
-          background: var(--bg-hover);
-          color: var(--text-muted);
-          border-radius: 5px;
-          padding: 2px 7px;
-          border: 1px solid var(--border);
-        }
-        .empty-state {
-          color: var(--text-muted);
-          text-align: center;
-          padding: 32px 0;
-          font-size: 13px;
-        }
-
-        /* Department */
-        .dept-wrap {
-          display: grid;
-          grid-template-columns: 200px 1fr;
-          gap: 24px;
-          align-items: start;
-        }
-        @media (max-width: 700px) { .dept-wrap { grid-template-columns: 1fr; } }
-
-        .dept-chart-col {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 12px;
-        }
-        .dept-legend {
-          width: 100%;
-          display: flex;
-          flex-direction: column;
-          gap: 5px;
-        }
-        .legend-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 11px;
-        }
-        .legend-dot {
-          width: 8px; height: 8px;
-          border-radius: 2px;
-          flex-shrink: 0;
-        }
-        .legend-name { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .legend-val { font-family: var(--font-jetbrains, monospace); font-size: 10px; color: var(--text-muted); }
-
-        .dept-table-col { flex: 1; }
-
-        .view-toggle {
-          display: flex;
-          gap: 4px;
-          background: var(--bg-hover);
-          border-radius: 8px;
-          padding: 3px;
-          width: fit-content;
-        }
-        .vt-btn {
-          padding: 5px 12px;
-          border-radius: 6px;
-          border: none;
-          background: transparent;
-          color: var(--text-secondary);
-          font-size: 11px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.15s;
-        }
-        .vt-btn:hover { color: var(--text-primary); }
-        .vt-btn--on { background: var(--bg-surface); color: var(--text-primary); font-weight: 600; }
-
-        .dept-row { padding: 2px 0; }
-
-        /* Table */
-        .tbl-th {
-          padding: 8px 10px;
-          text-align: left;
-          font-size: 10px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-          color: var(--text-muted);
-          border-bottom: 1px solid var(--border);
-        }
-        .tbl-row td { padding: 10px 10px; border-bottom: 1px solid rgba(42,42,58,0.5); }
-        .tbl-row:last-child td { border-bottom: none; }
-        .tbl-row:hover td { background: var(--bg-hover); }
-      `}</style>
+        )}
+      </div>
     </div>
   )
 }
