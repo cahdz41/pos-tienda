@@ -16,7 +16,6 @@ export async function GET() {
         id, flavor, sale_price, stock, image_url
       )
     `)
-    .eq('store_visible', true)
     .order('name')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
