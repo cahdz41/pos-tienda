@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useStoreCart } from '@/contexts/StoreCartContext'
 import type { StoreCartItem } from '@/contexts/StoreCartContext'
+import { useStoreAuth } from '@/contexts/StoreAuthContext'
 import { openWhatsApp } from '@/lib/whatsapp'
 
 const WA_NUMBER = process.env.NEXT_PUBLIC_STORE_WHATSAPP ?? ''
@@ -36,6 +37,7 @@ function buildWhatsAppMessage(
 
 export default function CarritoPage() {
   const { items, total, clearCart } = useStoreCart()
+  const { user, customer } = useStoreAuth()
   const [mounted, setMounted] = useState(false)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -43,6 +45,7 @@ export default function CarritoPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [forOther, setForOther] = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -68,11 +71,35 @@ export default function CarritoPage() {
     )
   }
 
-  function openModal() { setShowModal(true); setError(null) }
+  function openModal() {
+    setShowModal(true)
+    setError(null)
+    setForOther(false)
+    // Pre-llenar con datos del cliente registrado
+    setName(customer?.full_name ?? '')
+    setPhone(customer?.phone ?? '')
+  }
+
   function closeModal() {
     if (loading) return
     setShowModal(false)
+    setForOther(false)
     setName(''); setPhone(''); setNotes(''); setError(null)
+  }
+
+  function handleForOtherToggle() {
+    const next = !forOther
+    setForOther(next)
+    setError(null)
+    if (next) {
+      // Pedir para otra persona → limpiar campos
+      setName('')
+      setPhone('')
+    } else {
+      // Volver a mis datos → restaurar datos del cliente
+      setName(customer?.full_name ?? '')
+      setPhone(customer?.phone ?? '')
+    }
   }
 
   async function handleConfirm() {
@@ -92,6 +119,7 @@ export default function CarritoPage() {
           notes: notes.trim() || null,
           items,
           total,
+          customer_id: user?.id ?? null,
         }),
       })
       const data = await res.json()
@@ -317,6 +345,44 @@ export default function CarritoPage() {
             </span>
           </div>
 
+          {/* Toggle "para otra persona" — solo visible si hay sesión */}
+          {customer && (
+            <button
+              type="button"
+              onClick={handleForOtherToggle}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                width: '100%', padding: '11px 14px',
+                background: forOther ? 'rgba(240,180,41,0.06)' : 'transparent',
+                border: `1px solid ${forOther ? 'rgba(240,180,41,0.25)' : '#1E1E1E'}`,
+                borderRadius: '10px',
+                cursor: 'pointer',
+                marginBottom: '4px',
+                transition: 'border-color 0.2s, background 0.2s',
+                textAlign: 'left',
+              }}
+            >
+              {/* Checkbox visual */}
+              <span style={{
+                width: '18px', height: '18px', flexShrink: 0,
+                border: `2px solid ${forOther ? '#F0B429' : '#333333'}`,
+                borderRadius: '5px',
+                background: forOther ? '#F0B429' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s, border-color 0.15s',
+              }}>
+                {forOther && (
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6l3 3 5-5" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </span>
+              <span style={{ fontSize: '13px', color: forOther ? '#F0B429' : '#666666', transition: 'color 0.15s' }}>
+                Hacer pedido para otra persona
+              </span>
+            </button>
+          )}
+
           {/* Campos */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div>
@@ -330,7 +396,7 @@ export default function CarritoPage() {
                 type="text" value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="¿Cómo te llamamos?"
-                autoFocus
+                autoFocus={!customer}
                 style={inputStyle}
                 onFocus={e => (e.currentTarget.style.borderColor = '#F0B429')}
                 onBlur={e => (e.currentTarget.style.borderColor = '#2A2A2A')}

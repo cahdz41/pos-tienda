@@ -39,12 +39,13 @@ interface OrderItem {
 
 export async function POST(request: Request) {
   const body = await request.json()
-  const { customer_name, customer_phone, notes, items, total } = body as {
+  const { customer_name, customer_phone, notes, items, total, customer_id } = body as {
     customer_name: string
     customer_phone: string
     notes: string | null
     items: OrderItem[]
     total: number
+    customer_id: string | null
   }
 
   if (!customer_name || !customer_phone || !Array.isArray(items) || items.length === 0 || !total) {
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
 
   const { data: order, error: orderError } = await supabase
     .from('store_orders')
-    .insert({ customer_name, customer_phone, notes: notes || null, total, status: 'pending' })
+    .insert({ customer_name, customer_phone, notes: notes || null, total, status: 'pending', customer_id: customer_id || null })
     .select('id')
     .single()
 

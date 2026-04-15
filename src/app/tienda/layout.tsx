@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Syne, DM_Sans } from 'next/font/google'
 import { StoreCartProvider } from '@/contexts/StoreCartContext'
+import { StoreAuthProvider } from '@/contexts/StoreAuthContext'
 import StoreNav from '@/components/tienda/StoreNav'
 import CartDrawer from '@/components/tienda/CartDrawer'
 
@@ -31,11 +32,13 @@ export default function TiendaLayout({ children }: { children: React.ReactNode }
         fontFamily: 'var(--font-dm-sans, system-ui), sans-serif',
       }}
     >
-      <StoreCartProvider>
-        <StoreNav />
-        <CartDrawer />
-        {children}
-      </StoreCartProvider>
+      <StoreAuthProvider>
+        <StoreCartProvider>
+          <StoreNav />
+          <CartDrawer />
+          {children}
+        </StoreCartProvider>
+      </StoreAuthProvider>
     </div>
   )
 }

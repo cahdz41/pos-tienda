@@ -590,27 +590,88 @@ CREATE INDEX idx_store_order_items_order ON store_order_items(order_id);
 
 ---
 
+## Sesión 12 — 2026-04-15 (pos-v2)
+
+### ✅ Fase 2C — Panel de órdenes en Configuración
+
+**Archivos nuevos:**
+- `src/components/tienda/StoreOrdersPanel.tsx` — panel completo de gestión de pedidos:
+  - Filtros por estado: Todos / Pendientes / Confirmados / Listos / Entregados / Cancelados
+  - Tarjetas de orden: `#shortId · fecha`, nombre del cliente, teléfono, resumen de artículos, notas, badge de estado
+  - Dropdown para cambiar estado con actualización optimista y rollback si falla
+  - Botón WhatsApp por orden para contactar al cliente directo
+  - Botón recargar manual; error no-fatal (el resto de configuración sigue funcionando)
+- `src/app/api/store/orders/[orderId]/route.ts` — PATCH: actualiza `status` de una orden (valida contra `VALID_STATUSES`)
+- `src/lib/whatsapp.ts` — helper `openWhatsApp(phone, text)`:
+  - Móvil: `wa.me` directo
+  - Desktop: intenta `whatsapp://` (app nativa), detecta blur de ventana en 1.5s; fallback a `web.whatsapp.com`
+
+**Archivos modificados:**
+- `src/app/api/store/orders/route.ts` — GET agregado con filtro por status opcional
+- `src/app/(app)/configuracion/page.tsx` — nueva sección "Pedidos de la tienda" con `<StoreOrdersPanel />`
+- `src/types/index.ts` — `StoreOrderStatus`, `StoreOrderItem`, `StoreOrder` añadidos
+
+### ✅ Checkout modal rediseñado
+
+- `src/app/tienda/carrito/page.tsx` reescrito — modal overlay con:
+  - Ícono WhatsApp en caja verde, título, callout "Sin pagos en línea"
+  - Resumen compacto con total
+  - Campos: Nombre, WhatsApp, Indicaciones (opcional)
+  - Botón verde "Confirmar por WhatsApp" con spinner
+  - Fix React Hooks: `useState(false)` movido antes de early returns
+
+### ✅ Fase 3 — Auth de clientes para la tienda
+
+**SQL ejecutado en Supabase (requerido antes de implementar):**
+```sql
+CREATE TABLE IF NOT EXISTS store_customers (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name TEXT NOT NULL, phone TEXT, email TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE store_customers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "store_customers_self" ON store_customers
+  FOR ALL USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+ALTER TABLE store_orders ADD COLUMN IF NOT EXISTS customer_id UUID REFERENCES store_customers(id) ON DELETE SET NULL;
+ALTER TABLE store_orders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "store_orders_customer_read" ON store_orders FOR SELECT USING (customer_id = auth.uid());
+ALTER TABLE store_order_items ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "store_order_items_customer_read" ON store_order_items
+  FOR SELECT USING (EXISTS (SELECT 1 FROM store_orders o WHERE o.id = order_id AND o.customer_id = auth.uid()));
+```
+
+**Archivos nuevos:**
+- `src/lib/supabase-store.ts` — cliente Supabase aislado con `storageKey: 'store_sb'` para que la sesión de la tienda NO colisione con el POS
+- `src/contexts/StoreAuthContext.tsx` — `StoreAuthProvider` + `useStoreAuth()`. Callback de `onAuthStateChange` síncrono; fetch de perfil diferido con `setTimeout(0)` para evitar deadlock de Supabase
+- `src/app/api/store/auth/register/route.ts` — POST: crea usuario en `auth.users` (service role, `email_confirm: true`) + perfil en `store_customers`; rollback con `deleteUser` si falla el perfil
+- `src/app/tienda/auth/login/page.tsx` — login con email/password, redirige a `/tienda/cuenta/pedidos` si ya hay sesión
+- `src/app/tienda/auth/registro/page.tsx` — registro + auto-login al crear cuenta
+- `src/app/tienda/cuenta/layout.tsx` — guard: redirige a `/tienda/auth/login` si no hay sesión
+- `src/app/tienda/cuenta/pedidos/page.tsx` — historial de pedidos del cliente; usa `getStoreSupabase()` directo (RLS filtra por `customer_id = auth.uid()`)
+
+**Archivos modificados:**
+- `src/app/tienda/layout.tsx` — envuelve en `<StoreAuthProvider>`
+- `src/components/tienda/StoreNav.tsx` — botón "Mi cuenta" → si hay sesión muestra primer nombre + link a pedidos; si no hay sesión link a login
+- `src/app/tienda/carrito/page.tsx` — incluye `customer_id` en el POST si el usuario está logueado; checkbox "Hacer pedido para otra persona": pre-llena con datos del cliente registrado, toggle limpia/restaura campos
+- `src/app/api/store/orders/route.ts` — acepta y persiste `customer_id` en el insert
+
+**Flujo completo Fase 3:**
+1. Cliente navega a `/tienda` → ve "Mi cuenta" en la nav
+2. Se registra → auto-login → redirige a `/tienda/cuenta/pedidos`
+3. Al hacer pedido, el `customer_id` se vincula al `store_order` automáticamente
+4. En la página de pedidos, RLS de Supabase filtra solo sus órdenes
+5. Botón "Cerrar sesión" en la página de cuenta
+
+---
+
 ## ⏳ Pendiente — Próxima sesión
 
-### Fase 2C — Panel de órdenes en Configuración
-
-Panel en `/configuracion` para que el dueño vea y gestione los pedidos de la tienda.
-
-**Componente a crear:** `src/components/tienda/StoreOrdersPanel.tsx`
-- Lista de órdenes de `store_orders` con sus items de `store_order_items`
-- Columnas: fecha, cliente, teléfono, artículos, total, estado
-- Cambiar estado: pending → confirmed → delivered / cancelled
-- Botón WhatsApp para contactar al cliente directamente desde el panel
-- Filtro por estado
-
-**API a crear:** `src/app/api/store/orders/[orderId]/route.ts`
-- PATCH: actualiza el `status` de una orden
-
-### Fase 3 — Auth de clientes (opcional, baja prioridad)
-- Tabla `store_customers`, login/registro en tienda, historial de pedidos
-
-### Fase 4 — Imágenes Cloudinary
-- Subir imágenes desde inventario → guardar URL en `product_variants.image_url`
+### Fase 4 — Imágenes con Cloudinary
+- Subir imágenes desde el panel de inventario → guardar URL en `product_variants.image_url`
+- Mostrar imágenes en las tarjetas de producto de la tienda
+- Requiere: crear cuenta Cloudinary, agregar `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` a `.env.local`
 
 ### Fase 5 — SEO + Performance
-- Metadata dinámica por producto, sitemaps, loading skeletons
+- Metadata dinámica por producto (`generateMetadata` en `tienda/productos/[productId]`)
+- Sitemap automático (`app/sitemap.ts`)
+- Loading skeletons mientras cargan los productos

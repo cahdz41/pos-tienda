@@ -2,9 +2,11 @@
 
 import Link from 'next/link'
 import { useStoreCart } from '@/contexts/StoreCartContext'
+import { useStoreAuth } from '@/contexts/StoreAuthContext'
 
 export default function StoreNav() {
   const { itemCount, openCart } = useStoreCart()
+  const { user, customer } = useStoreAuth()
 
   return (
     <nav style={{
@@ -26,6 +28,63 @@ export default function StoreNav() {
           CHOCHOLAND
         </span>
       </Link>
+
+      {/* Zona derecha: cuenta + carrito */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+
+        {/* Link de cuenta */}
+        {user ? (
+          <Link href="/tienda/cuenta/pedidos" style={{
+            display: 'flex', alignItems: 'center', gap: '6px',
+            padding: '6px 12px',
+            background: 'transparent',
+            border: '1px solid #222222',
+            borderRadius: '8px',
+            color: '#AAAAAA', fontSize: '13px', fontWeight: 500,
+            textDecoration: 'none',
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+          onMouseEnter={e => {
+            const el = e.currentTarget as HTMLAnchorElement
+            el.style.borderColor = '#F0B429'
+            el.style.color = '#F0B429'
+          }}
+          onMouseLeave={e => {
+            const el = e.currentTarget as HTMLAnchorElement
+            el.style.borderColor = '#222222'
+            el.style.color = '#AAAAAA'
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span style={{ maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {customer?.full_name?.split(' ')[0] ?? 'Mi cuenta'}
+            </span>
+          </Link>
+        ) : (
+          <Link href="/tienda/auth/login" style={{
+            padding: '6px 12px',
+            background: 'transparent',
+            border: '1px solid #222222',
+            borderRadius: '8px',
+            color: '#666666', fontSize: '13px',
+            textDecoration: 'none',
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+          onMouseEnter={e => {
+            const el = e.currentTarget as HTMLAnchorElement
+            el.style.borderColor = '#444444'
+            el.style.color = '#AAAAAA'
+          }}
+          onMouseLeave={e => {
+            const el = e.currentTarget as HTMLAnchorElement
+            el.style.borderColor = '#222222'
+            el.style.color = '#666666'
+          }}>
+            Mi cuenta
+          </Link>
+        )}
 
       {/* Ícono de carrito con badge */}
       <button
@@ -67,6 +126,8 @@ export default function StoreNav() {
           </span>
         )}
       </button>
+
+      </div>{/* fin zona derecha */}
     </nav>
   )
 }
