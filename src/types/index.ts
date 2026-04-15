@@ -103,3 +103,22 @@ export interface SaleItem {
   unit_price: number
   subtotal: number
 }
+
+// ── Tienda online ────────────────────────────────────────────────────────────
+
+export interface StoreVariant {
+  id: string
+  flavor: string | null
+  sale_price: number
+  stock: number
+  image_url: string | null
+}
+
+export interface StoreProduct {
+  id: string
+  name: string
+  category: string | null
+  image_url: string | null
+  store_description: string | null
+  product_variants: StoreVariant[]
+}

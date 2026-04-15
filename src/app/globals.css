@@ -35,6 +35,16 @@ html {
   height: 100%;
 }
 
+/* ── Tienda online — variables scoped, no afectan al POS ─────────────────── */
+.store-root {
+  --store-bg:         #0A0A0A;
+  --store-surface:    #111111;
+  --store-accent:     #F0B429;
+  --store-text:       #FFFFFF;
+  --store-text-muted: #666666;
+  --store-border:     #1A1A1A;
+}
+
 /* Scrollbar custom */
 ::-webkit-scrollbar {
   width: 6px;
