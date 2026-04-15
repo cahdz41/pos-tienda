@@ -4,18 +4,11 @@ import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import type { ProductVariant, CartItem } from '@/types'
 
-// Categorías reales de la tabla products.category
-const CATEGORIES = [
-  'PROTEINAS',
-  'CREATINAS',
-  'PRE ENTRENOS',
-  'AMINOACIDOS',
-  'QUEMADORES',
-  'VITAMINAS',
-  'BARRAS',
-  'BEBIDAS',
-  'ROPA',
-  'OTROS',
+// Orden de prioridad para mostrar categorías (las que no aparezcan aquí van al final alfabético)
+const CATEGORY_PRIORITY = [
+  'PROTEINAS', 'GANADORES', 'CREATINAS', 'PRE-ENTRENOS', 'PRE ENTRENOS',
+  'AMINOACIDOS', 'QUEMADORES', 'TERMOGENICOS', 'VITAMINAS',
+  'BARRAS', 'SNACKS', 'BEBIDAS', 'ACCESORIOS', 'ROPA', 'OTROS',
 ]
 
 function getDaysUntilExpiry(date: string | null): number | null {
@@ -102,6 +95,7 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
             stock:           Number(v.stock ?? 0),
             min_stock:       Number(v.min_stock ?? 0),
             expiration_date: v.expiration_date ? String(v.expiration_date) : null,
+            image_url: null,
             product: productsMap[String(v.product_id)] ?? { id: String(v.product_id), name: 'Sin nombre', category: null },
           }))
 
@@ -121,6 +115,23 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
     }
   }
 
+  // Categorías derivadas de los datos reales — siempre coinciden con la BD
+  const categories = useMemo(() => {
+    const seen = new Set<string>()
+    for (const v of allVariants) {
+      const cat = v.product?.category
+      if (cat) seen.add(cat.trim().toUpperCase())
+    }
+    return Array.from(seen).sort((a, b) => {
+      const ai = CATEGORY_PRIORITY.indexOf(a)
+      const bi = CATEGORY_PRIORITY.indexOf(b)
+      if (ai !== -1 && bi !== -1) return ai - bi
+      if (ai !== -1) return -1
+      if (bi !== -1) return 1
+      return a.localeCompare(b, 'es')
+    })
+  }, [allVariants])
+
   const cartQtyMap = useMemo(() => {
     const m: Record<string, number> = {}
     for (const item of cart) m[item.variant.id] = item.quantity
@@ -132,7 +143,7 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
     let list = allVariants
     if (activeCategory) {
       list = list.filter(v =>
-        (v.product?.category ?? '').toUpperCase() === activeCategory
+        (v.product?.category ?? '').trim().toUpperCase() === activeCategory
       )
     }
     if (search.trim()) {
@@ -156,7 +167,7 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center flex-col gap-3">
+      <div className="flex-1 flex items-center justify-center flex-col gap-3 min-w-0 overflow-hidden">
         <div className="w-8 h-8 rounded-full border-2 animate-spin"
           style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
         <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Cargando productos…</span>
@@ -166,7 +177,7 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
 
   if (error) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center min-w-0 overflow-hidden">
         <button onClick={loadProducts} className="px-6 py-3 rounded-lg text-sm font-semibold"
           style={{ background: '#2D1010', color: '#FF6B6B', border: '1px solid #4D1A1A' }}>
           {error}
@@ -176,7 +187,7 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
       {/* Búsqueda */}
       <div className="p-3 shrink-0">
         <input
@@ -200,7 +211,7 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
           style={{ background: !activeCategory ? 'var(--accent)' : 'var(--surface)', color: !activeCategory ? '#000' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
           Todos
         </button>
-        {CATEGORIES.map(cat => (
+        {categories.map(cat => (
           <button key={cat} onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
             className="shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-all"
             style={{ background: activeCategory === cat ? 'var(--accent)' : 'var(--surface)', color: activeCategory === cat ? '#000' : 'var(--text-muted)', border: '1px solid var(--border)' }}>

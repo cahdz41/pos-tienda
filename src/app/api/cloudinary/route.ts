@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
           crop: 'pad',
           quality: 80,
           fetch_format: 'webp',
-          background: 'transparent',
+          background: 'auto',
         },
       ],
       resource_type: 'image',
@@ -42,6 +42,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, url: result.secure_url, publicId: result.public_id })
   } catch (error: any) {
     console.error('Error Cloudinary:', error)
-    return NextResponse.json({ error: 'Error al subir la imagen' }, { status: 500 })
+    return NextResponse.json({ error: error?.message || 'Error al subir la imagen' }, { status: 500 })
   }
 }

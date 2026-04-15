@@ -112,6 +112,16 @@ export default function PosPage() {
 
   const clearCart = useCallback(() => setCart([]), [])
 
+  // ── Precio personalizado ─────────────────────────────────────────────────
+
+  const setPriceOverride = useCallback((variantId: string, price: number) => {
+    setCart(prev => prev.map(item =>
+      item.variant.id === variantId
+        ? { ...item, unitPrice: price, useWholesale: false }
+        : item
+    ))
+  }, [])
+
   // ── Mayoreo (8.4) ────────────────────────────────────────────────────────
 
   const toggleWholesale = useCallback((variantId: string) => {
@@ -201,6 +211,7 @@ export default function PosPage() {
         onClear={clearCart}
         onPay={handlePay}
         onToggleWholesale={toggleWholesale}
+        onPriceChange={setPriceOverride}
         onHold={holdCart}
         onShowHolds={() => setShowHolds(true)}
         heldCount={heldTickets.length}

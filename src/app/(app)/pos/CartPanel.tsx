@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import type { CartItem, ProductVariant } from '@/types'
 
 interface Props {
@@ -9,8 +10,8 @@ interface Props {
   onRemoveAll: (variantId: string) => void
   onClear: () => void
   onPay: () => void
-  // Fase 8
   onToggleWholesale: (variantId: string) => void
+  onPriceChange: (variantId: string, price: number) => void
   onHold: () => void
   onShowHolds: () => void
   heldCount: number
@@ -25,13 +26,23 @@ export default function CartPanel({
   onClear,
   onPay,
   onToggleWholesale,
+  onPriceChange,
   onHold,
   onShowHolds,
   heldCount,
   onVoid,
 }: Props) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+
   const total = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
+
+  function confirmEdit(variantId: string) {
+    const n = parseFloat(editValue)
+    if (!isNaN(n) && n >= 0) onPriceChange(variantId, n)
+    setEditingId(null)
+  }
 
   return (
     <div
@@ -115,9 +126,37 @@ export default function CartPanel({
 
                   {/* Precio unitario + toggle mayoreo */}
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      ${item.unitPrice.toLocaleString('es-MX')} c/u
-                    </p>
+                    {editingId === item.variant.id ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => {
+                          e.stopPropagation()
+                          if (e.key === 'Enter')  confirmEdit(item.variant.id)
+                          if (e.key === 'Escape') setEditingId(null)
+                        }}
+                        onClick={e => e.stopPropagation()}
+                        onBlur={() => confirmEdit(item.variant.id)}
+                        className="w-20 text-xs rounded px-1.5 py-0.5 outline-none"
+                        style={{ background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--accent)', fontFamily: 'monospace' }}
+                      />
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          ${item.unitPrice.toLocaleString('es-MX')} c/u
+                        </p>
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingId(item.variant.id); setEditValue(String(item.unitPrice)) }}
+                          className="text-xs leading-none"
+                          style={{ color: 'var(--accent)', opacity: 0.7 }}
+                          title="Editar precio"
+                        >
+                          ✏️
+                        </button>
+                      </div>
+                    )}
                     {hasWholesale && (
                       <button
                         onClick={() => onToggleWholesale(item.variant.id)}
