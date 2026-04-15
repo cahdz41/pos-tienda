@@ -5,6 +5,7 @@ import { printReceipt } from '../pos/Receipt'
 import { createClient } from '@/lib/supabase'
 import type { CartItem } from '@/types'
 import { StoreOrdersPanel } from '@/components/tienda/StoreOrdersPanel'
+import PhotoManager from '@/components/PhotoManager'
 
 const K = {
   businessName: 'pos_business_name',
@@ -24,7 +25,7 @@ const TEST_CART: CartItem[] = [
     variant: {
       id: 'test-1', product_id: 'p1', barcode: '001',
       flavor: 'Fresa', sale_price: 25, wholesale_price: 20,
-      cost_price: 15, stock: 10, min_stock: 2, expiration_date: null,
+      cost_price: 15, stock: 10, min_stock: 2, expiration_date: null, image_url: null,
       product: { id: 'p1', name: 'Producto Ejemplo', category: 'General' },
     },
     quantity: 2, unitPrice: 25,
@@ -33,7 +34,7 @@ const TEST_CART: CartItem[] = [
     variant: {
       id: 'test-2', product_id: 'p2', barcode: '002',
       flavor: null, sale_price: 50, wholesale_price: 40,
-      cost_price: 30, stock: 5, min_stock: 1, expiration_date: null,
+      cost_price: 30, stock: 5, min_stock: 1, expiration_date: null, image_url: null,
       product: { id: 'p2', name: 'Otro Producto', category: 'General' },
     },
     quantity: 1, unitPrice: 50,
@@ -110,7 +111,7 @@ export default function ConfiguracionPage() {
       .from('product_variants')
       .select('product_id')
       .gt('stock', 0)
-    const unique = new Set((data ?? []).map(v => v.product_id))
+    const unique = new Set((data as any[] ?? []).map((v: any) => v.product_id))
     setStoreCount(unique.size)
   }
 
@@ -409,6 +410,11 @@ export default function ConfiguracionPage() {
               Ver tienda →
             </a>
           </div>
+        </Section>
+
+        {/* ── Fotos de productos ── */}
+        <Section title="Asignación de Fotos (IA)">
+          <PhotoManager />
         </Section>
 
         {/* ── Pedidos de la tienda ── */}

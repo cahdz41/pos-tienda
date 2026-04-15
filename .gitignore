@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# WASM binaries copiados en tiempo de build (generados por scripts/copy-wasm.js)
+/public/ort-wasm/
+
 # production
 /build
 

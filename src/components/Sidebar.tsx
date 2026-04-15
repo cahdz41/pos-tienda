@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/clientes',      label: 'Clientes',      icon: '👥' },
   { href: '/turnos',        label: 'Turnos',        icon: '⏰' },
   { href: '/reportes',      label: 'Reportes',      icon: '📊' },
+  { href: '/tienda',        label: 'Tienda',        icon: '🏪', external: true },
 ]
 
 const OWNER_ITEMS = [
@@ -60,6 +61,8 @@ export default function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
+            target={'external' in item && item.external ? '_blank' : undefined}
+            rel={'external' in item && item.external ? 'noopener noreferrer' : undefined}
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
             style={{
               color: isActive(item.href) ? '#000' : 'var(--text-muted)',

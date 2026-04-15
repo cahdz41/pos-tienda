@@ -23,6 +23,7 @@ export interface ProductVariant {
   stock: number
   min_stock: number
   expiration_date: string | null
+  image_url: string | null
   product: Product
 }
 
