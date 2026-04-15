@@ -122,3 +122,25 @@ export interface StoreProduct {
   store_description: string | null
   product_variants: StoreVariant[]
 }
+
+export type StoreOrderStatus = 'pending' | 'confirmed' | 'ready' | 'delivered' | 'cancelled'
+
+export interface StoreOrderItem {
+  id: string
+  product_name: string
+  flavor: string | null
+  quantity: number
+  unit_price: number
+  subtotal: number
+}
+
+export interface StoreOrder {
+  id: string
+  customer_name: string
+  customer_phone: string
+  notes: string | null
+  total: number
+  status: StoreOrderStatus
+  created_at: string
+  store_order_items: StoreOrderItem[]
+}

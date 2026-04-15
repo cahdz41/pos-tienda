@@ -1,6 +1,33 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+function adminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  )
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const status = searchParams.get('status')
+
+  const supabase = adminClient()
+  let query = supabase
+    .from('store_orders')
+    .select(`id, customer_name, customer_phone, notes, total, status, created_at,
+      store_order_items (id, product_name, flavor, quantity, unit_price, subtotal)`)
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  if (status && status !== 'all') query = query.eq('status', status)
+
+  const { data, error } = await query
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json(data ?? [])
+}
+
 interface OrderItem {
   variantId: string
   productId: string

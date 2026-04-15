@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { printReceipt } from '../pos/Receipt'
 import { createClient } from '@/lib/supabase'
 import type { CartItem } from '@/types'
+import { StoreOrdersPanel } from '@/components/tienda/StoreOrdersPanel'
 
 const K = {
   businessName: 'pos_business_name',
@@ -408,6 +409,11 @@ export default function ConfiguracionPage() {
               Ver tienda →
             </a>
           </div>
+        </Section>
+
+        {/* ── Pedidos de la tienda ── */}
+        <Section title="Pedidos de la tienda">
+          <StoreOrdersPanel />
         </Section>
 
       </div>
