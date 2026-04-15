@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { printReceipt } from '../pos/Receipt'
+import { createClient } from '@/lib/supabase'
 import type { CartItem } from '@/types'
 
 const K = {
@@ -39,6 +40,7 @@ const TEST_CART: CartItem[] = [
 ]
 
 interface CashierRow { id: string; name: string; email: string; role: string }
+interface StoreProductRow { id: string; name: string; category: string | null; store_visible: boolean }
 
 function Field({ label, hint, children }: {
   label: string; hint?: string; children: React.ReactNode
@@ -83,19 +85,51 @@ export default function ConfiguracionPage() {
   const [savingCashier,  setSavingCashier]  = useState(false)
   const [cashierError,   setCashierError]   = useState<string | null>(null)
 
+  // ── Tienda Online ─────────────────────────────────────────────────────
+  const [storeProducts,  setStoreProducts]  = useState<StoreProductRow[]>([])
+  const [loadingStore,   setLoadingStore]   = useState(false)
+  const [togglingId,     setTogglingId]     = useState<string | null>(null)
+
   // ── Reporte por email ─────────────────────────────────────────────────
   const [reportEmail, setReportEmail] = useState(() => load(K.reportEmail, ''))
   const [sending,     setSending]     = useState(false)
   const [sendResult,  setSendResult]  = useState<'ok' | 'error' | null>(null)
   const [sendError,   setSendError]   = useState('')
 
-  useEffect(() => { loadCashiers() }, [])
+  useEffect(() => { loadCashiers(); loadStoreProducts() }, [])
 
   // ── Helpers localStorage ──────────────────────────────────────────────
   function persist(key: string, value: string) {
     localStorage.setItem(key, value)
     setFlash(true)
     setTimeout(() => setFlash(false), 1400)
+  }
+
+  // ── Tienda: carga y toggle ────────────────────────────────────────────
+  async function loadStoreProducts() {
+    setLoadingStore(true)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('products')
+      .select('id, name, category, store_visible')
+      .order('name')
+    setStoreProducts(data ?? [])
+    setLoadingStore(false)
+  }
+
+  async function handleToggleVisible(product: StoreProductRow) {
+    setTogglingId(product.id)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('products')
+      .update({ store_visible: !product.store_visible })
+      .eq('id', product.id)
+    if (!error) {
+      setStoreProducts(prev =>
+        prev.map(p => p.id === product.id ? { ...p, store_visible: !p.store_visible } : p)
+      )
+    }
+    setTogglingId(null)
   }
 
   // ── Cajeros: carga ────────────────────────────────────────────────────
@@ -372,6 +406,53 @@ export default function ConfiguracionPage() {
               {`0 8 * * * curl -s -X POST http://localhost:3003/api/reports/daily-email -H "Content-Type: application/json" -d '{"email":"${reportEmail || 'tu@correo.com'}"}'`}
             </code>
           </div>
+        </Section>
+
+        {/* ── Tienda Online ── */}
+        <Section title="Tienda Online">
+          <div className="flex items-center justify-between -mt-2 mb-1">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Activa los productos que quieres mostrar en la tienda pública.
+            </p>
+            <a href="/tienda" target="_blank" rel="noopener noreferrer"
+              className="text-xs font-semibold shrink-0 ml-4"
+              style={{ color: 'var(--accent)' }}>
+              Ver tienda →
+            </a>
+          </div>
+
+          {loadingStore ? (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded-full border-2 animate-spin"
+                style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Cargando productos…</span>
+            </div>
+          ) : storeProducts.length === 0 ? (
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No hay productos en el inventario.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {storeProducts.map(p => (
+                <div key={p.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  <div className="min-w-0 mr-3">
+                    <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>{p.name}</p>
+                    {p.category && (
+                      <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{p.category}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleToggleVisible(p)}
+                    disabled={togglingId === p.id}
+                    className="relative shrink-0 w-12 h-6 rounded-full transition-all disabled:opacity-50"
+                    style={{ background: p.store_visible ? 'var(--accent)' : 'var(--border)' }}
+                  >
+                    <div className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+                      style={{ left: p.store_visible ? '26px' : '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </Section>
 
       </div>
