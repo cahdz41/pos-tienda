@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { Syne, DM_Sans } from 'next/font/google'
+import { StoreCartProvider } from '@/contexts/StoreCartContext'
 import StoreNav from '@/components/tienda/StoreNav'
+import CartDrawer from '@/components/tienda/CartDrawer'
 
 const syne = Syne({
   subsets: ['latin'],
@@ -29,8 +31,11 @@ export default function TiendaLayout({ children }: { children: React.ReactNode }
         fontFamily: 'var(--font-dm-sans, system-ui), sans-serif',
       }}
     >
-      <StoreNav />
-      {children}
+      <StoreCartProvider>
+        <StoreNav />
+        <CartDrawer />
+        {children}
+      </StoreCartProvider>
     </div>
   )
 }

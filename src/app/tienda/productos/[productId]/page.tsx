@@ -122,7 +122,11 @@ export default async function ProductoPage({ params }: Props) {
             </p>
           )}
 
-          <FlavorSelector variants={variants} />
+          <FlavorSelector
+            variants={variants}
+            productId={product.id}
+            productName={product.name}
+          />
         </div>
       </div>
     </main>
