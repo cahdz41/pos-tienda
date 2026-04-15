@@ -525,17 +525,92 @@ git reset --hard fase-3-estable
 
 ---
 
-## Pendiente — Próxima sesión
+## ✅ POS Completado (fases 8–11)
 
-### Fase 7 (continúa)
-- **7.4** — Edición de precios inline para `owner` (clic en precio → input → Enter guarda)
-- **7.5** — Importar Excel (columnas: Código, Producto, P. Costo, P. Venta, P. Mayoreo, Existencia; preview 20 registros; upsert por barcode)
-- Commit y tag `v0.8-inventario` al terminar
+Fases completadas después de Sesión 11 (ver commits en git):
+- **Fase 8** — Multi-ticket en espera, anular venta, pago mixto, precio mayoreo
+- **Fase 9** — Clientes + Crédito (CustomerModal, AbonoModal, HistorialModal)
+- **Fase 10** — Lealtad / Monedero electrónico
+- **Fase 11** — Reportes con SVG puro (KPIs, gráfica de barras, top 10 productos)
 
-### Fases siguientes
-- **Fase 8** — Features adicionales POS: venta en espera (multi-ticket), anular venta, pago mixto, precio mayoreo
-- **Fase 9** — Clientes + Crédito
-- **Fase 10** — Lealtad / Monedero
-- **Fase 11** — Reportes (SVG puro)
-- **Fase 12** — Configuración (nombre negocio, impresora, pie de ticket)
-- **Fase 13** — Deploy a VPS
+---
+
+## 🛍️ Tienda Online — `/tienda`
+
+### Decisiones de arquitectura
+
+- **Visibilidad automática:** todos los productos con `stock > 0` aparecen en la tienda. No hay toggle manual.
+- **Auth de servidor:** todas las rutas API y server components de tienda usan `SUPABASE_SERVICE_ROLE_KEY` para bypassar RLS. El anon key no funciona sin sesión.
+- **NO usar `@supabase/ssr`** — el proyecto usa `@supabase/supabase-js` directo.
+- **Carrito:** persistido en `localStorage` con key `store_cart`. Contexto: `src/contexts/StoreCartContext.tsx`.
+- **Categorías:** mapeo por keywords en `src/app/tienda/page.tsx` (PROTEINAS, GANADORES, PRE-ENTRENOS, CREATINAS, AMINOACIDOS, TERMOGENICOS, ACCESORIOS, SNACKS).
+- **WhatsApp del negocio:** `NEXT_PUBLIC_STORE_WHATSAPP=524427086715` en `.env.local`.
+
+### ✅ Fase 1 — Catálogo (`tienda-fase1-estable`)
+
+- `src/app/tienda/layout.tsx` — layout oscuro, fuentes Syne + DM_Sans, StoreCartProvider, StoreNav, CartDrawer
+- `src/app/tienda/page.tsx` — hero + sidebar de categorías + grid de productos con cards estilo Ghost Lifestyle
+- `src/app/api/store/products/route.ts` — GET público con service role key, filtra variantes con stock > 0
+- `src/components/tienda/` — StoreNav, CartDrawer, CartItem, ProductCard, ProductGrid, CategoryFilter, FlavorSelector
+- `src/contexts/StoreCartContext.tsx` — cart con localStorage, hydration-safe
+- `src/types/index.ts` — StoreVariant, StoreProduct añadidos al final
+
+### ✅ Fase 2A — Detalle de producto + carrito (`tienda-fase2A-estable`)
+
+- `src/app/tienda/productos/[productId]/page.tsx` — server component con service role key, sin filtro store_visible
+- FlavorSelector activo: selección de sabor, precio dinámico, badge de stock, botón "Agregar al carrito"
+- CartDrawer con lista de items, total, link a `/tienda/carrito`
+- Configuración: sección "Tienda Online" en `/configuracion` con conteo de productos con stock
+
+**Fix crítico:** el anon key en server-side routes devuelve 0 filas por RLS. Siempre usar service role key en API routes y server components de tienda.
+
+### ✅ Fase 2B — Checkout + Órdenes (`2026-04-14`)
+
+**SQL ejecutado en Supabase:**
+```sql
+CREATE TABLE store_orders (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), customer_name text NOT NULL, customer_phone text NOT NULL, notes text, total numeric(10,2) NOT NULL, status text NOT NULL DEFAULT 'pending', created_at timestamptz DEFAULT now());
+CREATE TABLE store_order_items (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES store_orders(id) ON DELETE CASCADE, variant_id text NOT NULL, product_id text NOT NULL, product_name text NOT NULL, flavor text, quantity int NOT NULL, unit_price numeric(10,2) NOT NULL, subtotal numeric(10,2) NOT NULL);
+CREATE INDEX idx_store_orders_status ON store_orders(status);
+CREATE INDEX idx_store_orders_created ON store_orders(created_at DESC);
+CREATE INDEX idx_store_order_items_order ON store_order_items(order_id);
+```
+
+**Archivos nuevos:**
+- `src/app/tienda/carrito/page.tsx` — página de checkout: resumen de artículos, formulario (nombre, teléfono, notas), botón WhatsApp
+- `src/app/api/store/orders/route.ts` — POST: crea `store_order` + `store_order_items`, retorna `order_id`
+
+**Flujo:**
+1. Usuario agrega al carrito → CartDrawer → "IR AL CHECKOUT" → `/tienda/carrito`
+2. Llena nombre + teléfono → "Confirmar por WhatsApp"
+3. La orden se guarda en Supabase **antes** de abrir WhatsApp
+4. Se abre WhatsApp con mensaje pre-llenado al número del negocio (524427086715)
+5. El carrito se limpia
+
+**Nota importante:** la orden queda en DB aunque el cliente no envíe el mensaje de WhatsApp.
+
+---
+
+## ⏳ Pendiente — Próxima sesión
+
+### Fase 2C — Panel de órdenes en Configuración
+
+Panel en `/configuracion` para que el dueño vea y gestione los pedidos de la tienda.
+
+**Componente a crear:** `src/components/tienda/StoreOrdersPanel.tsx`
+- Lista de órdenes de `store_orders` con sus items de `store_order_items`
+- Columnas: fecha, cliente, teléfono, artículos, total, estado
+- Cambiar estado: pending → confirmed → delivered / cancelled
+- Botón WhatsApp para contactar al cliente directamente desde el panel
+- Filtro por estado
+
+**API a crear:** `src/app/api/store/orders/[orderId]/route.ts`
+- PATCH: actualiza el `status` de una orden
+
+### Fase 3 — Auth de clientes (opcional, baja prioridad)
+- Tabla `store_customers`, login/registro en tienda, historial de pedidos
+
+### Fase 4 — Imágenes Cloudinary
+- Subir imágenes desde inventario → guardar URL en `product_variants.image_url`
+
+### Fase 5 — SEO + Performance
+- Metadata dinámica por producto, sitemaps, loading skeletons
