@@ -664,12 +664,57 @@ CREATE POLICY "store_order_items_customer_read" ON store_order_items
 
 ---
 
-## ⏳ Pendiente — Próxima sesión
+## Sesión 13 — 2026-04-15 (pos-v2)
 
-### Fase 4 — Imágenes con Cloudinary
-- Subir imágenes desde el panel de inventario → guardar URL en `product_variants.image_url`
-- Mostrar imágenes en las tarjetas de producto de la tienda
-- Requiere: crear cuenta Cloudinary, agregar `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` a `.env.local`
+### ✅ Fix POS — Carrito desaparecía tras cargar productos
+
+**Síntoma:** Al entrar al POS, el carrito se veía mientras cargaban los productos, pero en cuanto terminaba de cargar desaparecía.
+
+**Root cause:** `ProductPanel` usa `flex-1` como hijo de un contenedor flex. Sin `min-w-0`, CSS flexbox permite que el ítem se expanda más allá de su parte del ancho (el grid de productos y las tarjetas de categorías lo ensanchaban). Esto empujaba `CartPanel` fuera de la pantalla hacia la derecha.
+
+**Fix:** Agregado `min-w-0 overflow-hidden` a los tres `return` de `ProductPanel` (loading, error y el return principal).
+
+- Archivo: `src/app/(app)/pos/ProductPanel.tsx`
+
+### ✅ Fix POS — Filtro de categorías dinámico
+
+Las categorías ahora se derivan directamente de los datos reales en BD (en lugar de una lista hardcodeada). Se construyen con `.trim().toUpperCase()` en ambos lados del filtro para garantizar que siempre coincidan con los valores reales de Supabase, independientemente de cómo estén guardados.
+
+- Archivo: `src/app/(app)/pos/ProductPanel.tsx`
+
+### ✅ Fix POS — Botón editar precio en el carrito
+
+**Problema:** El botón ✏️ para editar el precio unitario de un producto en el carrito no era visible (estaba con `opacity-40` sobre fondo oscuro, prácticamente invisible).
+
+**Fix:** Cambiado a color ámbar (`var(--accent)`) con `opacity: 0.7`. Al hacer clic se abre un input inline; Enter confirma, Escape cancela.
+
+**Archivos:**
+- `src/app/(app)/pos/CartPanel.tsx` — botón de edición visible + `onPriceChange` prop
+- `src/app/(app)/pos/page.tsx` — `setPriceOverride` callback conectado
+
+### ✅ Fix Cloudinary — Error 500 al subir imágenes
+
+**Causas identificadas:**
+
+1. **En producción:** Las variables `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` no estaban en el archivo `.env.production` del VPS. Solo había variables de Supabase y Resend. **Fix:** agregar las 3 variables manualmente en el VPS con `nano /var/www/pos-v2/.env.production` + `pm2 restart pos-v2`.
+
+2. **En el route:** `crop: 'pad'` + `background: 'auto'` puede requerir plan de pago de Cloudinary. `fetch_format` no es el parámetro correcto del SDK para forzar el formato. **Fix:** cambiado a `crop: 'fill'` + `format: 'webp'` (elimina la necesidad de color de fondo).
+
+3. **Error silencioso:** PhotoManager lanzaba `"Error al subir a Cloudinary"` genérico sin mostrar el detalle real. **Fix:** el route ahora retorna `error.message` en el JSON, y PhotoManager lo muestra en pantalla.
+
+**Archivos:**
+- `src/app/api/cloudinary/route.ts` — transformación simplificada + mejor mensaje de error
+- `src/components/PhotoManager.tsx` — muestra el error real del servidor en la UI
+
+### ✅ Deploy a Hostinger
+
+- Commit: `88cc7fe` — todos los fixes anteriores
+- Push a `main` → `git pull` + `npm run build` + `pm2 reload pos-v2` en el VPS
+- Variables de Cloudinary agregadas a `/var/www/pos-v2/.env.production` manualmente
+
+---
+
+## ⏳ Pendiente — Próxima sesión
 
 ### Fase 5 — SEO + Performance
 - Metadata dinámica por producto (`generateMetadata` en `tienda/productos/[productId]`)

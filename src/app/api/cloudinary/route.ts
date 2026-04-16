@@ -27,10 +27,9 @@ export async function POST(request: NextRequest) {
         {
           width: 600,
           height: 600,
-          crop: 'pad',
+          crop: 'fill',
           quality: 80,
-          fetch_format: 'webp',
-          background: 'auto',
+          format: 'webp',
         },
       ],
       resource_type: 'image',
@@ -41,7 +40,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, url: result.secure_url, publicId: result.public_id })
   } catch (error: any) {
-    console.error('Error Cloudinary:', error)
-    return NextResponse.json({ error: error?.message || 'Error al subir la imagen' }, { status: 500 })
+    const msg = error?.message || error?.error?.message || 'Error al subir la imagen'
+    console.error('Error Cloudinary:', msg)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

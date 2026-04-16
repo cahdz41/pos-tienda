@@ -99,8 +99,9 @@ export default function PhotoManager() {
       formData.append('file', new File([blob], 'producto.png', { type: 'image/png' }))
 
       const res = await fetch('/api/cloudinary', { method: 'POST', body: formData })
-      if (!res.ok) throw new Error('Error al subir a Cloudinary')
-      const { url } = await res.json()
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Error al subir a Cloudinary')
+      const { url } = json
 
       setStage('saving')
 
