@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { ProductVariant } from '@/types'
 import AdjustModal from './AdjustModal'
 import ImportModal from './ImportModal'
+import ExportModal from './ExportModal'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -70,7 +71,8 @@ export default function InventarioPage() {
 
   // Modales
   const [adjustVariant, setAdjustVariant] = useState<ProductVariant | null>(null)
-  const [showImport, setShowImport] = useState(false)
+  const [showImport, setShowImport]   = useState(false)
+  const [showExport, setShowExport]   = useState(false)
 
   // Edición inline de fecha de caducidad
   const [editingExpiry, setEditingExpiry] = useState<string | null>(null) // variant id
@@ -272,15 +274,29 @@ export default function InventarioPage() {
               {filtered.length} de {allVariants.length} variantes
             </p>
           </div>
-          {isOwner && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowImport(true)}
-              className="px-3 py-2 rounded-lg text-xs font-semibold"
-              style={{ background: 'var(--surface)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+              onClick={() => setShowExport(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: '#052e16', color: '#4ade80', border: '1px solid #166534' }}
             >
-              Importar Excel
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Exportar Excel
             </button>
-          )}
+            {isOwner && (
+              <button
+                onClick={() => setShowImport(true)}
+                className="px-3 py-2 rounded-lg text-xs font-semibold"
+                style={{ background: 'var(--surface)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+              >
+                Importar Excel
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Búsqueda + filtros */}
@@ -470,6 +486,14 @@ export default function InventarioPage() {
         <ImportModal
           onClose={() => setShowImport(false)}
           onImported={() => { setShowImport(false); loadInventory() }}
+        />
+      )}
+
+      {/* Modal exportar Excel */}
+      {showExport && (
+        <ExportModal
+          variants={allVariants}
+          onClose={() => setShowExport(false)}
         />
       )}
     </div>
