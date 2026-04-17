@@ -5,11 +5,12 @@ import type { CartItem } from '@/types'
 export interface ReceiptData {
   cart: CartItem[]
   total: number
-  paymentMethod: 'cash' | 'card' | 'mixed'
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'mixed'
   amountPaid: number
   change: number
-  cashPaid?: number      // solo cuando method = 'mixed'
-  cardPaid?: number      // solo cuando method = 'mixed'
+  cashPaid?: number      // en pago mixto
+  cardPaid?: number      // en pago mixto
+  transferPaid?: number  // en pago mixto o método único
   walletPaid?: number    // monto pagado con monedero
   loyaltyEarned?: number // monedero ganado en esta compra
   date: Date
@@ -104,7 +105,10 @@ export function Receipt({ data }: { data: ReceiptData }) {
       {/* Pago */}
       <div style={{ fontSize: '13px', marginTop: '8px', color: '#333', lineHeight: '1.6' }}>
         <div>Pago: <strong>
-          {data.paymentMethod === 'cash' ? 'Efectivo' : data.paymentMethod === 'card' ? 'Tarjeta' : 'Mixto'}
+          {data.paymentMethod === 'cash' ? 'Efectivo'
+            : data.paymentMethod === 'card' ? 'Tarjeta'
+            : data.paymentMethod === 'transfer' ? 'Transferencia'
+            : 'Mixto'}
         </strong></div>
         {data.walletPaid != null && data.walletPaid > 0 && (
           <div>Monedero: <strong style={{ color: '#b07d00' }}>{fmt(data.walletPaid)}</strong></div>
@@ -113,6 +117,7 @@ export function Receipt({ data }: { data: ReceiptData }) {
           <>
             {data.cashPaid != null && data.cashPaid > 0 && <div>Efectivo: {fmt(data.cashPaid)}</div>}
             {data.cardPaid != null && data.cardPaid > 0 && <div>Tarjeta: {fmt(data.cardPaid)}</div>}
+            {data.transferPaid != null && data.transferPaid > 0 && <div>Transferencia: {fmt(data.transferPaid)}</div>}
           </>
         )}
         {data.paymentMethod === 'cash' && !data.walletPaid && (
@@ -154,7 +159,10 @@ export function printReceipt(data: ReceiptData) {
     </tr>`
   }).join('')
 
-  const payLabel = data.paymentMethod === 'cash' ? 'Efectivo' : data.paymentMethod === 'card' ? 'Tarjeta' : 'Mixto'
+  const payLabel = data.paymentMethod === 'cash' ? 'Efectivo'
+    : data.paymentMethod === 'card' ? 'Tarjeta'
+    : data.paymentMethod === 'transfer' ? 'Transferencia'
+    : 'Mixto'
   const walletRow = data.walletPaid && data.walletPaid > 0
     ? `<div>Monedero: ${fmt(data.walletPaid)}</div>` : ''
   const cashRows = data.paymentMethod === 'cash' && !data.walletPaid
@@ -163,6 +171,7 @@ export function printReceipt(data: ReceiptData) {
       ? [
           data.cashPaid && data.cashPaid > 0 ? `<div>Efectivo: ${fmt(data.cashPaid)}</div>` : '',
           data.cardPaid && data.cardPaid > 0 ? `<div>Tarjeta: ${fmt(data.cardPaid)}</div>` : '',
+          data.transferPaid && data.transferPaid > 0 ? `<div>Transferencia: ${fmt(data.transferPaid)}</div>` : '',
         ].join('')
       : ''
   const loyaltyRow = data.loyaltyEarned && data.loyaltyEarned > 0

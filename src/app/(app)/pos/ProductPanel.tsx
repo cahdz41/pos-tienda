@@ -40,6 +40,7 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
+  const [soloConStock, setSoloConStock] = useState(false)
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadProducts() }, [refreshKey])
@@ -154,8 +155,9 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
         v.barcode.includes(q)
       )
     }
+    if (soloConStock) list = list.filter(v => v.stock > 0)
     return list
-  }, [allVariants, search, activeCategory])
+  }, [allVariants, search, activeCategory, soloConStock])
 
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return
@@ -220,8 +222,19 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
         ))}
       </div>
 
-      <div className="px-4 pb-1 shrink-0">
+      <div className="px-3 pb-2 shrink-0 flex items-center justify-between gap-2">
         <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{filtered.length} productos</span>
+        <button
+          onClick={() => setSoloConStock(v => !v)}
+          className="shrink-0 px-3 py-1 rounded-full text-xs font-semibold transition-all"
+          style={{
+            background: soloConStock ? 'var(--accent)' : 'var(--surface)',
+            color: soloConStock ? '#000' : 'var(--text-muted)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          Solo con existencias
+        </button>
       </div>
 
       {/* Grid */}

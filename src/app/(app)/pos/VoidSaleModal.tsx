@@ -31,7 +31,7 @@ interface Props {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const METHOD_LABEL: Record<string, string> = {
-  cash: 'Efectivo', card: 'Tarjeta', credit: 'Crédito', mixed: 'Mixto',
+  cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Crédito', mixed: 'Mixto',
 }
 
 function formatTime(iso: string) {

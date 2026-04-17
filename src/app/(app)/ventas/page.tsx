@@ -47,17 +47,19 @@ type ExportRange = 'day' | 'week' | 'month' | 'custom'
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const METHOD_LABEL: Record<string, string> = {
-  cash: 'Efectivo',
-  card: 'Tarjeta',
-  credit: 'Crédito',
-  mixed: 'Mixto',
+  cash:     'Efectivo',
+  card:     'Tarjeta',
+  transfer: 'Transferencia',
+  credit:   'Crédito',
+  mixed:    'Mixto',
 }
 
 const METHOD_COLOR: Record<string, string> = {
-  cash:   '#4ade80',
-  card:   '#60a5fa',
-  credit: '#f59e0b',
-  mixed:  '#a78bfa',
+  cash:     '#4ade80',
+  card:     '#60a5fa',
+  transfer: '#34d399',
+  credit:   '#f59e0b',
+  mixed:    '#a78bfa',
 }
 
 function toLocalDateStr(date: Date): string {

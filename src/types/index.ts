@@ -89,7 +89,7 @@ export interface Sale {
   cashier_id: string
   customer_id: string | null
   total: number
-  payment_method: 'cash' | 'card' | 'credit' | 'mixed'
+  payment_method: 'cash' | 'card' | 'transfer' | 'credit' | 'mixed'
   amount_paid: number
   change_given: number
   status: 'completed' | 'cancelled'
