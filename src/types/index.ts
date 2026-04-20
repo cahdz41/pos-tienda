@@ -1,5 +1,11 @@
 export type UserRole = 'owner' | 'cashier'
 
+export interface Category {
+  id: string
+  name: string
+  created_at: string
+}
+
 export interface Profile {
   id: string
   name: string       // columna real en Supabase (no full_name)
