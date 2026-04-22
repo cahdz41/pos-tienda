@@ -85,7 +85,15 @@ export default function InventarioPage() {
   const [editingPriceVal, setEditingPriceVal] = useState('')
   const priceInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { loadInventory() }, [])
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  function focusSearch() {
+    setTimeout(() => {
+      searchInputRef.current?.focus()
+      searchInputRef.current?.select()
+    }, 50)
+  }
+
+  useEffect(() => { loadInventory().then(() => focusSearch()) }, [])
 
   async function loadInventory() {
     setLoading(true)
@@ -115,7 +123,7 @@ export default function InventarioPage() {
       while (true) {
         const { data, error: dbError } = await supabase
           .from('product_variants')
-          .select('id, product_id, barcode, flavor, sale_price, wholesale_price, cost_price, stock, min_stock, expiration_date')
+          .select('id, product_id, barcode, flavor, sale_price, wholesale_price, cost_price, stock, min_stock, expiration_date, image_url')
           .range(page * LIMIT, (page + 1) * LIMIT - 1)
           .order('id')
 
@@ -136,6 +144,7 @@ export default function InventarioPage() {
             stock:           Number(v.stock ?? 0),
             min_stock:       Number(v.min_stock ?? 0),
             expiration_date: v.expiration_date ? String(v.expiration_date) : null,
+            image_url:       v.image_url ? String(v.image_url) : null,
             product: productsMap[String(v.product_id)] ?? { id: String(v.product_id), name: 'Sin nombre', category: null },
           }))
 
@@ -164,6 +173,7 @@ export default function InventarioPage() {
   async function savePrice(variantId: string, field: PriceField) {
     const newValue = parseFloat(editingPriceVal)
     setEditingPrice(null)
+    focusSearch()
 
     if (isNaN(newValue) || newValue < 0) return
 
@@ -193,6 +203,7 @@ export default function InventarioPage() {
   async function saveExpiry(variantId: string) {
     const newDate = editingExpiryVal || null
     setEditingExpiry(null)
+    focusSearch()
 
     const supabase = createClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -302,12 +313,14 @@ export default function InventarioPage() {
         {/* Búsqueda + filtros */}
         <div className="flex gap-2">
           <input
+            ref={searchInputRef}
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Buscar por nombre, sabor, código o categoría…"
             className="flex-1 rounded-lg px-4 py-2 text-sm outline-none"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
+            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.select() }}
             onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
             onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
           />
@@ -390,7 +403,7 @@ export default function InventarioPage() {
                         onBlur={() => saveExpiry(v.id)}
                         onKeyDown={e => {
                           if (e.key === 'Enter') saveExpiry(v.id)
-                          if (e.key === 'Escape') setEditingExpiry(null)
+                          if (e.key === 'Escape') { setEditingExpiry(null); focusSearch() }
                         }}
                         className="rounded px-2 py-0.5 text-xs outline-none"
                         style={{
@@ -430,7 +443,7 @@ export default function InventarioPage() {
                             onBlur={() => savePrice(v.id, field)}
                             onKeyDown={e => {
                               if (e.key === 'Enter') savePrice(v.id, field)
-                              if (e.key === 'Escape') setEditingPrice(null)
+                              if (e.key === 'Escape') { setEditingPrice(null); focusSearch() }
                             }}
                             className="rounded px-2 py-0.5 text-xs font-mono outline-none"
                             style={{
@@ -476,7 +489,7 @@ export default function InventarioPage() {
       {adjustVariant && (
         <AdjustModal
           variant={adjustVariant}
-          onClose={() => setAdjustVariant(null)}
+          onClose={() => { setAdjustVariant(null); focusSearch() }}
           onSaved={handleStockSaved}
         />
       )}
@@ -484,8 +497,8 @@ export default function InventarioPage() {
       {/* Modal importar Excel */}
       {showImport && (
         <ImportModal
-          onClose={() => setShowImport(false)}
-          onImported={() => { setShowImport(false); loadInventory() }}
+          onClose={() => { setShowImport(false); focusSearch() }}
+          onImported={() => { setShowImport(false); loadInventory(); focusSearch() }}
         />
       )}
 
@@ -493,7 +506,7 @@ export default function InventarioPage() {
       {showExport && (
         <ExportModal
           variants={allVariants}
-          onClose={() => setShowExport(false)}
+          onClose={() => { setShowExport(false); focusSearch() }}
         />
       )}
     </div>

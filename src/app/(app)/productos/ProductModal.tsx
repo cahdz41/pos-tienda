@@ -38,6 +38,10 @@ function makeKey() {
   return Math.random().toString(36).slice(2)
 }
 
+function titleCase(s: string): string {
+  return s.replace(/\S+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+}
+
 function variantTooDraft(v: VariantFull): VariantDraft {
   return {
     _key:            v.id,
@@ -138,7 +142,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
   const [creatingCat, setCreatingCat] = useState(false)
 
   const [variants, setVariants] = useState<VariantDraft[]>(() => {
-    if (isNew) return [emptyDraft()]
+    if (isNew) return [{ ...emptyDraft(), barcode: highlightBarcode ?? '' }]
     const drafts = (product as ProductRow).product_variants.map(variantTooDraft)
     if (highlightBarcode) {
       return [...drafts].sort((a, b) => {
@@ -395,7 +399,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
                         <input
                           type="text"
                           value={val}
-                          onChange={e => set(e.target.value)}
+                          onChange={e => set(titleCase(e.target.value))}
                           placeholder={ph}
                           className="w-full rounded-lg px-3 py-2 text-sm outline-none"
                           style={{

@@ -127,21 +127,28 @@ export default function CartPanel({
                   {/* Precio unitario + toggle mayoreo */}
                   <div className="flex items-center gap-1.5 mt-0.5">
                     {editingId === item.variant.id ? (
-                      <input
-                        autoFocus
-                        type="number"
-                        value={editValue}
-                        onChange={e => setEditValue(e.target.value)}
-                        onKeyDown={e => {
-                          e.stopPropagation()
-                          if (e.key === 'Enter')  confirmEdit(item.variant.id)
-                          if (e.key === 'Escape') setEditingId(null)
-                        }}
-                        onClick={e => e.stopPropagation()}
-                        onBlur={() => confirmEdit(item.variant.id)}
-                        className="w-20 text-xs rounded px-1.5 py-0.5 outline-none"
-                        style={{ background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--accent)', fontFamily: 'monospace' }}
-                      />
+                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                        <input
+                          autoFocus
+                          type="number"
+                          value={editValue}
+                          onChange={e => setEditValue(e.target.value)}
+                          onKeyDown={e => {
+                            e.stopPropagation()
+                            if (e.key === 'Enter')  confirmEdit(item.variant.id)
+                            if (e.key === 'Escape') setEditingId(null)
+                          }}
+                          onClick={e => e.stopPropagation()}
+                          className="w-20 text-xs rounded px-1.5 py-0.5 outline-none"
+                          style={{ background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--accent)', fontFamily: 'monospace' }}
+                        />
+                        <button
+                          onMouseDown={e => { e.preventDefault(); confirmEdit(item.variant.id) }}
+                          className="text-xs font-bold rounded px-1.5 py-0.5 leading-none"
+                          style={{ background: 'var(--accent)', color: '#000' }}
+                          title="Confirmar precio"
+                        >✓</button>
+                      </div>
                     ) : (
                       <div className="flex items-center gap-1">
                         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>

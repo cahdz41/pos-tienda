@@ -46,10 +46,9 @@ export default function ProductosPage() {
   const searchRef = useRef<HTMLInputElement>(null)
   const needsFocusRef = useRef(false)
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { needsFocusRef.current = true; loadAll() }, [])
 
-  // Auto-foco al entrar a la sección
-  useEffect(() => { searchRef.current?.focus() }, [])
+  // Auto-foco al entrar a la sección — se aplica cuando loadAll termina
 
   // Foco al buscador cuando termina la recarga (tras guardar)
   useEffect(() => {
