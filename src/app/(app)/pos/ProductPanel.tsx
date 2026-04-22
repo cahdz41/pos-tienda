@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import type { ProductVariant, CartItem } from '@/types'
 
-// Orden de prioridad para mostrar categorías (las que no aparezcan aquí van al final alfabético)
 const CATEGORY_PRIORITY = [
   'PROTEINAS', 'GANADORES', 'CREATINAS', 'PRE-ENTRENOS', 'PRE ENTRENOS',
   'AMINOACIDOS', 'QUEMADORES', 'TERMOGENICOS', 'VITAMINAS',
@@ -35,12 +35,19 @@ interface Props {
 }
 
 export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }: Props) {
+  const router = useRouter()
   const [allVariants, setAllVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [soloConStock, setSoloConStock] = useState(false)
+  const [lastScanned, setLastScanned] = useState<ProductVariant | null>(null)
+  const [noStockVariant, setNoStockVariant] = useState<ProductVariant | null>(null)
+
+  // Foco automático al montar
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { searchRef.current?.focus() }, [])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadProducts() }, [refreshKey])
@@ -60,7 +67,6 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
     }, 15000)
 
     try {
-      // Productos: columnas reales confirmadas (category, no department)
       const { data: products, error: prodError } = await supabase
         .from('products')
         .select('id, name, category')
@@ -71,7 +77,6 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
         productsMap[String(p.id)] = { id: String(p.id), name: p.name, category: p.category ?? null }
       }
 
-      // Variantes: columnas reales confirmadas
       while (true) {
         const { data, error: dbError } = await supabase
           .from('product_variants')
@@ -116,7 +121,6 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
     }
   }
 
-  // Categorías derivadas de los datos reales — siempre coinciden con la BD
   const categories = useMemo(() => {
     const seen = new Set<string>()
     for (const v of allVariants) {
@@ -139,7 +143,6 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
     return m
   }, [cart])
 
-  // Filtrado 100% en cliente — instantáneo. Usa product.category (no department)
   const filtered = useMemo(() => {
     let list = allVariants
     if (activeCategory) {
@@ -159,12 +162,44 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
     return list
   }, [allVariants, search, activeCategory, soloConStock])
 
+  // Intento de agregar un producto — bloquea si no hay stock
+  function handleCardClick(variant: ProductVariant) {
+    if (variant.stock <= 0) {
+      setNoStockVariant(variant)
+      return
+    }
+    onAdd(variant)
+  }
+
+  // Escaneo por código de barras (Enter en el buscador)
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return
     const q = search.trim()
     if (!q) return
     const exact = allVariants.find(v => v.barcode === q)
-    if (exact) { onAdd(exact); setSearch('') }
+    if (exact) {
+      if (exact.stock <= 0) {
+        setNoStockVariant(exact)
+        return
+      }
+      onAdd(exact)
+      setLastScanned(exact)
+      // Seleccionar el código para que el próximo escaneo lo reemplace automáticamente
+      requestAnimationFrame(() => searchRef.current?.select())
+    }
+  }
+
+  function closeNoStock() {
+    setNoStockVariant(null)
+    requestAnimationFrame(() => {
+      searchRef.current?.focus()
+      searchRef.current?.select()
+    })
+  }
+
+  function goToInventory() {
+    if (!noStockVariant) return
+    router.push(`/inventario?ajustar=${encodeURIComponent(noStockVariant.barcode)}`)
   }
 
   if (loading) {
@@ -190,13 +225,18 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-      {/* Búsqueda */}
+
+      {/* Buscador */}
       <div className="p-3 shrink-0">
         <input
           ref={searchRef}
           type="text"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={e => {
+            setSearch(e.target.value)
+            // Limpiar tarjeta escaneada al escribir texto nuevo
+            if (e.target.value !== search) setLastScanned(null)
+          }}
           onKeyDown={handleSearchKeyDown}
           placeholder="Buscar por nombre, sabor o código de barras…"
           className="w-full rounded-lg px-4 py-2.5 text-sm outline-none"
@@ -205,6 +245,55 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
           onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
         />
       </div>
+
+      {/* Tarjeta del último producto escaneado */}
+      {lastScanned && (
+        <div style={{
+          margin: '0 12px 8px',
+          padding: '10px 12px',
+          borderRadius: '10px',
+          background: 'var(--surface)',
+          border: '1px solid var(--accent)',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          flexShrink: 0,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
+              <span style={{
+                fontSize: '10px', padding: '1px 6px', borderRadius: '4px',
+                background: 'rgba(240,180,41,0.15)', color: 'var(--accent)', fontWeight: 700,
+              }}>
+                ✓ Agregado
+              </span>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                Cód: {lastScanned.barcode}
+              </span>
+            </div>
+            <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)', margin: 0, lineHeight: 1.3 }}>
+              {lastScanned.product?.name}{lastScanned.flavor ? ` — ${lastScanned.flavor}` : ''}
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '3px' }}>
+              <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--accent)', fontFamily: 'monospace' }}>
+                ${lastScanned.sale_price.toLocaleString('es-MX')}
+              </span>
+              <span style={{ fontSize: '11px', color: lastScanned.stock <= 5 ? '#F0B429' : 'var(--text-muted)' }}>
+                {lastScanned.stock} pzs
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setLastScanned(null)}
+            style={{
+              width: '22px', height: '22px', borderRadius: '50%',
+              background: 'var(--bg)', color: 'var(--text-muted)',
+              fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, border: 'none', cursor: 'pointer', lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Filtro por categoría */}
       <div className="px-3 pb-2 shrink-0 flex gap-1.5 overflow-x-auto">
@@ -237,18 +326,24 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
         </button>
       </div>
 
-      {/* Grid */}
+      {/* Grid de productos */}
       <div className="flex-1 overflow-y-auto px-3 pb-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {filtered.map(variant => {
             const qty = cartQtyMap[variant.id] ?? 0
             const days = getDaysUntilExpiry(variant.expiration_date)
             const isExpired = days !== null && days <= 0
+            const sinStock = variant.stock <= 0
 
             return (
-              <button key={variant.id} onClick={() => onAdd(variant)}
+              <button key={variant.id} onClick={() => handleCardClick(variant)}
                 className="relative flex flex-col items-start p-3 rounded-xl text-left transition-all"
-                style={{ background: 'var(--surface)', border: `1px solid ${isExpired ? '#4D1A1A' : qty > 0 ? 'var(--accent)' : 'var(--border)'}`, opacity: variant.stock <= 0 ? 0.5 : 1 }}>
+                style={{
+                  background: 'var(--surface)',
+                  border: `1px solid ${isExpired ? '#4D1A1A' : qty > 0 ? 'var(--accent)' : 'var(--border)'}`,
+                  opacity: sinStock ? 0.5 : 1,
+                  cursor: sinStock ? 'not-allowed' : 'pointer',
+                }}>
 
                 {qty > 0 && (
                   <div className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold"
@@ -267,8 +362,8 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
                   ${variant.sale_price.toLocaleString('es-MX')}
                 </p>
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                  <span className="text-xs" style={{ color: variant.stock <= (variant.min_stock ?? 0) ? '#FF6B6B' : 'var(--text-muted)' }}>
-                    {variant.stock} pzs
+                  <span className="text-xs" style={{ color: sinStock ? '#FF6B6B' : variant.stock <= (variant.min_stock ?? 0) ? '#F0B429' : 'var(--text-muted)' }}>
+                    {sinStock ? 'Sin stock' : `${variant.stock} pzs`}
                   </span>
                   <ExpiryBadge date={variant.expiration_date} />
                 </div>
@@ -285,6 +380,62 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
           </div>
         )}
       </div>
+
+      {/* Diálogo: sin stock — ¿ir a inventario? */}
+      {noStockVariant && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 60,
+            background: 'rgba(0,0,0,0.78)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '16px',
+          }}
+          onClick={e => { if (e.target === e.currentTarget) closeNoStock() }}
+        >
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: '18px',
+            padding: '24px 20px 20px',
+            maxWidth: '320px', width: '100%',
+          }}>
+            <div style={{ fontSize: '30px', textAlign: 'center', marginBottom: '12px' }}>📦</div>
+            <p style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text)', textAlign: 'center', margin: '0 0 4px' }}>
+              Sin stock disponible
+            </p>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 4px', fontWeight: 600 }}>
+              {noStockVariant.product?.name}
+              {noStockVariant.flavor ? ` — ${noStockVariant.flavor}` : ''}
+            </p>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', margin: '0 0 20px' }}>
+              ¿Quieres modificar su inventario?
+            </p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={closeNoStock}
+                style={{
+                  flex: 1, padding: '11px', borderRadius: '12px',
+                  background: 'var(--bg)', color: 'var(--text-muted)',
+                  border: '1px solid var(--border)',
+                  fontWeight: 600, fontSize: '14px', cursor: 'pointer',
+                }}
+              >
+                No
+              </button>
+              <button
+                onClick={goToInventory}
+                style={{
+                  flex: 1, padding: '11px', borderRadius: '12px',
+                  background: 'var(--accent)', color: '#000',
+                  border: 'none', fontWeight: 700, fontSize: '14px', cursor: 'pointer',
+                }}
+              >
+                Sí, ajustar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -218,7 +218,30 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
         throw new Error(`Error al guardar productos: ${itemsErr.message}`)
       }
 
-      // 3 — Decrementar stock (no-fatal)
+      // 3 — Registrar desglose de pagos en sale_payments (no-fatal)
+      {
+        const payRows: { sale_id: string; method: string; amount: number }[] = []
+        if (walletUse > 0) payRows.push({ sale_id: saleId!, method: 'wallet', amount: walletUse })
+        if (!walletOnly && effectiveTotal > 0) {
+          if (isMulti) {
+            if (cashFinal > 0)     payRows.push({ sale_id: saleId!, method: 'cash',     amount: cashFinal })
+            if (cardFinal > 0)     payRows.push({ sale_id: saleId!, method: 'card',     amount: cardFinal })
+            if (transferFinal > 0) payRows.push({ sale_id: saleId!, method: 'transfer', amount: transferFinal })
+          } else {
+            if (hasCash)     payRows.push({ sale_id: saleId!, method: 'cash',     amount: effectiveTotal })
+            if (hasCard)     payRows.push({ sale_id: saleId!, method: 'card',     amount: effectiveTotal })
+            if (hasTransfer) payRows.push({ sale_id: saleId!, method: 'transfer', amount: effectiveTotal })
+          }
+        }
+        if (payRows.length > 0) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (supabase as any).from('sale_payments').insert(payRows)
+          } catch { /* no-fatal: tabla puede no existir en instancias antiguas */ }
+        }
+      }
+
+      // 4 — Decrementar stock (no-fatal)
       await Promise.allSettled(cart.map(item =>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (supabase as any)

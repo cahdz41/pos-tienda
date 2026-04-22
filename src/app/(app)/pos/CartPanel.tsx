@@ -46,7 +46,7 @@ export default function CartPanel({
 
   return (
     <div
-      className="w-72 shrink-0 flex flex-col h-full"
+      className="w-[420px] shrink-0 flex flex-col h-full"
       style={{ background: 'var(--surface)', borderLeft: '1px solid var(--border)' }}
     >
       {/* Header */}
@@ -125,9 +125,9 @@ export default function CartPanel({
                   </p>
 
                   {/* Precio unitario + toggle mayoreo */}
-                  <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className="flex items-center gap-1.5 mt-1">
                     {editingId === item.variant.id ? (
-                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                         <input
                           autoFocus
                           type="number"
@@ -139,25 +139,32 @@ export default function CartPanel({
                             if (e.key === 'Escape') setEditingId(null)
                           }}
                           onClick={e => e.stopPropagation()}
-                          className="w-20 text-xs rounded px-1.5 py-0.5 outline-none"
-                          style={{ background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--accent)', fontFamily: 'monospace' }}
+                          className="w-28 rounded px-2 py-1 outline-none"
+                          style={{ background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--accent)', fontFamily: 'monospace', fontSize: '15px', fontWeight: 700 }}
                         />
                         <button
                           onMouseDown={e => { e.preventDefault(); confirmEdit(item.variant.id) }}
-                          className="text-xs font-bold rounded px-1.5 py-0.5 leading-none"
-                          style={{ background: 'var(--accent)', color: '#000' }}
+                          className="font-bold rounded px-2 py-1 leading-none"
+                          style={{ background: 'var(--accent)', color: '#000', fontSize: '14px' }}
                           title="Confirmar precio"
                         >✓</button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1">
-                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold" style={{ color: 'var(--text-muted)' }}>
                           ${item.unitPrice.toLocaleString('es-MX')} c/u
                         </p>
                         <button
                           onClick={e => { e.stopPropagation(); setEditingId(item.variant.id); setEditValue(String(item.unitPrice)) }}
-                          className="text-xs leading-none"
-                          style={{ color: 'var(--accent)', opacity: 0.7 }}
+                          style={{
+                            width: '26px', height: '26px',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            borderRadius: '6px', fontSize: '14px',
+                            color: 'var(--accent)',
+                            background: 'rgba(240,180,41,0.12)',
+                            border: '1px solid rgba(240,180,41,0.3)',
+                            cursor: 'pointer',
+                          }}
                           title="Editar precio"
                         >
                           ✏️
@@ -182,31 +189,31 @@ export default function CartPanel({
 
                   {/* Controles cantidad + subtotal */}
                   <div className="flex items-center justify-between mt-2">
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => onRemoveOne(item.variant.id)}
-                        className="w-6 h-6 rounded flex items-center justify-center text-sm font-bold"
-                        style={{ background: 'var(--border)', color: 'var(--text)' }}
+                        className="w-8 h-8 rounded flex items-center justify-center font-bold"
+                        style={{ background: 'var(--border)', color: 'var(--text)', fontSize: '18px' }}
                       >
                         −
                       </button>
                       <span
-                        className="w-7 text-center text-sm font-bold"
-                        style={{ color: 'var(--text)' }}
+                        className="w-8 text-center font-bold"
+                        style={{ color: 'var(--text)', fontSize: '16px' }}
                       >
                         {item.quantity}
                       </span>
                       <button
                         onClick={() => onAdd(item.variant)}
-                        className="w-6 h-6 rounded flex items-center justify-center text-sm font-bold"
-                        style={{ background: 'var(--border)', color: 'var(--text)' }}
+                        className="w-8 h-8 rounded flex items-center justify-center font-bold"
+                        style={{ background: 'var(--border)', color: 'var(--text)', fontSize: '18px' }}
                       >
                         +
                       </button>
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-bold" style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>
+                      <span className="text-base font-bold" style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>
                         ${(item.unitPrice * item.quantity).toLocaleString('es-MX')}
                       </span>
                       <button

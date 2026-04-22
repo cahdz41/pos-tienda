@@ -4,6 +4,80 @@ import { useEffect, useState, useMemo } from 'react'
 import type { StoreProduct } from '@/types'
 import ProductGrid from '@/components/tienda/ProductGrid'
 
+const LOGO_URL = 'https://res.cloudinary.com/dflnist9g/image/upload/v1776893327/303479618_567324658514485_3402746677447074430_n_dujqec.jpg'
+
+// 22 partículas con posiciones y timings determinísticos (SSR-safe)
+const PARTICLES = Array.from({ length: 22 }, (_, i) => ({
+  left:     `${5  + ((i * 17 + 11) % 85)}%`,
+  top:      `${10 + ((i * 23 +  7) % 75)}%`,
+  size:     1.5 + (i % 3) * 0.7,
+  delay:    `${((i * 280) % 3500) / 1000}s`,
+  duration: `${3.5 + (i % 4) * 0.8}s`,
+  color:    i % 5 === 0 ? '#ff6020' : '#cc2020',
+  driftX:   `${-30 + (i % 7) * 10}px`,
+}))
+
+const HERO_CSS = `
+  @keyframes glitch1 {
+    0%, 88%, 100% { clip-path: inset(0 0 100% 0); transform: translate(0); }
+    89% { clip-path: inset(15% 0 65% 0); transform: translate(-5px, 2px); }
+    90% { clip-path: inset(55% 0 25% 0); transform: translate(5px, -2px); }
+    91% { clip-path: inset(35% 0 45% 0); transform: translate(-3px, 1px); }
+    92% { clip-path: inset(0 0 100% 0); }
+  }
+  @keyframes neonFlicker {
+    0%, 93%, 100% {
+      text-shadow: 0 0 10px rgba(200,20,20,0.9), 0 0 30px rgba(200,20,20,0.5), 0 0 60px rgba(200,20,20,0.2);
+      opacity: 1;
+    }
+    94% { opacity: 0.6; text-shadow: 0 0 4px rgba(200,20,20,0.3); }
+    95% { opacity: 1; text-shadow: 0 0 20px rgba(200,20,20,1), 0 0 50px rgba(200,20,20,0.7), 0 0 90px rgba(200,20,20,0.3); }
+    96% { opacity: 0.8; }
+    97% { opacity: 1; }
+  }
+  @keyframes particleDrift {
+    0%   { transform: translateY(0)      translateX(0);             opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 0.5; }
+    100% { transform: translateY(-400px) translateX(var(--dx, 20px)); opacity: 0; }
+  }
+  @keyframes scanline {
+    from { top: -2px; }
+    to   { top: 100%; }
+  }
+  @keyframes neonBorderPulse {
+    0%,100% {
+      box-shadow: 0 0 8px  rgba(200,20,20,0.4), 0 0 20px rgba(200,20,20,0.2), inset 0 0 12px rgba(200,20,20,0.08);
+      border-color: rgba(200,20,20,0.5);
+    }
+    50% {
+      box-shadow: 0 0 22px rgba(200,20,20,0.9), 0 0 45px rgba(200,20,20,0.5), 0 0 70px rgba(200,20,20,0.2), inset 0 0 20px rgba(200,20,20,0.12);
+      border-color: rgba(200,20,20,0.95);
+    }
+  }
+  @keyframes energyLine {
+    0%   { transform: scaleX(0); opacity: 0.9; }
+    60%  { transform: scaleX(1); opacity: 0.6; }
+    100% { transform: scaleX(1); opacity: 0;   }
+  }
+  @keyframes heroTextSlide {
+    from { transform: translateX(-60px); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+  }
+  @keyframes logoScale {
+    from { transform: translate(-50%, -50%) scale(0.65); opacity: 0; }
+    to   { transform: translate(-50%, -50%) scale(1);    opacity: 1; }
+  }
+  @keyframes shockwave {
+    0%   { transform: translate(-50%, -50%) scale(0.3); opacity: 0.8; }
+    100% { transform: translate(-50%, -50%) scale(5.5); opacity: 0;   }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 0.45; }
+  }
+`
+
 // Categorías de display → keywords para matchear contra categorías internas del inventario
 const STORE_CATEGORIES = [
   { label: 'PROTEINAS',    keywords: ['prote'] },
@@ -18,82 +92,212 @@ const STORE_CATEGORIES = [
 
 function matchCategory(productCat: string | null, keywords: string[]): boolean {
   if (!productCat) return false
-  // Normaliza: minúsculas + quita acentos
-  const norm = productCat.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const norm = productCat.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   return keywords.some(k => norm.includes(k.toLowerCase()))
 }
 
 function Hero({ onShopClick }: { onShopClick: () => void }) {
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    const t = setInterval(() => setTick(k => k + 1), 8000)
+    return () => clearInterval(t)
+  }, [])
+
   return (
     <section style={{
       position: 'relative',
       minHeight: '92vh',
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'flex-end',
-      padding: '0 max(24px, calc(50vw - 680px)) 80px',
       overflow: 'hidden',
+      background: 'linear-gradient(135deg, #050005 0%, #0a0005 50%, #050010 100%)',
     }}>
-      <div style={{
-        position: 'absolute', inset: 0,
-        background: 'radial-gradient(ellipse 80% 60% at 60% 40%, #1A1200 0%, #0A0A0A 70%)',
-        zIndex: 0,
-      }} />
-      <div style={{
-        position: 'absolute', top: '-200px', right: '-100px',
-        width: '600px', height: '600px', borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(240,180,41,0.07) 0%, transparent 70%)',
-        zIndex: 0,
-      }} />
+      <style>{HERO_CSS}</style>
 
-      <div style={{ position: 'relative', zIndex: 1 }}>
-        <p style={{
-          fontFamily: 'var(--font-syne, system-ui)',
-          fontSize: '11px', fontWeight: 600, color: '#F0B429',
-          letterSpacing: '0.25em', textTransform: 'uppercase', margin: '0 0 24px',
+      {/* Todo lo animado está bajo este div — al cambiar key React lo remonta y reinicia las animaciones */}
+      <div key={tick} style={{ position: 'relative', width: '100%', minHeight: '92vh' }}>
+
+        {/* Scanlines estáticas */}
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none',
+          backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px)',
+        }} />
+
+        {/* Scanline móvil */}
+        <div style={{
+          position: 'absolute', left: 0, right: 0, height: '2px',
+          background: 'linear-gradient(90deg, transparent, rgba(200,20,20,0.55), transparent)',
+          zIndex: 3, pointerEvents: 'none',
+          animation: 'scanline 5s linear infinite',
+        }} />
+
+        {/* Partículas */}
+        {PARTICLES.map((p, i) => (
+          <div key={i} style={{
+            position: 'absolute',
+            left: p.left, top: p.top,
+            width: `${p.size}px`, height: `${p.size}px`,
+            borderRadius: '50%',
+            background: p.color,
+            boxShadow: `0 0 ${p.size * 2}px ${p.color}`,
+            zIndex: 1, pointerEvents: 'none',
+            '--dx': p.driftX,
+            animation: `particleDrift ${p.duration} ${p.delay} ease-in-out infinite`,
+          } as React.CSSProperties} />
+        ))}
+
+        {/* Anillos shockwave ×3 */}
+        {([0, 0.3, 0.6] as const).map((delay, i) => (
+          <div key={i} style={{
+            position: 'absolute',
+            left: '50%', top: '42%',
+            width: '200px', height: '200px',
+            borderRadius: '50%',
+            border: `${1.5 - i * 0.3}px solid rgba(200,20,20,${0.6 - i * 0.15})`,
+            zIndex: 4, pointerEvents: 'none',
+            animation: `shockwave 1.5s ${delay}s ease-out both`,
+          }} />
+        ))}
+
+        {/* Líneas de energía ×3 */}
+        {([40, 44, 48] as const).map((top, i) => (
+          <div key={i} style={{
+            position: 'absolute', left: 0, right: 0,
+            top: `${top}%`, height: '1px',
+            background: `linear-gradient(90deg, transparent, rgba(200,20,20,${0.45 - i * 0.1}) 50%, transparent)`,
+            zIndex: 4, pointerEvents: 'none',
+            transformOrigin: 'center',
+            animation: `energyLine 1.6s ${0.15 + i * 0.2}s ease-out both`,
+          }} />
+        ))}
+
+        {/* Logo central */}
+        <div style={{
+          position: 'absolute',
+          left: '50%', top: '42%',
+          zIndex: 6,
+          animation: 'logoScale 0.9s 0.15s ease-out both',
         }}>
-          Nutrición deportiva · Suplementos
-        </p>
-        <h1 style={{
-          fontFamily: 'var(--font-syne, system-ui)',
-          fontWeight: 800,
-          fontSize: 'clamp(52px, 10vw, 130px)',
-          color: '#FFFFFF', margin: '0 0 32px',
-          lineHeight: 0.92, letterSpacing: '-4px', maxWidth: '900px',
+          {/* Anillo exterior pulsante */}
+          <div style={{
+            width: '220px', height: '220px',
+            borderRadius: '50%', overflow: 'hidden',
+            border: '3px solid rgba(200,20,20,0.6)',
+            animation: 'neonBorderPulse 2.8s ease-in-out infinite',
+          }}>
+            <img src={LOGO_URL} alt="Chocholand" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          </div>
+          {/* Capa glitch encima */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            borderRadius: '50%', overflow: 'hidden',
+            zIndex: 1, pointerEvents: 'none',
+          }}>
+            <img src={LOGO_URL} alt="" aria-hidden style={{
+              width: '100%', height: '100%', objectFit: 'cover',
+              mixBlendMode: 'screen', opacity: 0.25,
+              filter: 'hue-rotate(180deg) saturate(4)',
+              animation: 'glitch1 5s 1s ease-in-out infinite',
+            }} />
+          </div>
+        </div>
+
+        {/* Texto hero — bottom left */}
+        <div style={{
+          position: 'absolute',
+          bottom: '80px',
+          left: 'max(24px, calc(50vw - 680px))',
+          zIndex: 8,
+          animation: 'heroTextSlide 0.9s 0.3s ease-out both',
         }}>
-          ELEVA TU<br />
-          <span style={{ color: '#F0B429' }}>RENDIMIENTO</span>
-        </h1>
-        <p style={{
-          fontSize: '16px', color: '#555555', margin: '0 0 48px',
-          maxWidth: '440px', lineHeight: 1.6,
+          <p style={{
+            margin: '0 0 20px',
+            fontSize: '15px', letterSpacing: '5px',
+            color: '#cc2020',
+            fontFamily: 'var(--font-syne, system-ui)',
+            fontWeight: 600, textTransform: 'uppercase',
+          }}>
+            ▪ NUTRICIÓN DEPORTIVA · SUPLEMENTOS
+          </p>
+
+          <h1 style={{ margin: 0, lineHeight: 0.9 }}>
+            <span style={{
+              display: 'block',
+              fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))',
+              fontSize: 'clamp(56px, 8vw, 86px)', fontWeight: 900,
+              color: '#FFFFFF', letterSpacing: '-2px',
+              animation: 'glitch1 7s 2.5s ease-in-out infinite',
+            }}>
+              ELEVA TU
+            </span>
+            <span style={{
+              display: 'block',
+              fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))',
+              fontSize: 'clamp(56px, 8vw, 86px)', fontWeight: 900,
+              color: '#ff2020', letterSpacing: '-2px',
+              animation: 'neonFlicker 4.5s 1.2s ease-in-out infinite',
+              textShadow: '0 0 10px rgba(200,20,20,0.9), 0 0 30px rgba(200,20,20,0.5)',
+            }}>
+              RENDIMIENTO
+            </span>
+          </h1>
+
+          <button
+            onClick={onShopClick}
+            style={{
+              marginTop: '44px',
+              display: 'inline-flex', alignItems: 'center', gap: '10px',
+              padding: '14px 28px',
+              background: 'rgba(200,20,20,0.12)',
+              border: '1px solid rgba(200,20,20,0.7)',
+              borderRadius: '8px', color: '#FFFFFF', fontSize: '13px',
+              fontWeight: 700, fontFamily: 'var(--font-syne, system-ui)',
+              letterSpacing: '0.1em', cursor: 'pointer',
+              textTransform: 'uppercase',
+              transition: 'background 0.15s, box-shadow 0.15s',
+            }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLButtonElement
+              el.style.background = 'rgba(200,20,20,0.28)'
+              el.style.boxShadow = '0 0 22px rgba(200,20,20,0.4)'
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLButtonElement
+              el.style.background = 'rgba(200,20,20,0.12)'
+              el.style.boxShadow = 'none'
+            }}
+          >
+            VER CATÁLOGO
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Texto vertical derecha */}
+        <div style={{
+          position: 'absolute',
+          right: 'max(24px, calc(50vw - 680px))',
+          top: '50%',
+          zIndex: 5, pointerEvents: 'none',
+          animation: 'fadeIn 1.2s 0.8s ease-out both',
+          opacity: 0,
         }}>
-          Suplementos de calidad premium. Stock siempre actualizado en tiempo real con nuestra tienda.
-        </p>
-        <button
-          onClick={onShopClick}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: '10px',
-            padding: '16px 32px', background: '#F0B429', border: 'none',
-            borderRadius: '8px', color: '#000000', fontSize: '14px',
-            fontWeight: 700, fontFamily: 'var(--font-syne, system-ui)',
-            letterSpacing: '0.05em', cursor: 'pointer', transition: 'background 0.15s',
-          }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#FFCA4A' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#F0B429' }}
-        >
-          VER CATÁLOGO
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
-        </button>
+          <span style={{
+            display: 'block',
+            writingMode: 'vertical-rl',
+            textOrientation: 'mixed',
+            fontSize: '10px', letterSpacing: '0.2em',
+            color: 'rgba(200,20,20,0.55)',
+            fontFamily: 'var(--font-syne, system-ui)',
+            fontWeight: 600, textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
+            transform: 'rotate(180deg)',
+          }}>
+            CHOCHOLAND · SUPLEMENTOS DEPORTIVOS · 2025
+          </span>
+        </div>
+
       </div>
-
-      <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0, height: '1px',
-        background: 'linear-gradient(90deg, transparent, #1A1A1A 20%, #1A1A1A 80%, transparent)',
-        zIndex: 1,
-      }} />
     </section>
   )
 }
@@ -151,6 +355,7 @@ export default function TiendaPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+
   useEffect(() => {
     fetch('/api/store/products')
       .then(r => r.json())
@@ -176,7 +381,6 @@ export default function TiendaPage() {
       }} />
 
       <section id="catalogo" style={{ padding: '80px max(24px, calc(50vw - 680px)) 100px' }}>
-        {/* Encabezado */}
         <div style={{ marginBottom: '48px' }}>
           <p style={{
             fontFamily: 'var(--font-syne, system-ui)',
@@ -194,7 +398,6 @@ export default function TiendaPage() {
           </h2>
         </div>
 
-        {/* Layout: sidebar + grid */}
         <div style={{ display: 'flex', gap: '48px', alignItems: 'flex-start' }}>
           <Sidebar selected={selectedCategory} onSelect={setSelectedCategory} />
 

@@ -1,12 +1,14 @@
 'use client'
 
 import { useEffect, useState, useMemo, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ProductVariant } from '@/types'
 import AdjustModal from './AdjustModal'
 import ImportModal from './ImportModal'
 import ExportModal from './ExportModal'
+import ReporteModal from './ReporteModal'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -62,17 +64,20 @@ function ExpiryCell({ date }: { date: string | null }) {
 export default function InventarioPage() {
   const { profile } = useAuth()
   const isOwner = profile?.role === 'owner'
+  const searchParams = useSearchParams()
 
   const [allVariants, setAllVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [soloConExistencias, setSoloConExistencias] = useState(false)
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
 
   // Modales
   const [adjustVariant, setAdjustVariant] = useState<ProductVariant | null>(null)
   const [showImport, setShowImport]   = useState(false)
   const [showExport, setShowExport]   = useState(false)
+  const [showReporte, setShowReporte] = useState(false)
 
   // Edición inline de fecha de caducidad
   const [editingExpiry, setEditingExpiry] = useState<string | null>(null) // variant id
@@ -94,6 +99,17 @@ export default function InventarioPage() {
   }
 
   useEffect(() => { loadInventory().then(() => focusSearch()) }, [])
+
+  // Auto-abrir AdjustModal si se llegó desde el POS con ?ajustar=BARCODE
+  useEffect(() => {
+    const barcode = searchParams?.get('ajustar')
+    if (!barcode || allVariants.length === 0) return
+    const variant = allVariants.find(v => v.barcode === barcode)
+    if (variant) {
+      setSearch(barcode)
+      setAdjustVariant(variant)
+    }
+  }, [searchParams, allVariants])
 
   async function loadInventory() {
     setLoading(true)
@@ -222,9 +238,19 @@ export default function InventarioPage() {
     )
   }
 
+  const categories = useMemo(() => {
+    const seen = new Set<string>()
+    for (const v of allVariants) {
+      const cat = v.product?.category?.trim()
+      if (cat) seen.add(cat)
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b, 'es'))
+  }, [allVariants])
+
   const filtered = useMemo(() => {
     let list = allVariants
     if (soloConExistencias) list = list.filter(v => v.stock > 0)
+    if (categoryFilter) list = list.filter(v => (v.product?.category?.trim() ?? '') === categoryFilter)
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(v =>
@@ -235,7 +261,7 @@ export default function InventarioPage() {
       )
     }
     return list
-  }, [allVariants, search, soloConExistencias])
+  }, [allVariants, search, soloConExistencias, categoryFilter])
 
   function handleStockSaved(
     variantId: string,
@@ -287,6 +313,16 @@ export default function InventarioPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowReporte(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: '#0c1a2e', color: '#60a5fa', border: '1px solid #1e3a5f' }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/>
+              </svg>
+              Reporte de Inventario
+            </button>
+            <button
               onClick={() => setShowExport(true)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold"
               style={{ background: '#052e16', color: '#4ade80', border: '1px solid #166534' }}
@@ -335,6 +371,37 @@ export default function InventarioPage() {
             Solo con existencias
           </button>
         </div>
+
+        {/* Pills de categoría */}
+        {categories.length > 0 && (
+          <div className="flex gap-1.5 mt-2 flex-wrap">
+            <button
+              onClick={() => setCategoryFilter(null)}
+              className="px-3 py-1 rounded-full text-xs font-semibold"
+              style={{
+                background: categoryFilter === null ? 'var(--accent)' : 'var(--surface)',
+                color: categoryFilter === null ? '#000' : 'var(--text-muted)',
+                border: `1px solid ${categoryFilter === null ? 'var(--accent)' : 'var(--border)'}`,
+              }}
+            >
+              Todas
+            </button>
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(cat === categoryFilter ? null : cat)}
+                className="px-3 py-1 rounded-full text-xs font-semibold"
+                style={{
+                  background: categoryFilter === cat ? 'var(--accent)' : 'var(--surface)',
+                  color: categoryFilter === cat ? '#000' : 'var(--text-muted)',
+                  border: `1px solid ${categoryFilter === cat ? 'var(--accent)' : 'var(--border)'}`,
+                }}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Tabla */}
@@ -507,6 +574,14 @@ export default function InventarioPage() {
         <ExportModal
           variants={allVariants}
           onClose={() => { setShowExport(false); focusSearch() }}
+        />
+      )}
+
+      {/* Modal reporte de inventario */}
+      {showReporte && (
+        <ReporteModal
+          variants={allVariants}
+          onClose={() => { setShowReporte(false); focusSearch() }}
         />
       )}
     </div>

@@ -720,3 +720,137 @@ Las categorías ahora se derivan directamente de los datos reales en BD (en luga
 - Metadata dinámica por producto (`generateMetadata` en `tienda/productos/[productId]`)
 - Sitemap automático (`app/sitemap.ts`)
 - Loading skeletons mientras cargan los productos
+
+---
+
+## 🎨 Encabezado Neon Energy — Plan de implementación (Opción 3)
+
+> Diseño exportado desde Claude Design (`claude.ai/design`).  
+> Archivo final de referencia: `Encabezado Chocholand v2.html` (bundle descargado vía API).
+
+### Descripción del diseño
+
+Estilo **gaming/esports** — fondo oscuro casi negro-morado, partículas rojas flotantes, efecto glitch en el logo, scanlines, y texto hero con efecto neon rojo pulsante. Toda la animación se reinicia automáticamente cada 8 segundos (truco `key` de React).
+
+---
+
+### Archivos a modificar
+
+#### 1. `src/app/tienda/layout.tsx` — Agregar fuentes Barlow
+
+El diseño usa `Barlow Condensed` (700, 900) y `Barlow` (400, 600) de Google Fonts.  
+Se añaden junto a las fuentes actuales (Syne + DM Sans) con `next/font/google`.
+
+```tsx
+import { Syne, DM_Sans, Barlow_Condensed, Barlow } from 'next/font/google'
+```
+
+Las variables CSS nuevas: `--font-barlow-condensed`, `--font-barlow`.
+
+---
+
+#### 2. `src/components/tienda/StoreNav.tsx` — Navbar neon
+
+Reemplaza la barra actual (negra/amarilla) por la navbar de la Opción 3.
+
+| Elemento | Diseño actual | Diseño nuevo |
+|---|---|---|
+| Fondo | `rgba(10,10,10,0.92)` | `rgba(5,0,5,0.92)` |
+| Borde inferior | `#1A1A1A` | `rgba(200,20,20,0.5)` (rojo) |
+| Logo | Solo texto | Foto circular 44×44px con borde rojo + glow |
+| Texto "CHOCHOLAND" | Amarillo estático | Blanco con animación `neonFlicker` rojo |
+| "Mi cuenta" | Gris / ámbar | Rojo `#cc2020`, uppercase, letter-spacing |
+| Ícono carrito | Borde gris | Borde rojo `rgba(200,20,20,0.7)` + glow |
+
+**Funcionalidad que se mantiene intacta:**
+- Badge de cantidad en el carrito (`itemCount`)
+- `openCart()` al hacer clic en el ícono
+- Link a `/tienda/cuenta/pedidos` si hay sesión activa
+- Link a `/tienda/auth/login` si no hay sesión
+
+**Animaciones CSS a agregar (como `<style>` dentro del componente o en `globals.css`):**
+```css
+@keyframes neonFlicker { /* flicker del texto CHOCHOLAND */ }
+@keyframes navSlide    { /* entrada desde arriba al montar */ }
+```
+
+---
+
+#### 3. `src/app/tienda/page.tsx` — Reemplazar componente `Hero`
+
+El `Hero` actual es texto estático sobre fondo oscuro. El nuevo Hero tiene:
+
+**Estructura de capas (de fondo a frente):**
+
+| Capa | Z-Index | Descripción |
+|---|---|---|
+| Fondo | base | `linear-gradient(135deg, #050005, #0a0005, #050010)` |
+| Scanlines estáticas | 2 | `repeating-linear-gradient` horizontal semitransparente |
+| Scanline móvil | 3 | Línea roja 2px que baja con `animation: scanline 5s linear infinite` |
+| Partículas (22) | 1 | Puntos rojos/naranjas con drift aleatorio hacia arriba (`particleDrift`) |
+| Anillos shockwave (×3) | 4 | Círculos que explotan del centro al montar (`shockwave 1.4s`) |
+| Líneas de energía (×3) | 4 | Líneas horizontales que se expanden desde el centro |
+| **Logo central** | 6 | 220×220px con borde neon pulsante + glow rojo + glitch overlay encima |
+| **Texto hero** | 8 | Bottom-left: subtítulo + "ELEVA TU" + "RENDIMIENTO" |
+| Texto vertical | 5 | "CHOCHOLAND · SUPLEMENTOS DEPORTIVOS · 2025" rotado a la derecha |
+
+**Texto hero (tamaños finales según v2):**
+- Subtítulo: `fontSize: 15`, `letterSpacing: 5`, color rojo `#cc2020`  
+  → `"⬛ NUTRICIÓN DEPORTIVA · SUPLEMENTOS"`
+- Línea 1: `fontSize: 86`, `fontWeight: 900`, color blanco, fuente Barlow Condensed  
+  → `"ELEVA TU"` (con animación glitch)
+- Línea 2: `fontSize: 86`, color `#ff2020`, animación `neonFlicker`  
+  → `"RENDIMIENTO"`
+
+**Logo:**  
+⚠️ Confirmar ruta antes de implementar. El prototipo usa `uploads/303479618_...jpg`.  
+En el proyecto real, buscar en `public/` o usar URL de Cloudinary.
+
+**Replay cada 8 segundos:**
+```tsx
+const [key, setKey] = useState(0)
+useEffect(() => {
+  const t = setInterval(() => setKey(k => k + 1), 8000)
+  return () => clearInterval(t)
+}, [])
+// ...
+<div key={key} ...> {/* todo el hero */} </div>
+```
+
+**Prop `onShopClick` se mantiene** para el scroll suave al catálogo.
+
+---
+
+### Animaciones CSS requeridas
+
+```css
+@keyframes glitch1         { /* desplazamiento de clip-path en franjas */ }
+@keyframes neonFlicker     { /* parpadeo text-shadow rojo */ }
+@keyframes particleDrift   { /* partícula sube 400px con translateX aleatorio */ }
+@keyframes scanline        { /* línea baja de -100% a 600px */ }
+@keyframes neonBorderPulse { /* borde del logo oscila entre tenue y brillante */ }
+@keyframes logoGlow        { /* drop-shadow del logo pulsa */ }
+@keyframes energyLine      { /* línea horizontal se expande desde el centro */ }
+@keyframes navSlide        { /* navbar entra desde arriba */ }
+@keyframes heroTextSlide   { /* texto hero entra desde la izquierda */ }
+@keyframes logoScale       { /* logo aparece escalando */ }
+@keyframes fadeUp          { /* texto vertical aparece subiendo */ }
+@keyframes shockwave       { /* anillo escala de 0.5× a 5× y desaparece */ }
+```
+
+Pueden ir en `globals.css` (para reutilizar) o como `<style>` dentro de cada componente.
+
+---
+
+### Lo que NO cambia
+- Funcionalidad de carrito y autenticación
+- Catálogo de productos debajo del hero
+- Sidebar de categorías
+- `CartDrawer`
+- Rutas de checkout y órdenes
+
+---
+
+### Pendiente confirmar antes de ejecutar
+- [ ] Ruta real del logo de Chocholand (¿`public/logo.jpg`? ¿URL Cloudinary?)
+- [ ] ¿Añadir animaciones en `globals.css` o como `<style>` inline en cada componente?
