@@ -7,6 +7,8 @@ import type { CartItem } from '@/types'
 import { StoreOrdersPanel } from '@/components/tienda/StoreOrdersPanel'
 import PhotoManager from '@/components/PhotoManager'
 
+type StoreProduct = { id: string; name: string; category: string | null; store_visible: boolean }
+
 const K = {
   businessName: 'pos_business_name',
   footer:       'pos_receipt_footer',
@@ -89,19 +91,100 @@ export default function ConfiguracionPage() {
   // ── Tienda Online ─────────────────────────────────────────────────────
   const [storeCount, setStoreCount] = useState<number | null>(null)
 
+  // ── Visibilidad en Tienda ─────────────────────────────────────────────
+  const [visProducts,    setVisProducts]    = useState<StoreProduct[]>([])
+  const [catVisibility,  setCatVisibility]  = useState<Record<string, boolean>>({})
+  const [productSearch,  setProductSearch]  = useState('')
+  const [loadingVis,     setLoadingVis]     = useState(false)
+
   // ── Reporte por email ─────────────────────────────────────────────────
   const [reportEmail, setReportEmail] = useState(() => load(K.reportEmail, ''))
   const [sending,     setSending]     = useState(false)
   const [sendResult,  setSendResult]  = useState<'ok' | 'error' | null>(null)
   const [sendError,   setSendError]   = useState('')
 
-  useEffect(() => { loadCashiers(); loadStoreProducts() }, [])
+  useEffect(() => { loadCashiers(); loadStoreProducts(); loadVisibility() }, [])
 
   // ── Helpers localStorage ──────────────────────────────────────────────
   function persist(key: string, value: string) {
     localStorage.setItem(key, value)
     setFlash(true)
     setTimeout(() => setFlash(false), 1400)
+  }
+
+  // ── Visibilidad: cargar productos y categorías ────────────────────────
+  async function loadVisibility() {
+    setLoadingVis(true)
+    try {
+      const supabase = createClient()
+
+      const { data: prods } = await supabase
+        .from('products')
+        .select('id, name, category, store_visible')
+        .order('name')
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: catData } = await (supabase as any)
+        .from('store_category_visibility')
+        .select('name, visible')
+
+      setVisProducts((prods ?? []) as StoreProduct[])
+
+      const catMap: Record<string, boolean> = {}
+      for (const p of (prods ?? []) as StoreProduct[]) {
+        if (p.category) catMap[p.category] = true
+      }
+      for (const c of ((catData ?? []) as { name: string; visible: boolean }[])) {
+        catMap[c.name] = c.visible
+      }
+      setCatVisibility(catMap)
+    } finally {
+      setLoadingVis(false)
+    }
+  }
+
+  async function toggleCategory(catName: string) {
+    const newVal = !catVisibility[catName]
+    setCatVisibility(prev => ({ ...prev, [catName]: newVal }))
+    const supabase = createClient()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('store_category_visibility').upsert({ name: catName, visible: newVal })
+  }
+
+  async function activateAllCategories() {
+    if (!window.confirm('¿Hacer visibles TODAS las categorías en la tienda?')) return
+    const supabase = createClient()
+    const updates = Object.keys(catVisibility).map(name => ({ name, visible: true }))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('store_category_visibility').upsert(updates)
+    setCatVisibility(prev => {
+      const next = { ...prev }
+      for (const k of Object.keys(next)) next[k] = true
+      return next
+    })
+  }
+
+  async function toggleProduct(productId: string) {
+    const product = visProducts.find(p => p.id === productId)
+    if (!product) return
+    const newVal = !product.store_visible
+    setVisProducts(prev => prev.map(p => p.id === productId ? { ...p, store_visible: newVal } : p))
+    const supabase = createClient()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('products').update({ store_visible: newVal }).eq('id', productId)
+  }
+
+  async function activateAllProducts() {
+    if (!window.confirm('¿Hacer visibles TODOS los productos en la tienda?')) return
+    setLoadingVis(true)
+    try {
+      const supabase = createClient()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any).from('products').update({ store_visible: true }).neq('store_visible', true)
+      setVisProducts(prev => prev.map(p => ({ ...p, store_visible: true })))
+    } finally {
+      setLoadingVis(false)
+    }
   }
 
   // ── Tienda: contar productos con stock ───────────────────────────────
@@ -410,6 +493,106 @@ export default function ConfiguracionPage() {
               Ver tienda →
             </a>
           </div>
+        </Section>
+
+        {/* ── Visibilidad en Tienda ── */}
+        <Section title="Visibilidad en Tienda">
+          <p className="text-xs -mt-2" style={{ color: 'var(--text-muted)' }}>
+            Los cambios aplican de inmediato en la tienda en línea.
+          </p>
+
+          {loadingVis ? (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded-full border-2 animate-spin"
+                style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Cargando…</span>
+            </div>
+          ) : (
+            <>
+              {/* Categorías */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold" style={{ color: 'var(--text)' }}>Categorías</p>
+                  <button
+                    onClick={activateAllCategories}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg"
+                    style={{ background: 'var(--bg)', color: 'var(--accent)', border: '1px solid var(--accent)' }}
+                  >
+                    Activar todas
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1">
+                  {Object.entries(catVisibility).sort(([a], [b]) => a.localeCompare(b, 'es')).map(([cat, visible]) => (
+                    <div key={cat} className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                      style={{ background: 'var(--bg)', border: '1px solid var(--border)', opacity: visible ? 1 : 0.5 }}>
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{cat}</p>
+                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          {visible ? 'Visible en tienda' : 'Oculta en tienda'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => toggleCategory(cat)}
+                        className="relative shrink-0 w-12 h-6 rounded-full transition-all"
+                        style={{ background: visible ? 'var(--accent)' : 'var(--border)' }}
+                      >
+                        <div className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+                          style={{ left: visible ? '26px' : '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Productos individuales */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold" style={{ color: 'var(--text)' }}>Productos individuales</p>
+                  <button
+                    onClick={activateAllProducts}
+                    disabled={loadingVis}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg disabled:opacity-40"
+                    style={{ background: 'var(--bg)', color: 'var(--accent)', border: '1px solid var(--accent)' }}
+                  >
+                    {loadingVis ? 'Activando…' : 'Activar todos'}
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  placeholder="Buscar producto…"
+                  className="w-full rounded-lg px-3 py-2 text-sm outline-none mb-2"
+                  style={inputStyle}
+                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                  onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                />
+                <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
+                  {visProducts
+                    .filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()))
+                    .map(p => (
+                      <div key={p.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                        style={{ background: 'var(--bg)', border: '1px solid var(--border)', opacity: p.store_visible ? 1 : 0.5 }}>
+                        <div className="min-w-0 mr-3">
+                          <p className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>{p.name}</p>
+                          {p.category && (
+                            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{p.category}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => toggleProduct(p.id)}
+                          className="relative shrink-0 w-12 h-6 rounded-full transition-all"
+                          style={{ background: p.store_visible ? 'var(--accent)' : 'var(--border)' }}
+                        >
+                          <div className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+                            style={{ left: p.store_visible ? '26px' : '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </>
+          )}
         </Section>
 
         {/* ── Fotos de productos ── */}

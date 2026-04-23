@@ -56,9 +56,6 @@ export default function LoginPage() {
           >
             Chocholand Suplementos
           </h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
-            Sistema de punto de venta
-          </p>
         </div>
 
         {/* Formulario */}

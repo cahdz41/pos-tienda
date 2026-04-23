@@ -254,7 +254,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
       if (isNew) {
         const { data, error: err } = await supabase
           .from('products')
-          .insert({ name, category: categoryName || null })
+          .insert({ name, category: categoryName || null, store_visible: true })
           .select('id')
           .single()
         if (err) throw new Error('Error creando producto: ' + err.message)
@@ -263,7 +263,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
         // Orphan: INSERT new product then bulk-reassign ALL original variants
         const { data, error: err } = await supabase
           .from('products')
-          .insert({ name, category: categoryName || null })
+          .insert({ name, category: categoryName || null, store_visible: true })
           .select('id')
           .single()
         if (err) throw new Error('Error creando producto: ' + err.message)

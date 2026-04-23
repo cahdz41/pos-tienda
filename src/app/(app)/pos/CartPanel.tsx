@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import type { RefObject } from 'react'
 import type { CartItem, ProductVariant } from '@/types'
 
 interface Props {
@@ -16,6 +17,7 @@ interface Props {
   onShowHolds: () => void
   heldCount: number
   onVoid: () => void
+  searchRef: RefObject<HTMLInputElement | null>
 }
 
 export default function CartPanel({
@@ -31,6 +33,7 @@ export default function CartPanel({
   onShowHolds,
   heldCount,
   onVoid,
+  searchRef,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -38,16 +41,27 @@ export default function CartPanel({
   const total = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
 
+  function focusSearch() {
+    const el = searchRef.current
+    if (el) {
+      el.focus()
+      el.select()
+    }
+  }
+
   function confirmEdit(variantId: string) {
     const n = parseFloat(editValue)
     if (!isNaN(n) && n >= 0) onPriceChange(variantId, n)
     setEditingId(null)
+    // Devolver foco al buscador y seleccionar todo para escanear inmediatamente
+    setTimeout(focusSearch, 0)
   }
 
   return (
     <div
       className="w-[420px] shrink-0 flex flex-col h-full"
       style={{ background: 'var(--surface)', borderLeft: '1px solid var(--border)' }}
+      onClick={e => { if (editingId) e.stopPropagation() }}
     >
       {/* Header */}
       <div
@@ -135,12 +149,17 @@ export default function CartPanel({
                           onChange={e => setEditValue(e.target.value)}
                           onKeyDown={e => {
                             e.stopPropagation()
-                            if (e.key === 'Enter')  confirmEdit(item.variant.id)
-                            if (e.key === 'Escape') setEditingId(null)
+                            if (e.key === 'Enter') {
+                              confirmEdit(item.variant.id)
+                            }
+                            if (e.key === 'Escape') {
+                              setEditingId(null)
+                              setTimeout(focusSearch, 0)
+                            }
                           }}
                           onClick={e => e.stopPropagation()}
-                          className="w-28 rounded px-2 py-1 outline-none"
-                          style={{ background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--accent)', fontFamily: 'monospace', fontSize: '15px', fontWeight: 700 }}
+                          className="rounded px-3 py-1.5 outline-none"
+                          style={{ width: '140px', background: 'var(--bg)', border: '1px solid var(--accent)', color: 'var(--accent)', fontFamily: 'monospace', fontSize: '18px', fontWeight: 700 }}
                         />
                         <button
                           onMouseDown={e => { e.preventDefault(); confirmEdit(item.variant.id) }}

@@ -8,6 +8,13 @@ export async function GET() {
     { auth: { persistSession: false, autoRefreshToken: false } }
   )
 
+  // Categorías ocultas
+  const { data: catData } = await supabase
+    .from('store_category_visibility')
+    .select('name')
+    .eq('visible', false)
+  const hiddenCats = new Set((catData ?? []).map((c: { name: string }) => c.name))
+
   const { data, error } = await supabase
     .from('products')
     .select(`
@@ -16,12 +23,14 @@ export async function GET() {
         id, flavor, sale_price, stock, image_url
       )
     `)
+    .eq('store_visible', true)
     .order('name')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Solo variantes con stock > 0; excluir productos que quedan sin variantes
+  // Excluir categorías ocultas; solo variantes con stock > 0
   const products = (data ?? [])
+    .filter(p => !hiddenCats.has(p.category))
     .map(p => ({
       ...p,
       product_variants: p.product_variants.filter((v: { stock: number }) => v.stock > 0),

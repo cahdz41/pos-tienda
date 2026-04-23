@@ -302,50 +302,106 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
   )
 }
 
+const CATALOG_CSS = `
+  @keyframes catGlow {
+    0%, 100% { box-shadow: inset 3px 0 0 rgba(200,20,20,0.9), 0 0 10px rgba(200,20,20,0.25); }
+    50%       { box-shadow: inset 3px 0 0 rgba(200,20,20,1),   0 0 22px rgba(200,20,20,0.55); }
+  }
+  @keyframes catPillGlow {
+    0%, 100% { box-shadow: 0 0 8px rgba(200,20,20,0.4),  0 0 18px rgba(200,20,20,0.15); }
+    50%       { box-shadow: 0 0 16px rgba(200,20,20,0.8), 0 0 30px rgba(200,20,20,0.35); }
+  }
+  /* Mobile: sidebar → pills horizontales */
+  @media (max-width: 768px) {
+    .cat-layout  { flex-direction: column !important; gap: 20px !important; }
+    .cat-aside   { width: 100% !important; flex-shrink: 1 !important; }
+    .cat-label   { display: none !important; }
+    .cat-inner   {
+      flex-direction: row !important;
+      flex-wrap: nowrap !important;
+      overflow-x: auto !important;
+      padding-bottom: 6px;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .cat-inner::-webkit-scrollbar { display: none; }
+    .cat-btn {
+      width: auto !important;
+      white-space: nowrap !important;
+      padding: 8px 18px !important;
+      border-radius: 999px !important;
+      text-align: center !important;
+      font-size: 12px !important;
+      box-shadow: none !important;
+    }
+    .cat-btn-active {
+      animation: catPillGlow 2.5s ease-in-out infinite !important;
+    }
+  }
+`
+
 function Sidebar({ selected, onSelect }: { selected: string | null; onSelect: (c: string | null) => void }) {
-  const itemStyle = (active: boolean): React.CSSProperties => ({
-    display: 'block',
-    width: '100%',
-    textAlign: 'left',
-    padding: '10px 14px',
-    borderRadius: '8px',
-    border: 'none',
-    background: active ? 'rgba(240,180,41,0.08)' : 'transparent',
-    color: active ? '#F0B429' : '#555555',
-    fontFamily: 'var(--font-syne, system-ui)',
-    fontSize: '12px',
-    fontWeight: 700,
-    letterSpacing: '0.08em',
-    cursor: 'pointer',
-    transition: 'color 0.15s, background 0.15s',
-  })
+  const ALL_ITEMS = [{ label: 'TODOS', value: null as string | null }, ...STORE_CATEGORIES.map(c => ({ label: c.label, value: c.label }))]
 
   return (
-    <aside style={{ width: '180px', flexShrink: 0, paddingTop: '4px' }}>
-      <p style={{
-        fontSize: '10px', fontWeight: 600, color: '#333333',
-        letterSpacing: '0.15em', textTransform: 'uppercase',
-        margin: '0 0 12px 14px',
+    <aside className="cat-aside" style={{ width: '210px', flexShrink: 0 }}>
+      <style>{CATALOG_CSS}</style>
+      <p className="cat-label" style={{
+        fontSize: '10px', fontWeight: 700,
+        color: 'rgba(200,20,20,0.65)',
+        letterSpacing: '0.22em', textTransform: 'uppercase',
+        margin: '0 0 18px 4px',
+        fontFamily: 'var(--font-syne, system-ui)',
       }}>
-        Categorías
+        — Categorías
       </p>
-      <button style={itemStyle(selected === null)} onClick={() => onSelect(null)}
-        onMouseEnter={e => { if (selected !== null) (e.currentTarget as HTMLButtonElement).style.color = '#FFFFFF' }}
-        onMouseLeave={e => { if (selected !== null) (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
-      >
-        TODOS
-      </button>
-      {STORE_CATEGORIES.map(cat => (
-        <button
-          key={cat.label}
-          style={itemStyle(selected === cat.label)}
-          onClick={() => onSelect(cat.label)}
-          onMouseEnter={e => { if (selected !== cat.label) (e.currentTarget as HTMLButtonElement).style.color = '#FFFFFF' }}
-          onMouseLeave={e => { if (selected !== cat.label) (e.currentTarget as HTMLButtonElement).style.color = '#555555' }}
-        >
-          {cat.label}
-        </button>
-      ))}
+
+      <div className="cat-inner" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        {ALL_ITEMS.map(({ label, value }) => {
+          const active = selected === value
+          return (
+            <button
+              key={label}
+              className={`cat-btn${active ? ' cat-btn-active' : ''}`}
+              onClick={() => onSelect(value)}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '11px 18px',
+                border: 'none',
+                borderRadius: '6px',
+                background: active ? 'rgba(200,20,20,0.1)' : 'transparent',
+                color: active ? '#ff4040' : 'rgba(255,255,255,0.38)',
+                fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))',
+                fontSize: '15px',
+                fontWeight: 700,
+                letterSpacing: '0.14em',
+                cursor: 'pointer',
+                transition: 'color 0.15s, background 0.15s',
+                textShadow: active ? '0 0 12px rgba(200,20,20,0.9), 0 0 28px rgba(200,20,20,0.45)' : 'none',
+                animation: active ? 'catGlow 2.5s ease-in-out infinite' : 'none',
+              }}
+              onMouseEnter={e => {
+                if (!active) {
+                  const el = e.currentTarget as HTMLButtonElement
+                  el.style.color = 'rgba(255,255,255,0.9)'
+                  el.style.background = 'rgba(255,255,255,0.05)'
+                }
+              }}
+              onMouseLeave={e => {
+                if (!active) {
+                  const el = e.currentTarget as HTMLButtonElement
+                  el.style.color = 'rgba(255,255,255,0.38)'
+                  el.style.background = 'transparent'
+                }
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
     </aside>
   )
 }
@@ -398,7 +454,7 @@ export default function TiendaPage() {
           </h2>
         </div>
 
-        <div style={{ display: 'flex', gap: '48px', alignItems: 'flex-start' }}>
+        <div className="cat-layout" style={{ display: 'flex', gap: '48px', alignItems: 'flex-start' }}>
           <Sidebar selected={selectedCategory} onSelect={setSelectedCategory} />
 
           <div style={{ flex: 1, minWidth: 0 }}>

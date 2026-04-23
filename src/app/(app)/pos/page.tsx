@@ -216,6 +216,7 @@ export default function PosPage() {
         onShowHolds={() => setShowHolds(true)}
         heldCount={heldTickets.length}
         onVoid={() => setShowVoid(true)}
+        searchRef={searchRef}
       />
 
       {/* Modal de pago */}
