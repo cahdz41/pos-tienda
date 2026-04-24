@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ProductVariant } from '@/types'
@@ -125,11 +125,18 @@ export default function AdjustModal({ variant, onClose, onSaved }: Props) {
 
   const productName = `${variant.product?.name ?? ''}${variant.flavor ? ` — ${variant.flavor}` : ''}`
 
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.85)', overflowY: 'auto' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
         className="w-full max-w-sm rounded-2xl flex flex-col overflow-hidden"
