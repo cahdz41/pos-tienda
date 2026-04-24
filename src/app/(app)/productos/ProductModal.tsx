@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 import type { Category } from '@/types'
 import type { ProductRow, VariantFull } from './page'
@@ -165,6 +165,15 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
   const [error, setError] = useState<string | null>(null)
 
   const isLocked = conflict !== null
+
+  const brandInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isNew) {
+      const t = setTimeout(() => brandInputRef.current?.focus(), 100)
+      return () => clearTimeout(t)
+    }
+  }, [isNew])
 
   function updateVariant(key: string, field: keyof VariantDraft, value: string) {
     setVariants(prev => prev.map(v => v._key === key ? { ...v, [field]: value } : v))
@@ -397,6 +406,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
                       <div key={label}>
                         <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{label}</label>
                         <input
+                          ref={label === 'Marca' ? brandInputRef : undefined}
                           type="text"
                           value={val}
                           onChange={e => set(titleCase(e.target.value))}

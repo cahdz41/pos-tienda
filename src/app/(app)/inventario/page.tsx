@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ProductVariant } from '@/types'
@@ -65,6 +65,7 @@ export default function InventarioPage() {
   const { profile } = useAuth()
   const isOwner = profile?.role === 'owner'
   const searchParams = useSearchParams()
+  const router = useRouter()
 
   const [allVariants, setAllVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
@@ -78,6 +79,7 @@ export default function InventarioPage() {
   const [showImport, setShowImport]   = useState(false)
   const [showExport, setShowExport]   = useState(false)
   const [showReporte, setShowReporte] = useState(false)
+  const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null)
 
   // Edición inline de fecha de caducidad
   const [editingExpiry, setEditingExpiry] = useState<string | null>(null) // variant id
@@ -262,6 +264,42 @@ export default function InventarioPage() {
     }
     return list
   }, [allVariants, search, soloConExistencias, categoryFilter])
+
+  // Detectar barcode escaneado que no existe en inventario
+  const notFoundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastDetectedRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (loading || !search.trim() || !/^\d{6,}$/.test(search.trim())) {
+      if (notFoundTimerRef.current) {
+        clearTimeout(notFoundTimerRef.current)
+        notFoundTimerRef.current = null
+      }
+      return
+    }
+
+    // Evitar re-detectar el mismo código seguido
+    if (lastDetectedRef.current === search.trim()) return
+
+    if (notFoundTimerRef.current) clearTimeout(notFoundTimerRef.current)
+
+    notFoundTimerRef.current = setTimeout(() => {
+      const code = search.trim()
+      const exists = allVariants.some(v => v.barcode === code)
+      if (!exists) {
+        lastDetectedRef.current = code
+        setNotFoundBarcode(code)
+      }
+      notFoundTimerRef.current = null
+    }, 350)
+
+    return () => {
+      if (notFoundTimerRef.current) {
+        clearTimeout(notFoundTimerRef.current)
+        notFoundTimerRef.current = null
+      }
+    }
+  }, [search, allVariants, loading])
 
   function handleStockSaved(
     variantId: string,
@@ -583,6 +621,45 @@ export default function InventarioPage() {
           variants={allVariants}
           onClose={() => { setShowReporte(false); focusSearch() }}
         />
+      )}
+
+      {/* Modal producto no encontrado */}
+      {notFoundBarcode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.85)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <p className="text-base font-bold" style={{ color: 'var(--text)' }}>
+              Producto no encontrado
+            </p>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              El producto no existe en la base de datos
+            </p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              ¿Quieres registrarlo?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setNotFoundBarcode(null); setSearch(''); lastDetectedRef.current = null; focusSearch() }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                No
+              </button>
+              <button
+                onClick={() => {
+                  const code = notFoundBarcode
+                  setNotFoundBarcode(null)
+                  setSearch('')
+                  lastDetectedRef.current = null
+                  router.push(`/productos?nuevo=true&barcode=${encodeURIComponent(code)}`)
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+                style={{ background: 'var(--accent)', color: '#000' }}>
+                Sí
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

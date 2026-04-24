@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo, useRef } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Category } from '@/types'
@@ -45,6 +46,9 @@ export default function ProductosPage() {
 
   const searchRef = useRef<HTMLInputElement>(null)
   const needsFocusRef = useRef(false)
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [pendingBarcode, setPendingBarcode] = useState<string | undefined>(undefined)
 
   useEffect(() => { needsFocusRef.current = true; loadAll() }, [])
 
@@ -58,6 +62,20 @@ export default function ProductosPage() {
       searchRef.current?.select()
     }
   }, [loading])
+
+  // Auto-abrir modal de nuevo producto si se navega desde inventario con ?nuevo=true&barcode=...
+  useEffect(() => {
+    if (!loading && searchParams) {
+      const nuevo = searchParams.get('nuevo')
+      const barcode = searchParams.get('barcode')
+      if (nuevo === 'true' && barcode) {
+        setPendingBarcode(barcode)
+        setEditProduct('new')
+        setSearch('')
+        router.replace('/productos', { scroll: false })
+      }
+    }
+  }, [loading, searchParams, router])
 
   function handleSaved() {
     setEditProduct(null)
@@ -412,9 +430,9 @@ export default function ProductosPage() {
           product={editProduct}
           categories={categories}
           isOwner={isOwner}
-          highlightBarcode={search.trim() || undefined}
-          onClose={handleClose}
-          onSaved={handleSaved}
+          highlightBarcode={pendingBarcode || search.trim() || undefined}
+          onClose={() => { setPendingBarcode(undefined); handleClose() }}
+          onSaved={() => { setPendingBarcode(undefined); handleSaved() }}
         />
       )}
 
