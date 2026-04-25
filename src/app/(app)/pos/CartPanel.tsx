@@ -6,7 +6,7 @@ import type { CartItem, ProductVariant } from '@/types'
 
 interface Props {
   cart: CartItem[]
-  onAdd: (variant: ProductVariant) => void
+  onAdd: (variant: ProductVariant) => void | Promise<void>
   onRemoveOne: (variantId: string) => void
   onRemoveAll: (variantId: string) => void
   onClear: () => void

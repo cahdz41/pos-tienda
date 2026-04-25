@@ -99,6 +99,7 @@ export interface Sale {
   amount_paid: number
   change_given: number
   status: 'completed' | 'cancelled'
+  notes: string | null
   created_at: string
 }
 

@@ -2,6 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import ProductPanel from './ProductPanel'
 import CartPanel from './CartPanel'
 import PaymentModal from './PaymentModal'
@@ -21,6 +22,7 @@ function formatElapsed(ts: number): string {
 }
 
 export default function PosPage() {
+  const router = useRouter()
   const { user, loading: authLoading } = useAuth()
 
   // Cart persistente — lazy initializer para no perder el ticket activo al recargar
@@ -40,6 +42,8 @@ export default function PosPage() {
   const [showPayment, setShowPayment] = useState(false)
   const [showVoid, setShowVoid]       = useState(false)
   const [showHolds, setShowHolds]     = useState(false)
+  // Alerta de stock insuficiente
+  const [stockAlertVariant, setStockAlertVariant] = useState<ProductVariant | null>(null)
   // Refresh del panel de productos
   const [refreshKey, setRefreshKey]   = useState(0)
 
@@ -87,16 +91,40 @@ export default function PosPage() {
 
   // ── Carrito ──────────────────────────────────────────────────────────────
 
-  const addToCart = useCallback((variant: ProductVariant) => {
+  const addToCart = useCallback(async (variant: ProductVariant): Promise<boolean> => {
+    // Consultar stock real en Supabase para evitar datos desactualizados
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabase = createClient() as any
+    const { data } = await supabase
+      .from('product_variants')
+      .select('stock')
+      .eq('id', variant.id)
+      .single()
+    const freshStock = Number(data?.stock ?? variant.stock)
+
+    let added = false
     setCart(prev => {
       const existing = prev.find(i => i.variant.id === variant.id)
       if (existing) {
+        if (existing.quantity + 1 > freshStock) {
+          setStockAlertVariant({ ...variant, stock: freshStock })
+          return prev
+        }
+        added = true
         return prev.map(i =>
-          i.variant.id === variant.id ? { ...i, quantity: i.quantity + 1 } : i
+          i.variant.id === variant.id
+            ? { ...i, quantity: i.quantity + 1, variant: { ...i.variant, stock: freshStock } }
+            : i
         )
       }
-      return [...prev, { variant, quantity: 1, unitPrice: variant.sale_price, useWholesale: false }]
+      if (freshStock <= 0) {
+        setStockAlertVariant({ ...variant, stock: freshStock })
+        return prev
+      }
+      added = true
+      return [...prev, { variant: { ...variant, stock: freshStock }, quantity: 1, unitPrice: variant.sale_price, useWholesale: false }]
     })
+    return added
   }, [])
 
   const removeOne = useCallback((variantId: string) => {
@@ -355,6 +383,49 @@ export default function PosPage() {
                   )
                 })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: stock insuficiente */}
+      {stockAlertVariant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.85)' }}
+          onClick={e => { if (e.target === e.currentTarget) setStockAlertVariant(null) }}>
+          <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">⚠️</span>
+              <div>
+                <p className="text-base font-bold" style={{ color: 'var(--text)' }}>Stock insuficiente</p>
+                <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {stockAlertVariant.product?.name}
+                  {stockAlertVariant.flavor ? ` — ${stockAlertVariant.flavor}` : ''}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              Solo hay <strong style={{ color: '#F0B429' }}>{stockAlertVariant.stock}</strong> unidad{stockAlertVariant.stock === 1 ? '' : 'es'} disponible{stockAlertVariant.stock === 1 ? '' : 's'}.
+              ¿Quieres agregar más stock a este producto?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setStockAlertVariant(null)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                No
+              </button>
+              <button
+                onClick={() => {
+                  const barcode = stockAlertVariant.barcode
+                  setStockAlertVariant(null)
+                  router.push(`/inventario?ajustar=${encodeURIComponent(barcode)}`)
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+                style={{ background: 'var(--accent)', color: '#000' }}>
+                Sí, ir a inventario
+              </button>
             </div>
           </div>
         </div>

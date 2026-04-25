@@ -29,7 +29,7 @@ function ExpiryBadge({ date }: { date: string | null }) {
 
 interface Props {
   cart: CartItem[]
-  onAdd: (variant: ProductVariant) => void
+  onAdd: (variant: ProductVariant) => void | Promise<void>
   searchRef: React.RefObject<HTMLInputElement | null>
   refreshKey?: number
 }
@@ -162,12 +162,8 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
     return list
   }, [allVariants, search, activeCategory, soloConStock])
 
-  // Intento de agregar un producto — bloquea si no hay stock
+  // Intento de agregar un producto — la validación de stock real la hace PosPage
   function handleCardClick(variant: ProductVariant) {
-    if (variant.stock <= 0) {
-      setNoStockVariant(variant)
-      return
-    }
     onAdd(variant)
   }
 
@@ -178,10 +174,6 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
     if (!q) return
     const exact = allVariants.find(v => v.barcode === q)
     if (exact) {
-      if (exact.stock <= 0) {
-        setNoStockVariant(exact)
-        return
-      }
       onAdd(exact)
       setLastScanned(exact)
       // Seleccionar el código para que el próximo escaneo lo reemplace automáticamente

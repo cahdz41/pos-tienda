@@ -13,6 +13,7 @@ export interface ReceiptData {
   transferPaid?: number  // en pago mixto o método único
   walletPaid?: number    // monto pagado con monedero
   loyaltyEarned?: number // monedero ganado en esta compra
+  notes?: string         // notas de la venta
   date: Date
 }
 
@@ -176,6 +177,8 @@ export function printReceipt(data: ReceiptData) {
       : ''
   const loyaltyRow = data.loyaltyEarned && data.loyaltyEarned > 0
     ? `<div style="color:#b07d00;font-weight:bold">Monedero ganado: +${fmt(data.loyaltyEarned)}</div>` : ''
+  const notesRow = data.notes
+    ? `<div style="margin-top:6px;font-size:12px;color:#333;font-style:italic"><strong>Notas:</strong> ${data.notes.replace(/</g, '&lt;')}</div>` : ''
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -186,8 +189,8 @@ export function printReceipt(data: ReceiptData) {
   @page { size: ${paperWidth} auto; margin: 0; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 12px;
+    font-family: 'Arial Black', 'Arial', sans-serif;
+    font-size: 14px;
     width: ${paperWidth};
     padding: 4mm 3mm;
     color: #000;
@@ -196,20 +199,20 @@ export function printReceipt(data: ReceiptData) {
   .center { text-align: center; }
   .right  { text-align: right; }
   .bold   { font-weight: bold; }
-  .divider { border-top: 1px dashed #000; margin: 5px 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 11px; }
-  thead th { font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 2px; }
-  tbody td { padding: 2px 0; vertical-align: top; }
+  .divider { border-top: 2px dashed #000; margin: 6px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { font-weight: bold; border-bottom: 2px solid #000; padding-bottom: 3px; }
+  tbody td { padding: 3px 0; vertical-align: top; }
   td.center { text-align: center; }
   td.right  { text-align: right; white-space: nowrap; }
-  .total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: 14px; }
-  .pay-info  { font-size: 11px; margin-top: 4px; }
+  .total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: 18px; }
+  .pay-info  { font-size: 13px; margin-top: 6px; line-height: 1.5; }
 </style>
 </head>
 <body>
-  <div class="center bold" style="font-size:15px;margin-bottom:5px">${businessName}</div>
+  <div class="center bold" style="font-size:18px;margin-bottom:6px">${businessName}</div>
   <div class="divider"></div>
-  <div style="font-size:11px">${dateStr} &nbsp; ${timeStr}</div>
+  <div style="font-size:13px">${dateStr} &nbsp; ${timeStr}</div>
   <div class="divider"></div>
 
   <table>
@@ -230,9 +233,10 @@ export function printReceipt(data: ReceiptData) {
     ${walletRow}
     ${cashRows}
     ${loyaltyRow}
+    ${notesRow}
   </div>
-  <div class="divider" style="margin-top:8px"></div>
-  <div class="center" style="font-size:11px;margin-top:4px">${footer}</div>
+  <div class="divider" style="margin-top:10px"></div>
+  <div class="center" style="font-size:12px;margin-top:6px">${footer}</div>
 </body>
 </html>`
 

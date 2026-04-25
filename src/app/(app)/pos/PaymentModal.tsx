@@ -45,6 +45,7 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   const [customerResults,  setCustomerResults]  = useState<Customer[]>([])
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [walletAmount,     setWalletAmount]     = useState('')
+  const [notes,            setNotes]            = useState('')
 
   async function searchCustomers(q: string) {
     setCustomerQuery(q)
@@ -194,6 +195,7 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
           amount_paid:    amountPaid_db,
           change_given:   changeGiven_db,
           status:         'completed',
+          notes:          notes.trim() || null,
         })
         .select('id').single()
 
@@ -270,6 +272,7 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
         transferPaid:  transferFinal > 0 && isMulti ? transferFinal : undefined,
         walletPaid:    walletUse > 0 ? walletUse : undefined,
         loyaltyEarned: loyaltyEarned > 0 ? loyaltyEarned : undefined,
+        notes:         notes.trim() || undefined,
         date:          new Date(),
       }
       setSuccess(receiptData)
@@ -634,6 +637,23 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
               <p className="text-2xl font-black mt-1 font-mono" style={{ color: '#F0B429' }}>{fmt(total)}</p>
             </div>
           )}
+
+          {/* Notas opcionales */}
+          <div>
+            <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+              Notas <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(opcional)</span>
+            </label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Detalles de la venta…"
+              rows={2}
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none"
+              style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
+              onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+              onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+            />
+          </div>
 
           {error && <p className="text-xs" style={{ color: '#FF6B6B' }}>{error}</p>}
 

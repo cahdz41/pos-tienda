@@ -29,6 +29,7 @@ interface SaleDetail {
   status: 'completed' | 'cancelled'
   created_at: string
   cashier_name: string
+  notes: string | null
   payments: { method: string; amount: number }[]
   items: {
     id: string
@@ -252,7 +253,7 @@ export default function VentasPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: sale } = await (supabase as any)
       .from('sales')
-      .select('id, total, payment_method, amount_paid, change_given, status, created_at, cashier_id')
+      .select('id, total, payment_method, amount_paid, change_given, status, created_at, cashier_id, notes')
       .eq('id', saleId).single()
     if (!sale) { setDetailLoading(false); return }
 
@@ -286,6 +287,7 @@ export default function VentasPage() {
       status:         sale.status,
       created_at:     sale.created_at,
       cashier_name:   cashierProfile?.name ?? 'Desconocido',
+      notes:          sale.notes ?? null,
       payments,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       items: (items ?? []).map((i: any) => ({
@@ -342,6 +344,7 @@ export default function VentasPage() {
       cashPaid,
       cardPaid,
       transferPaid,
+      notes:         detail.notes ?? undefined,
       date:          new Date(detail.created_at),
     })
   }
@@ -710,6 +713,17 @@ export default function VentasPage() {
                 </div>
               ))}
             </div>
+
+            {/* Notas de la venta */}
+            {detail.notes && (
+              <div className="px-4 pt-3">
+                <div className="rounded-xl p-3"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Notas</p>
+                  <p className="text-xs" style={{ color: 'var(--text)', fontStyle: 'italic' }}>{detail.notes}</p>
+                </div>
+              </div>
+            )}
 
             {/* Resumen de pago */}
             <div className="px-4 pt-4 pb-4 mt-auto">
