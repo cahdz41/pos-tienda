@@ -181,6 +181,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
 
   function addVariant() {
     setVariants(prev => [...prev, emptyDraft()])
+    setVariantFilter('')
   }
 
   function removeVariant(v: VariantDraft) {
@@ -524,7 +525,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
               <p className="text-xs font-semibold uppercase tracking-wide flex-1" style={{ color: 'var(--text-muted)' }}>
                 Variantes ({variants.length}{variantFilter.trim() && displayedVariants.length !== variants.length ? ` · ${displayedVariants.length} mostradas` : ''})
               </p>
-              {variants.length > 4 && (
+              {(variants.length > 4 || variantFilter.trim()) && (
                 <input
                   type="text"
                   value={variantFilter}
