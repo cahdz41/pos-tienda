@@ -851,6 +851,72 @@ Pueden ir en `globals.css` (para reutilizar) o como `<style>` dentro de cada com
 
 ---
 
-### Pendiente confirmar antes de ejecutar
-- [ ] Ruta real del logo de Chocholand (¿`public/logo.jpg`? ¿URL Cloudinary?)
-- [ ] ¿Añadir animaciones en `globals.css` o como `<style>` inline en cada componente?
+## Sesión 14 — 2026-04-25
+
+### ✅ Fix Productos — Variantes ocultas al filtrar por barcode
+
+**Problema:** Al abrir el modal de editar producto desde POS o inventario (con `highlightBarcode`), el filtro se activaba automáticamente pero el campo de búsqueda solo aparecía si había más de 4 variantes. Con 2 variantes no se veía el input y no se podía limpiar el filtro.
+
+**Fix:**
+- Input de filtro ahora se muestra también cuando `variantFilter.trim()` está activo, aunque haya pocas variantes.
+- Al dar "+ Agregar variante" se limpia el filtro automáticamente para que la nueva variante sea visible.
+
+- Archivo: `src/app/(app)/productos/ProductModal.tsx`
+
+### ✅ Control de stock en POS + redirección a inventario
+
+**Problema:** El POS permitía agregar al carrito sin verificar stock real. Al agregar más piezas de las disponibles, no había bloqueo ni guía para reabastecer.
+
+**Solución:**
+- `addToCart` ahora es `async` y consulta el **stock real en Supabase** antes de decidir.
+- Si no hay stock suficiente (o es 0), aparece un modal preguntando si se quiere agregar más stock.
+- Si el usuario da **"Sí, ir a inventario"**, redirige a `/inventario?ajustar={barcode}` y el modal de ajuste se abre automáticamente con el producto precargado.
+- `ProductPanel` ya no bloquea localmente con stock viejo; deja que `PosPage` valide con el dato fresco.
+
+**Archivos:**
+- `src/app/(app)/pos/page.tsx` — `addToCart` async con consulta a BD + modal de alerta
+- `src/app/(app)/pos/ProductPanel.tsx` — quita validación local de stock viejo
+- `src/app/(app)/pos/CartPanel.tsx` — firma de `onAdd` actualizada
+
+### ✅ Notas opcionales en ventas
+
+**Nueva funcionalidad:**
+- Campo **"Notas (opcional)"** agregado en `PaymentModal` (textarea, 2 filas).
+- La nota se guarda en la tabla `sales` (columna `notes`, tipo `text`).
+- Se muestra en la **vista previa del ticket** y en la **impresión térmica**.
+- En la sección **Ventas**, el detalle de una venta ahora muestra las notas si existen.
+- Al **reimprimir un ticket desde Ventas**, la nota también se incluye.
+
+**SQL ejecutado en Supabase:**
+```sql
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS notes text;
+```
+
+**Archivos:**
+- `src/app/(app)/pos/PaymentModal.tsx` — campo notes + insert en BD + pasar a ReceiptData
+- `src/app/(app)/pos/Receipt.tsx` — mostrar notes en preview y en ticket impreso
+- `src/app/(app)/ventas/page.tsx` — cargar notes en detalle, mostrar en panel, incluir en reimpresión
+- `src/types/index.ts` — agregar `notes` a la interfaz `Sale`
+
+### ✅ Tickets térmicos más legibles
+
+**Problema:** Letras muy tenues en impresora térmica (Courier New 12px). Se veía como tinta seca.
+
+**Mejoras:**
+- Fuente cambiada de `Courier New, monospace` a **`Arial Black, Arial, sans-serif`** (más gruesa).
+- Tamaños aumentados:
+  - Items: 11px → 13px
+  - Nombre del negocio: 15px → 18px bold
+  - Total: 14px → 18px bold
+  - Info de pago: 11px → 13px
+  - Fecha/hora: 11px → 13px
+  - Footer: 11px → 12px
+- Separadores (`divider`) más gruesos: `2px dashed #000`
+- Bordes de tabla: `2px solid #000`
+
+- Archivo: `src/app/(app)/pos/Receipt.tsx`
+
+### ✅ Deploy a Hostinger
+
+- Commit: `a550864` — todos los cambios anteriores
+- Push a `main` → `git pull` + `npm install` + `npm run build` + `pm2 reload pos-v2` en el VPS

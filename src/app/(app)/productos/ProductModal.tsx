@@ -123,9 +123,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
   const existingProduct = isNew ? null : (product as ProductRow)
   const existingName = existingProduct?.name ?? ''
 
-  // Permitir editar el nombre si: es nuevo, no tiene nombre aún, o es huérfano
-  const nameEditable = isNew || !existingName.trim() || !!existingProduct?.isOrphan
-
+  // Nombre siempre editable (marca · descripción · sabor/variante)
   const [parsed0, parsed1, parsed2] = parseName(existingName)
   const [brand, setBrand]             = useState(parsed0)
   const [productSpec, setProductSpec] = useState(parsed1)
@@ -243,7 +241,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
 
   async function handleSave() {
     if (!isOwner || isLocked) return
-    if (nameEditable && !nameComplete) {
+    if (!nameComplete) {
       setError('Completa los tres campos del nombre: Marca, Nombre+gramos y Sabor/variante.')
       return
     }
@@ -269,23 +267,6 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
           .single()
         if (err) throw new Error('Error creando producto: ' + err.message)
         productId = (data as { id: string }).id
-      } else if (existingProduct?.isOrphan) {
-        // Orphan: INSERT new product then bulk-reassign ALL original variants
-        const { data, error: err } = await supabase
-          .from('products')
-          .insert({ name, category: categoryName || null, store_visible: true })
-          .select('id')
-          .single()
-        if (err) throw new Error('Error creando producto: ' + err.message)
-        productId = (data as { id: string }).id
-        const allOriginalIds = existingProduct.product_variants.map(v => v.id)
-        if (allOriginalIds.length > 0) {
-          const { error: reErr } = await supabase
-            .from('product_variants')
-            .update({ product_id: productId })
-            .in('id', allOriginalIds)
-          if (reErr) throw new Error('Error reasignando variantes: ' + reErr.message)
-        }
       } else {
         const existingId = (product as ProductRow).id
         const { error: err } = await supabase
@@ -338,7 +319,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
     }
   }
 
-  const canSave = isOwner && (nameEditable ? nameComplete : true) && variants.some(v => v.barcode.trim()) && !isLocked && !checkingBarcode
+  const canSave = isOwner && nameComplete && variants.some(v => v.barcode.trim()) && !isLocked && !checkingBarcode
 
   const displayedVariants = variantFilter.trim()
     ? variants.filter(v =>
@@ -360,7 +341,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
         <div className="flex items-center justify-between px-5 py-4 shrink-0"
           style={{ borderBottom: '1px solid var(--border)' }}>
           <p className="text-base font-bold" style={{ color: 'var(--text)' }}>
-            {isNew ? 'Nuevo producto' : nameEditable ? 'Completar producto' : (isOwner ? 'Editar producto' : 'Detalle de producto')}
+            {isNew ? 'Nuevo producto' : 'Editar producto'}
           </p>
           <button onClick={onClose}
             style={{ color: 'var(--text-muted)', fontSize: '20px', lineHeight: 1 }}>×</button>
@@ -390,9 +371,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
             <p className="text-xs font-semibold mb-3 uppercase tracking-wide"
               style={{ color: 'var(--text-muted)' }}>Información general</p>
 
-            {nameEditable ? (
-              /* ── Crear / Completar: campos editables ── */
-              <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3">
                 <div>
                   <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
                     Nombre del producto <span style={{ color: '#FF6B6B' }}>*</span>
@@ -480,43 +459,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
                     </div>
                   )}
                 </div>
-              </div>
-            ) : (
-              /* ── Editar: nombre fijo (ya tiene nombre correcto) ── */
-              <div className="px-4 py-3 rounded-xl flex flex-col gap-2"
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Nombre del producto (no editable)</p>
-                <p className="text-sm font-bold leading-snug" style={{ color: 'var(--text)' }}>
-                  {existingName}
-                </p>
-                {isOwner ? (
-                  <div>
-                    <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-muted)' }}>Categoría</label>
-                    <select
-                      value={categoryName}
-                      onChange={e => setCategoryName(e.target.value)}
-                      className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                      style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                      onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-                      onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                    >
-                      <option value="">Sin categoría</option>
-                      {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                    </select>
-                  </div>
-                ) : (
-                  categoryName && (
-                    <span className="text-xs self-start px-2 py-0.5 rounded-md font-medium"
-                      style={{ background: 'var(--surface)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
-                      {categoryName}
-                    </span>
-                  )
-                )}
-                <p className="text-xs" style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
-                  Para modificar el nombre crea un producto nuevo y elimina este.
-                </p>
-              </div>
-            )}
+            </div>
           </section>
 
           {/* Variantes */}
@@ -640,7 +583,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
             <button onClick={handleSave} disabled={saving || !canSave}
               className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
               style={{ background: 'var(--accent)', color: '#000' }}>
-              {saving ? 'Guardando…' : checkingBarcode ? 'Verificando código…' : isNew ? 'Crear producto' : nameEditable ? 'Guardar y completar' : 'Guardar cambios'}
+              {saving ? 'Guardando…' : checkingBarcode ? 'Verificando código…' : isNew ? 'Crear producto' : 'Guardar cambios'}
             </button>
           )}
         </div>

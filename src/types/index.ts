@@ -152,3 +152,24 @@ export interface StoreOrder {
   created_at: string
   store_order_items: StoreOrderItem[]
 }
+
+// ── Encargos (pedidos especiales tienda física) ─────────────────────────────
+
+export interface SpecialOrder {
+  id: string
+  customer_id: string
+  product_id: string | null
+  product_name: string | null
+  sale_price: number
+  estimated_delivery_date: string | null
+  deposit: number
+  status: 'pending' | 'completed'
+  type: 'order' | 'delivery'
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SpecialOrderWithCustomer extends SpecialOrder {
+  customer: Customer
+}
