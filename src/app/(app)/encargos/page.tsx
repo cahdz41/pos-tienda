@@ -56,7 +56,7 @@ export default function EncargosPage() {
     const supabase = createClient()
     const { data, error: err } = await (supabase as any)
       .from('special_orders')
-      .select('*, customers(*)')
+      .select('*, customers(*), product_variants(*, products(*))')
       .order('created_at', { ascending: false })
 
     if (err) {
@@ -83,7 +83,11 @@ export default function EncargosPage() {
         id: String(row.id),
         customer_id: String(row.customer_id),
         product_id: row.product_id ? String(row.product_id) : null,
-        product_name: row.product_name ? String(row.product_name) : null,
+        product_name: row.product_name
+          ? String(row.product_name)
+          : row.product_variants?.products?.name
+            ? `${String(row.product_variants.products.name)}${row.product_variants.flavor ? ` — ${String(row.product_variants.flavor)}` : ''}`
+            : null,
         sale_price: Number(row.sale_price ?? 0),
         estimated_delivery_date: row.estimated_delivery_date ? String(row.estimated_delivery_date) : null,
         deposit: Number(row.deposit ?? 0),
@@ -139,6 +143,26 @@ export default function EncargosPage() {
       date: new Date(order.created_at),
     }
     printOrderTicket(data)
+  }
+
+  async function handleDelete(order: SpecialOrderWithCustomer) {
+    const confirmed = window.confirm(
+      `¿Eliminar el registro de "${order.customer.full_name}" por "${order.product_name ?? 'Producto'}"?\n\nEsta acción no se puede deshacer.`
+    )
+    if (!confirmed) return
+
+    const supabase = createClient()
+    const { error: err } = await (supabase as any)
+      .from('special_orders')
+      .delete()
+      .eq('id', order.id)
+
+    if (err) {
+      alert('Error al eliminar: ' + err.message)
+      return
+    }
+
+    setOrders(prev => prev.filter(o => o.id !== order.id))
   }
 
   const filtered = useMemo(() => {
@@ -426,6 +450,16 @@ export default function EncargosPage() {
                         title="Editar"
                       >
                         ✏️
+                      </button>
+                    )}
+                    {(isOwner || o.status === 'pending') && (
+                      <button
+                        onClick={() => handleDelete(o)}
+                        className="px-2 py-1 rounded text-xs font-medium transition-opacity hover:opacity-80"
+                        style={{ background: '#2D1010', color: '#FF6B6B', border: '1px solid #4D1A1A' }}
+                        title="Eliminar"
+                      >
+                        🗑️
                       </button>
                     )}
                   </div>
