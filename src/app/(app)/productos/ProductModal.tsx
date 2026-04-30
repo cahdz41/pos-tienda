@@ -123,16 +123,15 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
   const existingProduct = isNew ? null : (product as ProductRow)
   const existingName = existingProduct?.name ?? ''
 
-  // Nombre siempre editable (marca · descripción · sabor/variante)
-  const [parsed0, parsed1, parsed2] = parseName(existingName)
+  // Nombre siempre editable (marca · descripción)
+  const [parsed0, parsed1] = parseName(existingName)
   const [brand, setBrand]             = useState(parsed0)
   const [productSpec, setProductSpec] = useState(parsed1)
-  const [flavorPart, setFlavorPart]   = useState(parsed2)
 
-  const name = [brand.trim(), productSpec.trim(), flavorPart.trim()]
+  const name = [brand.trim(), productSpec.trim()]
     .filter(Boolean)
     .join(' - ')
-  const nameComplete = brand.trim() !== '' && productSpec.trim() !== '' && flavorPart.trim() !== ''
+  const nameComplete = brand.trim() !== '' && productSpec.trim() !== ''
 
   const [categoryName, setCategoryName] = useState(isNew ? '' : ((product as ProductRow).category ?? ''))
   const [newCatName, setNewCatName] = useState('')
@@ -242,7 +241,7 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
   async function handleSave() {
     if (!isOwner || isLocked) return
     if (!nameComplete) {
-      setError('Completa los tres campos del nombre: Marca, Nombre+gramos y Sabor/variante.')
+      setError('Completa los dos campos del nombre: Marca y Nombre+gramos.')
       return
     }
     const validVariants = variants.filter(v => v.barcode.trim())
@@ -375,13 +374,12 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
                 <div>
                   <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
                     Nombre del producto <span style={{ color: '#FF6B6B' }}>*</span>
-                    <span className="ml-1 font-normal">— Marca · Nombre+gramos · Sabor/variante</span>
+                    <span className="ml-1 font-normal">— Marca · Nombre+gramos</span>
                   </p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {([
-                      { label: 'Marca',            val: brand,       set: setBrand,       ph: 'Ej: ON' },
-                      { label: 'Nombre + gramos',  val: productSpec, set: setProductSpec, ph: 'Ej: Whey Gold 5lb' },
-                      { label: 'Sabor / variante', val: flavorPart,  set: setFlavorPart,  ph: 'Ej: Chocolate' },
+                      { label: 'Marca',           val: brand,       set: setBrand,       ph: 'Ej: ON' },
+                      { label: 'Nombre + gramos', val: productSpec, set: setProductSpec, ph: 'Ej: Whey Gold 5lb' },
                     ] as const).map(({ label, val, set, ph }) => (
                       <div key={label}>
                         <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{label}</label>
@@ -411,12 +409,10 @@ export default function ProductModal({ product, categories, isOwner, highlightBa
                         <span style={{ color: 'var(--text)' }}>{brand.trim()}</span>
                         <span style={{ color: 'var(--text-muted)' }}> — </span>
                         <span style={{ color: 'var(--text)' }}>{productSpec.trim()}</span>
-                        <span style={{ color: 'var(--text-muted)' }}> — </span>
-                        <span style={{ color: 'var(--text)' }}>{flavorPart.trim()}</span>
                       </span>
                     ) : (
                       <span className="text-xs" style={{ color: '#FF6B6B' }}>
-                        Completa los 3 campos para ver el nombre final
+                        Completa los 2 campos para ver el nombre final
                       </span>
                     )}
                   </div>
