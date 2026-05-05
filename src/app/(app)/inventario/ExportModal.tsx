@@ -122,30 +122,28 @@ export default function ExportModal({ variants, onClose }: Props) {
     const rows: Row[] = []
 
     if (detailLevel === 'variants') {
-      // Una fila por variante
+      // Una fila por variante — nombre incluye el sabor
       for (const v of list) {
-        const row: Row = [
-          v.product?.name ?? 'Sin nombre',
-          v.flavor ?? '—',
-          v.barcode || '—',
-          v.product?.category || '—',
-          v.stock,
-          v.min_stock,
-        ]
-        if (priceColumns === 'all' || priceColumns === 'sale')      row.push(v.sale_price)
-        if (priceColumns === 'all' || priceColumns === 'wholesale')  row.push(v.wholesale_price)
+        const productName = v.flavor
+          ? `${v.product?.name ?? 'Sin nombre'} - ${v.flavor}`
+          : (v.product?.name ?? 'Sin nombre')
+        const row: Row = [v.barcode || '—', productName]
         if (priceColumns === 'all' || priceColumns === 'cost')       row.push(v.cost_price)
+        if (priceColumns === 'all' || priceColumns === 'sale')       row.push(v.sale_price)
+        if (priceColumns === 'all' || priceColumns === 'wholesale')  row.push(v.wholesale_price)
+        row.push(v.stock, v.min_stock, 0, v.product?.category || '—')
         rows.push(row)
       }
     } else {
       // Agrupar por product_id — una fila por producto
-      const grouped = new Map<string, { name: string; category: string; stock: number; variants: ProductVariant[] }>()
+      const grouped = new Map<string, { name: string; category: string; barcode: string; stock: number; variants: ProductVariant[] }>()
       for (const v of list) {
         const key = v.product_id
         if (!grouped.has(key)) {
           grouped.set(key, {
             name:     v.product?.name ?? 'Sin nombre',
             category: v.product?.category ?? '—',
+            barcode:  v.barcode || '—',
             stock:    0,
             variants: [],
           })
@@ -156,60 +154,33 @@ export default function ExportModal({ variants, onClose }: Props) {
       }
 
       for (const [, g] of grouped) {
-        // Para precios: usar la primera variante como referencia
         const ref = g.variants[0]
-        const multiVariant = g.variants.length > 1
-        // Si hay más de una variante con precios distintos, indicar rango
-        const saleMin   = Math.min(...g.variants.map(v => v.sale_price))
-        const saleMax   = Math.max(...g.variants.map(v => v.sale_price))
-        const wholeMin  = Math.min(...g.variants.map(v => v.wholesale_price))
-        const wholeMax  = Math.max(...g.variants.map(v => v.wholesale_price))
-        const costMin   = Math.min(...g.variants.map(v => v.cost_price))
-        const costMax   = Math.max(...g.variants.map(v => v.cost_price))
-
-        function priceStr(min: number, max: number): string | number {
-          if (!multiVariant || min === max) return min
-          return `${min} – ${max}`
-        }
-
-        const row: Row = [
-          g.name,
-          g.category,
-          g.variants.length, // Nº sabores/variantes
-          g.stock,            // stock total sumado
-        ]
-        if (priceColumns === 'all' || priceColumns === 'sale')      row.push(priceStr(saleMin, saleMax) as string | number)
-        if (priceColumns === 'all' || priceColumns === 'wholesale')  row.push(priceStr(wholeMin, wholeMax) as string | number)
-        if (priceColumns === 'all' || priceColumns === 'cost')       row.push(priceStr(costMin, costMax) as string | number)
-        void ref // ref solo para satisfacer lint
+        const row: Row = [g.barcode, g.name]
+        if (priceColumns === 'all' || priceColumns === 'cost')       row.push(ref.cost_price)
+        if (priceColumns === 'all' || priceColumns === 'sale')       row.push(ref.sale_price)
+        if (priceColumns === 'all' || priceColumns === 'wholesale')  row.push(ref.wholesale_price)
+        row.push(g.stock, ref.min_stock, 0, g.category)
         rows.push(row)
       }
     }
 
-    // 3. Construir cabecera
-    let headers: string[]
-    if (detailLevel === 'variants') {
-      headers = ['Producto', 'Sabor', 'Código de barras', 'Categoría', 'Stock', 'Stock mínimo']
-      if (priceColumns === 'all' || priceColumns === 'sale')      headers.push('Precio público')
-      if (priceColumns === 'all' || priceColumns === 'wholesale')  headers.push('Precio mayoreo')
-      if (priceColumns === 'all' || priceColumns === 'cost')       headers.push('Precio costo')
-    } else {
-      headers = ['Producto', 'Categoría', 'Variantes', 'Stock total']
-      if (priceColumns === 'all' || priceColumns === 'sale')      headers.push('Precio público')
-      if (priceColumns === 'all' || priceColumns === 'wholesale')  headers.push('Precio mayoreo')
-      if (priceColumns === 'all' || priceColumns === 'cost')       headers.push('Precio costo')
-    }
+    // 3. Construir cabecera (misma estructura para ambos modos)
+    const headers: string[] = ['Código', 'Producto']
+    if (priceColumns === 'all' || priceColumns === 'cost')       headers.push('P.Costo')
+    if (priceColumns === 'all' || priceColumns === 'sale')       headers.push('P.Venta')
+    if (priceColumns === 'all' || priceColumns === 'wholesale')  headers.push('P.Mayoreo')
+    headers.push('Existencia', 'Inv. Mínimo', 'Inv. Máximo', 'Departamento')
 
     // 4. Crear libro Excel
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
 
     // Anchos de columna
-    ws['!cols'] = headers.map((h, i) => {
-      if (i === 0) return { wch: 28 } // Producto
-      if (h === 'Sabor' || h === 'Categoría') return { wch: 16 }
-      if (h === 'Código de barras') return { wch: 16 }
-      if (h.startsWith('Precio')) return { wch: 16 }
-      return { wch: 12 }
+    ws['!cols'] = headers.map(h => {
+      if (h === 'Código')      return { wch: 16 }
+      if (h === 'Producto')    return { wch: 42 }
+      if (h.startsWith('P.')) return { wch: 14 }
+      if (h === 'Departamento') return { wch: 20 }
+      return { wch: 13 }
     })
 
     const wb = XLSX.utils.book_new()
