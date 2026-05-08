@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { CartItem, Customer, Shift } from '@/types'
 import { Receipt, printReceipt, type ReceiptData } from './Receipt'
 
-type Method = 'cash' | 'card' | 'transfer'
+type Method = 'cash' | 'card' | 'transfer' | 'credit'
 
 const QUICK_AMOUNTS = [50, 100, 200, 500, 1000]
 
@@ -14,6 +14,7 @@ const METHOD_CONFIG: Record<Method, { label: string; icon: string }> = {
   cash:     { label: 'Efectivo',      icon: '💵' },
   card:     { label: 'Tarjeta',       icon: '💳' },
   transfer: { label: 'Transferencia', icon: '🏦' },
+  credit:   { label: 'Crédito',       icon: '📒' },
 }
 
 function fmt(n: number) {
@@ -34,8 +35,8 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   // ── Métodos ───────────────────────────────────────────────────────────────
   const [mixedMode, setMixedMode]   = useState(false)
   const [methods, setMethods]       = useState<Set<Method>>(new Set(['cash']))
-  const [cashAmount, setCashAmount] = useState('')  // efectivo (o 1er método variable en mixto)
-  const [cardAmount, setCardAmount] = useState('')  // tarjeta en mezcla de 3 vías
+  const [cashAmount, setCashAmount] = useState('')
+  const [cardAmount, setCardAmount] = useState('')
   const [processing, setProcessing] = useState(false)
   const [error, setError]           = useState<string | null>(null)
   const [success, setSuccess]       = useState<ReceiptData | null>(null)
@@ -68,14 +69,22 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   }
 
   // ── Toggles de método ─────────────────────────────────────────────────────
-
   function toggleMethod(m: Method) {
     if (walletOnly) return
+    if (m === 'credit') {
+      setMixedMode(false)
+      setMethods(new Set(['credit']))
+      setCashAmount(''); setCardAmount('')
+      return
+    }
+    if (methods.has('credit')) {
+      setMethods(new Set([m]))
+      setCashAmount(''); setCardAmount('')
+      return
+    }
     if (!mixedMode) {
-      // Modo radio: solo uno activo
       setMethods(new Set([m]))
     } else {
-      // Modo mixto: toggle, mínimo 1
       setMethods(prev => {
         if (prev.has(m) && prev.size === 1) return prev
         const next = new Set(prev)
@@ -87,9 +96,9 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   }
 
   function handleMixedToggle(enabled: boolean) {
+    if (isCredit) return
     setMixedMode(enabled)
     if (!enabled) {
-      // Reducir al primer método activo
       const first = methods.values().next().value as Method
       setMethods(new Set([first]))
     }
@@ -97,13 +106,16 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   }
 
   // ── Cálculos ──────────────────────────────────────────────────────────────
-  const walletUse      = Math.min(parseFloat(walletAmount) || 0, selectedCustomer?.loyalty_balance ?? 0, total)
+  const isCredit       = methods.has('credit')
+  const walletUse      = isCredit ? 0 : Math.min(parseFloat(walletAmount) || 0, selectedCustomer?.loyalty_balance ?? 0, total)
   const effectiveTotal = Math.max(0, total - walletUse)
-  const walletOnly     = walletUse >= total
+  const walletOnly     = !isCredit && walletUse >= total
 
-  const hasCash     = methods.has('cash')
-  const hasCard     = methods.has('card')
-  const hasTransfer = methods.has('transfer')
+  const availableCredit = (selectedCustomer?.credit_limit ?? 0) - (selectedCustomer?.credit_balance ?? 0)
+
+  const hasCash     = !isCredit && methods.has('cash')
+  const hasCard     = !isCredit && methods.has('card')
+  const hasTransfer = !isCredit && methods.has('transfer')
   const methodCount = methods.size
   const isMulti     = mixedMode && methodCount >= 2
   const isThreeWay  = mixedMode && methodCount === 3
@@ -111,16 +123,14 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   const cashInput = parseFloat(cashAmount) || 0
   const cardInput = parseFloat(cardAmount) || 0
 
-  // Montos finales por método
   let cashFinal = 0, cardFinal = 0, transferFinal = 0
 
-  if (!walletOnly && effectiveTotal > 0) {
+  if (!walletOnly && !isCredit && effectiveTotal > 0) {
     if (!isMulti) {
       if (hasCash)     cashFinal = cashInput
       if (hasCard)     cardFinal = effectiveTotal
       if (hasTransfer) transferFinal = effectiveTotal
     } else if (isThreeWay) {
-      // cash + card + transfer: dos inputs, transfer = resto
       cashFinal     = cashInput
       cardFinal     = cardInput
       transferFinal = Math.max(0, effectiveTotal - cashFinal - cardFinal)
@@ -131,7 +141,6 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
       cashFinal     = cashInput
       transferFinal = Math.max(0, effectiveTotal - cashFinal)
     } else {
-      // card + transfer: cashAmount se usa para el monto de tarjeta
       cardFinal     = cashInput
       transferFinal = Math.max(0, effectiveTotal - cardFinal)
     }
@@ -140,17 +149,16 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   const change = !isMulti && hasCash ? Math.max(0, cashFinal - effectiveTotal) : 0
 
   const canPay = (() => {
+    if (isCredit) return !!selectedCustomer && availableCredit >= total
     if (walletOnly || effectiveTotal <= 0) return true
     if (!isMulti) {
       if (hasCash) return cashFinal >= effectiveTotal
       return true
     }
     if (isThreeWay) return cashInput > 0 && cardInput > 0 && (cashInput + cardInput) < effectiveTotal
-    // Dos métodos con cash o card como variable
     return cashInput > 0 && cashInput < effectiveTotal
   })()
 
-  // Etiqueta del input variable en modo mixto
   const varInputLabel = hasCash ? 'Monto en efectivo' : 'Monto en tarjeta'
   const varInputPlaceholder = hasCash
     ? 'Ej: 200 (el resto va a ' + (hasCard ? 'tarjeta' : 'transferencia') + ')'
@@ -163,22 +171,24 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
 
     const supabase = createClient()
 
-    const dbMethod = walletOnly ? 'cash'
-      : isMulti      ? 'mixed'
-      : hasCash      ? 'cash'
-      : hasCard      ? 'card'
+    const dbMethod = isCredit    ? 'credit'
+      : walletOnly ? 'cash'
+      : isMulti    ? 'mixed'
+      : hasCash    ? 'cash'
+      : hasCard    ? 'card'
       : 'transfer'
 
-    const amountPaid_db = walletOnly ? total
-      : isMulti ? (cashFinal + cardFinal + transferFinal + walletUse)
-      : hasCash  ? (cashFinal + walletUse)
+    const amountPaid_db = isCredit   ? total
+      : walletOnly ? total
+      : isMulti    ? (cashFinal + cardFinal + transferFinal + walletUse)
+      : hasCash    ? (cashFinal + walletUse)
       : total
 
-    const changeGiven_db = !isMulti && hasCash ? Math.max(0, cashFinal - effectiveTotal) : 0
+    const changeGiven_db = !isCredit && !isMulti && hasCash ? Math.max(0, cashFinal - effectiveTotal) : 0
 
     const prevSpent     = selectedCustomer?.loyalty_spent ?? 0
     const milestones    = Math.floor((prevSpent + total) / 1000) - Math.floor(prevSpent / 1000)
-    const loyaltyEarned = selectedCustomer && milestones > 0 ? milestones * 1000 * 0.03 : 0
+    const loyaltyEarned = !isCredit && selectedCustomer && milestones > 0 ? milestones * 1000 * 0.03 : 0
 
     let saleId: string | null = null
     try {
@@ -221,7 +231,7 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
       }
 
       // 3 — Registrar desglose de pagos en sale_payments (no-fatal)
-      {
+      if (!isCredit) {
         const payRows: { sale_id: string; method: string; amount: number }[] = []
         if (walletUse > 0) payRows.push({ sale_id: saleId!, method: 'wallet', amount: walletUse })
         if (!walletOnly && effectiveTotal > 0) {
@@ -252,14 +262,28 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
           .eq('id', item.variant.id)
       ))
 
-      // 4 — Actualizar monedero (no-fatal)
+      // 5 — Actualizar cliente
       if (selectedCustomer) {
-        const newBalance = Math.max(0, selectedCustomer.loyalty_balance - walletUse + loyaltyEarned)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (supabase as any)
-          .from('customers')
-          .update({ loyalty_balance: newBalance, loyalty_spent: selectedCustomer.loyalty_spent + total })
-          .eq('id', selectedCustomer.id)
+        if (isCredit) {
+          // Incrementar deuda de crédito (FATAL: debe actualizarse correctamente)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error: creditErr } = await (supabase as any)
+            .from('customers')
+            .update({
+              credit_balance: selectedCustomer.credit_balance + total,
+              loyalty_spent:  selectedCustomer.loyalty_spent + total,
+            })
+            .eq('id', selectedCustomer.id)
+          if (creditErr) throw new Error(`Error al actualizar línea de crédito: ${creditErr.message}`)
+        } else {
+          // Actualizar monedero (no-fatal)
+          const newBalance = Math.max(0, selectedCustomer.loyalty_balance - walletUse + loyaltyEarned)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase as any)
+            .from('customers')
+            .update({ loyalty_balance: newBalance, loyalty_spent: selectedCustomer.loyalty_spent + total })
+            .eq('id', selectedCustomer.id)
+        }
       }
 
       const receiptData: ReceiptData = {
@@ -300,8 +324,15 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
             <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0"
               style={{ background: '#0D2B0D', border: '2px solid #4CAF50' }}>✓</div>
             <div>
-              <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>Venta registrada</p>
+              <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+                {success.paymentMethod === 'credit' ? 'Venta a crédito registrada' : 'Venta registrada'}
+              </p>
               <p className="text-xl font-black font-mono" style={{ color: 'var(--accent)' }}>{fmt(total)}</p>
+              {success.paymentMethod === 'credit' && selectedCustomer && (
+                <p className="text-xs mt-0.5" style={{ color: '#FF6B6B' }}>
+                  Nueva deuda: {fmt(selectedCustomer.credit_balance + total)} / {fmt(selectedCustomer.credit_limit)}
+                </p>
+              )}
               {success.loyaltyEarned && (
                 <p className="text-xs mt-0.5" style={{ color: '#F0B429' }}>
                   +{fmt(success.loyaltyEarned)} ganados en monedero
@@ -351,15 +382,21 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
 
         <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
 
-          {/* ── Cliente (opcional) ──────────────────────────────── */}
+          {/* ── Cliente ──────────────────────────────────────────── */}
           <div>
-            <p className="text-xs font-medium mb-1.5" style={{ color: 'var(--text-muted)' }}>Cliente (opcional)</p>
+            <p className="text-xs font-medium mb-1.5" style={{ color: 'var(--text-muted)' }}>
+              {isCredit ? 'Cliente (requerido)' : 'Cliente (opcional)'}
+            </p>
             {selectedCustomer ? (
               <div className="flex items-center justify-between px-3 py-2.5 rounded-xl"
-                style={{ background: 'var(--bg)', border: '1px solid var(--accent)' }}>
+                style={{ background: 'var(--bg)', border: `1px solid ${isCredit ? '#FF6B6B' : 'var(--accent)'}` }}>
                 <div>
                   <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{selectedCustomer.full_name}</p>
-                  {selectedCustomer.loyalty_balance > 0 && (
+                  {isCredit ? (
+                    <p className="text-xs mt-0.5" style={{ color: availableCredit >= total ? '#4CAF50' : '#FF6B6B' }}>
+                      Crédito disponible: {fmt(availableCredit)} / {fmt(selectedCustomer.credit_limit)}
+                    </p>
+                  ) : selectedCustomer.loyalty_balance > 0 && (
                     <p className="text-xs mt-0.5" style={{ color: '#F0B429' }}>
                       Monedero: {fmt(selectedCustomer.loyalty_balance)} disponible
                     </p>
@@ -375,33 +412,48 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
                   onChange={e => searchCustomers(e.target.value)}
                   placeholder="Buscar cliente por nombre…"
                   className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                  onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-                  onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; setTimeout(() => setCustomerResults([]), 150) }}
+                  style={{
+                    background: 'var(--bg)',
+                    border: `1px solid ${isCredit ? '#FF6B6B55' : 'var(--border)'}`,
+                    color: 'var(--text)',
+                  }}
+                  onFocus={e => (e.currentTarget.style.borderColor = isCredit ? '#FF6B6B' : 'var(--accent)')}
+                  onBlur={e => {
+                    e.currentTarget.style.borderColor = isCredit ? '#FF6B6B55' : 'var(--border)'
+                    setTimeout(() => setCustomerResults([]), 150)
+                  }}
+                  autoFocus={isCredit}
                 />
                 {customerResults.length > 0 && (
                   <div className="absolute top-full left-0 right-0 mt-1 rounded-xl overflow-hidden z-10"
                     style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                    {customerResults.map(c => (
-                      <button key={c.id} onMouseDown={() => selectCustomer(c)}
-                        className="w-full text-left px-3 py-2.5 text-sm"
-                        style={{ borderBottom: '1px solid var(--border)', color: 'var(--text)' }}>
-                        <span className="font-semibold">{c.full_name}</span>
-                        {c.loyalty_balance > 0 && (
-                          <span className="text-xs ml-2" style={{ color: '#F0B429' }}>
-                            {fmt(c.loyalty_balance)} monedero
-                          </span>
-                        )}
-                      </button>
-                    ))}
+                    {customerResults.map(c => {
+                      const avail = c.credit_limit - c.credit_balance
+                      return (
+                        <button key={c.id} onMouseDown={() => selectCustomer(c)}
+                          className="w-full text-left px-3 py-2.5 text-sm"
+                          style={{ borderBottom: '1px solid var(--border)', color: 'var(--text)' }}>
+                          <span className="font-semibold">{c.full_name}</span>
+                          {isCredit ? (
+                            <span className="text-xs ml-2" style={{ color: avail >= total ? '#4CAF50' : '#FF6B6B' }}>
+                              {fmt(avail)} crédito disp.
+                            </span>
+                          ) : c.loyalty_balance > 0 && (
+                            <span className="text-xs ml-2" style={{ color: '#F0B429' }}>
+                              {fmt(c.loyalty_balance)} monedero
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          {/* ── Monedero ────────────────────────────────────────── */}
-          {selectedCustomer && selectedCustomer.loyalty_balance > 0 && (
+          {/* ── Monedero (solo si no es crédito) ─────────────────── */}
+          {!isCredit && selectedCustomer && selectedCustomer.loyalty_balance > 0 && (
             <div className="rounded-xl p-3 flex flex-col gap-2"
               style={{ background: '#1A1400', border: '1px solid #3D2E00' }}>
               <div className="flex items-center justify-between">
@@ -446,24 +498,31 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
           )}
 
           {/* ── Métodos de pago ──────────────────────────────────── */}
-          {!walletOnly && effectiveTotal > 0 && (
+          {!walletOnly && (
             <div className="flex flex-col gap-2.5">
               <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
                 Método de pago
                 {isMulti && <span style={{ color: 'var(--accent)' }}> — Mixto ({methodCount})</span>}
               </p>
 
-              {/* Botones de método */}
-              <div className="grid grid-cols-3 gap-2">
-                {(['cash', 'card', 'transfer'] as Method[]).map(m => {
+              {/* Botones de método — 2x2 */}
+              <div className="grid grid-cols-2 gap-2">
+                {(['cash', 'card', 'transfer', 'credit'] as Method[]).map(m => {
                   const active = methods.has(m)
+                  const isCreditBtn = m === 'credit'
                   return (
                     <button key={m} onClick={() => toggleMethod(m)}
                       className="py-2.5 rounded-xl text-xs font-semibold transition-all flex flex-col items-center gap-1"
                       style={{
-                        background: active ? 'var(--accent)' : 'var(--bg)',
-                        color: active ? '#000' : 'var(--text-muted)',
-                        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                        background: active
+                          ? (isCreditBtn ? '#3D1010' : 'var(--accent)')
+                          : 'var(--bg)',
+                        color: active
+                          ? (isCreditBtn ? '#FF6B6B' : '#000')
+                          : 'var(--text-muted)',
+                        border: `1px solid ${active
+                          ? (isCreditBtn ? '#FF6B6B' : 'var(--accent)')
+                          : 'var(--border)'}`,
                       }}>
                       <span className="text-base">{METHOD_CONFIG[m].icon}</span>
                       <span>{METHOD_CONFIG[m].label}</span>
@@ -472,39 +531,79 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
                 })}
               </div>
 
-              {/* Checkbox Pago Mixto */}
-              <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
-                <div
-                  onClick={() => handleMixedToggle(!mixedMode)}
-                  className="w-4 h-4 rounded flex items-center justify-center shrink-0 transition-all"
-                  style={{
-                    background: mixedMode ? 'var(--accent)' : 'var(--bg)',
-                    border: `2px solid ${mixedMode ? 'var(--accent)' : 'var(--border)'}`,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {mixedMode && (
-                    <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
-                      <path d="M1.5 5L4 7.5L8.5 2.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  )}
-                </div>
-                <span className="text-xs font-medium" style={{ color: mixedMode ? 'var(--text)' : 'var(--text-muted)' }}>
-                  Pago mixto
-                </span>
-                {!mixedMode && (
-                  <span className="text-xs" style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
-                    (2 o 3 métodos)
+              {/* Pago mixto — solo si no es crédito */}
+              {!isCredit && (
+                <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+                  <div
+                    onClick={() => handleMixedToggle(!mixedMode)}
+                    className="w-4 h-4 rounded flex items-center justify-center shrink-0 transition-all"
+                    style={{
+                      background: mixedMode ? 'var(--accent)' : 'var(--bg)',
+                      border: `2px solid ${mixedMode ? 'var(--accent)' : 'var(--border)'}`,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {mixedMode && (
+                      <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+                        <path d="M1.5 5L4 7.5L8.5 2.5" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </div>
+                  <span className="text-xs font-medium" style={{ color: mixedMode ? 'var(--text)' : 'var(--text-muted)' }}>
+                    Pago mixto
                   </span>
-                )}
-              </label>
+                  {!mixedMode && (
+                    <span className="text-xs" style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
+                      (2 o 3 métodos)
+                    </span>
+                  )}
+                </label>
+              )}
             </div>
           )}
 
-          {/* ── Inputs de monto ──────────────────────────────────── */}
-          {!walletOnly && effectiveTotal > 0 && (
+          {/* ── Panel de crédito ─────────────────────────────────── */}
+          {isCredit && selectedCustomer && (
+            <div className="rounded-xl p-3 flex flex-col gap-1.5"
+              style={{
+                background: availableCredit >= total ? '#0D1A2B' : '#2D1010',
+                border: `1px solid ${availableCredit >= total ? '#1A4A7A' : '#FF6B6B55'}`,
+              }}>
+              <div className="flex justify-between text-xs">
+                <span style={{ color: 'var(--text-muted)' }}>Límite de crédito</span>
+                <span className="font-mono font-bold" style={{ color: 'var(--text)' }}>{fmt(selectedCustomer.credit_limit)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span style={{ color: 'var(--text-muted)' }}>Deuda actual</span>
+                <span className="font-mono font-bold" style={{ color: '#FF6B6B' }}>{fmt(selectedCustomer.credit_balance)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span style={{ color: 'var(--text-muted)' }}>Esta venta</span>
+                <span className="font-mono font-bold" style={{ color: 'var(--accent)' }}>+{fmt(total)}</span>
+              </div>
+              <div className="flex justify-between text-xs pt-1.5"
+                style={{ borderTop: '1px solid var(--border)' }}>
+                <span className="font-semibold" style={{ color: 'var(--text)' }}>Disponible después</span>
+                <span className="font-mono font-black"
+                  style={{ color: availableCredit >= total ? '#4CAF50' : '#FF6B6B' }}>
+                  {fmt(availableCredit - total)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {isCredit && !selectedCustomer && (
+            <div className="rounded-xl p-3 text-center"
+              style={{ background: '#2D1010', border: '1px solid #FF6B6B55' }}>
+              <p className="text-xs" style={{ color: '#FF6B6B' }}>
+                Selecciona un cliente para continuar con crédito
+              </p>
+            </div>
+          )}
+
+          {/* ── Inputs de monto (solo si no es crédito) ──────────── */}
+          {!isCredit && !walletOnly && effectiveTotal > 0 && (
             <>
-              {/* Input principal: efectivo en modo normal o en mixto */}
               {(hasCash || (!hasCash && isMulti && !isThreeWay)) && (
                 <div className="flex flex-col gap-2">
                   <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
@@ -661,8 +760,12 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
             onClick={handlePay}
             disabled={processing || !canPay}
             className="w-full py-3 rounded-xl text-sm font-bold transition-all disabled:opacity-40"
-            style={{ background: 'var(--accent)', color: '#000' }}>
-            {processing ? 'Procesando…' : `Cobrar ${fmt(total)}`}
+            style={{
+              background: isCredit ? '#3D1010' : 'var(--accent)',
+              color: isCredit ? '#FF6B6B' : '#000',
+              border: isCredit ? '1px solid #FF6B6B' : 'none',
+            }}>
+            {processing ? 'Procesando…' : isCredit ? `Registrar a crédito ${fmt(total)}` : `Cobrar ${fmt(total)}`}
           </button>
         </div>
       </div>

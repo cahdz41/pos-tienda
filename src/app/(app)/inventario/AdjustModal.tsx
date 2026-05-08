@@ -65,6 +65,15 @@ export default function AdjustModal({ variant, onClose, onSaved }: Props) {
   const stockDelta = newStock - variant.stock
   const isValid    = qty > 0   // motivo opcional
 
+  // Costo promedio ponderado (solo aplica en Entrada con stock previo)
+  const newCostNum = parseFloat(costPrice) || 0
+  const avgCost = (() => {
+    if (type !== 'in' || qty === 0 || newCostNum <= 0) return newCostNum
+    if (variant.stock <= 0) return newCostNum
+    return (variant.stock * variant.cost_price + qty * newCostNum) / (variant.stock + qty)
+  })()
+  const showAvgPreview = type === 'in' && qty > 0 && variant.stock > 0 && newCostNum > 0 && newCostNum !== variant.cost_price
+
   async function handleSave() {
     if (!isValid || !user) return
     setSaving(true)
@@ -78,10 +87,9 @@ export default function AdjustModal({ variant, onClose, onSaved }: Props) {
 
       if (type === 'in') {
         const sp = parseFloat(salePrice)      || 0
-        const cp = parseFloat(costPrice)      || 0
         const wp = parseFloat(wholesalePrice) || 0
         if (sp > 0) updatePayload.sale_price      = sp
-        if (cp > 0) updatePayload.cost_price      = cp
+        if (avgCost > 0) updatePayload.cost_price = avgCost
         if (wp > 0) updatePayload.wholesale_price = wp
       }
 
@@ -110,7 +118,7 @@ export default function AdjustModal({ variant, onClose, onSaved }: Props) {
 
       const prices = type === 'in' ? {
         sale_price:      parseFloat(salePrice)      || variant.sale_price,
-        cost_price:      parseFloat(costPrice)      || variant.cost_price,
+        cost_price:      avgCost > 0 ? avgCost      : variant.cost_price,
         wholesale_price: parseFloat(wholesalePrice) || variant.wholesale_price,
       } : undefined
 
@@ -209,6 +217,41 @@ export default function AdjustModal({ variant, onClose, onSaved }: Props) {
                 <PriceInput label="Público"  value={salePrice}      onChange={setSalePrice} />
                 <PriceInput label="Mayoreo"  value={wholesalePrice} onChange={setWholesalePrice} />
               </div>
+
+              {/* Preview de costo promedio ponderado */}
+              {showAvgPreview && (
+                <div className="flex flex-col gap-1.5 pt-2"
+                  style={{ borderTop: '1px solid var(--border)' }}>
+                  <p className="text-xs font-semibold" style={{ color: '#F0B429' }}>
+                    Costo promedio ponderado
+                  </p>
+                  <div className="flex justify-between text-xs">
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      Existencias ({variant.stock} pzs × ${variant.cost_price.toFixed(2)})
+                    </span>
+                    <span className="font-mono" style={{ color: 'var(--text-muted)' }}>
+                      ${(variant.stock * variant.cost_price).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      Entrada ({qty} pzs × ${newCostNum.toFixed(2)})
+                    </span>
+                    <span className="font-mono" style={{ color: 'var(--text-muted)' }}>
+                      ${(qty * newCostNum).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs pt-1"
+                    style={{ borderTop: '1px dashed var(--border)' }}>
+                    <span className="font-semibold" style={{ color: 'var(--text)' }}>
+                      Nuevo costo unitario ({newStock} pzs)
+                    </span>
+                    <span className="font-mono font-bold" style={{ color: '#F0B429' }}>
+                      ${avgCost.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

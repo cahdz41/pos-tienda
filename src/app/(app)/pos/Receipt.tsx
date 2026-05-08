@@ -5,7 +5,7 @@ import type { CartItem } from '@/types'
 export interface ReceiptData {
   cart: CartItem[]
   total: number
-  paymentMethod: 'cash' | 'card' | 'transfer' | 'mixed'
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'mixed' | 'credit'
   amountPaid: number
   change: number
   cashPaid?: number      // en pago mixto
@@ -109,6 +109,7 @@ export function Receipt({ data }: { data: ReceiptData }) {
           {data.paymentMethod === 'cash' ? 'Efectivo'
             : data.paymentMethod === 'card' ? 'Tarjeta'
             : data.paymentMethod === 'transfer' ? 'Transferencia'
+            : data.paymentMethod === 'credit' ? 'Crédito'
             : 'Mixto'}
         </strong></div>
         {data.walletPaid != null && data.walletPaid > 0 && (
@@ -163,6 +164,7 @@ export function printReceipt(data: ReceiptData) {
   const payLabel = data.paymentMethod === 'cash' ? 'Efectivo'
     : data.paymentMethod === 'card' ? 'Tarjeta'
     : data.paymentMethod === 'transfer' ? 'Transferencia'
+    : data.paymentMethod === 'credit' ? 'Crédito'
     : 'Mixto'
   const walletRow = data.walletPaid && data.walletPaid > 0
     ? `<div>Monedero: ${fmt(data.walletPaid)}</div>` : ''
