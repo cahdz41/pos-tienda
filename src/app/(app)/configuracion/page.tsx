@@ -123,12 +123,9 @@ export default function ConfiguracionPage() {
 
   async function saveBotSetting(key: string, value: string) {
     setBotSaving(true)
-    const supabase = createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { setBotSaving(false); return }
     await fetch('/api/chat/settings', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, value }),
     })
     setBotSaving(false)
