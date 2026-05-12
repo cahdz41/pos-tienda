@@ -49,7 +49,7 @@ function BotAvatar() {
 }
 
 export default function ChatWidget() {
-  const { user } = useStoreAuth()
+  const { user, loading: authLoading } = useStoreAuth()
   const [minimized, setMinimized]         = useState(false)
   const [sessionId, setSessionId]         = useState<string | null>(null)
   const [messages, setMessages]           = useState<Message[]>([])
@@ -99,9 +99,9 @@ export default function ChatWidget() {
     if (pollRef.current) clearInterval(pollRef.current)
   }, [])
 
-  // Auto-inicializa cuando el usuario está disponible, una sola vez
+  // Auto-inicializa cuando la sesión de auth está lista, una sola vez
   useEffect(() => {
-    if (!user || hasInitRef.current) return
+    if (authLoading || !user || hasInitRef.current) return
     hasInitRef.current = true
 
     let cancelled = false;
@@ -165,7 +165,7 @@ export default function ChatWidget() {
     })()
 
     return () => { cancelled = true }
-  }, [user, startPolling])
+  }, [user, authLoading, startPolling])
 
   async function send(text: string) {
     if (!text || !sessionId || status === 'loading') return
