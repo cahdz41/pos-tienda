@@ -103,7 +103,42 @@ export default function ConfiguracionPage() {
   const [sendResult,  setSendResult]  = useState<'ok' | 'error' | null>(null)
   const [sendError,   setSendError]   = useState('')
 
-  useEffect(() => { loadCashiers(); loadStoreProducts(); loadVisibility() }, [])
+  // ── Asistente IA ──────────────────────────────────────────────────────
+  const [botEnabled,   setBotEnabled]   = useState(true)
+  const [botMode,      setBotMode]      = useState<'auto' | 'manual'>('auto')
+  const [botApiCalls,  setBotApiCalls]  = useState(0)
+  const [botApiLimit,  setBotApiLimit]  = useState(500)
+  const [botSaving,    setBotSaving]    = useState(false)
+
+  async function loadBotSettings() {
+    const supabase = createClient()
+    const { data } = await supabase.from('chat_settings').select('key, value')
+    if (!data) return
+    const map = Object.fromEntries(data.map((d: { key: string; value: string }) => [d.key, d.value]))
+    setBotEnabled(map.bot_enabled !== 'false')
+    setBotMode(map.bot_mode === 'manual' ? 'manual' : 'auto')
+    setBotApiCalls(parseInt(map.daily_api_calls ?? '0', 10))
+    setBotApiLimit(parseInt(map.daily_api_limit ?? '500', 10))
+  }
+
+  async function saveBotSetting(key: string, value: string) {
+    setBotSaving(true)
+    const supabase = createClient()
+    await supabase.from('chat_settings').update({ value }).eq('key', key)
+    setBotSaving(false)
+  }
+
+  async function handleBotEnabled(val: boolean) {
+    setBotEnabled(val)
+    await saveBotSetting('bot_enabled', String(val))
+  }
+
+  async function handleBotMode(val: 'auto' | 'manual') {
+    setBotMode(val)
+    await saveBotSetting('bot_mode', val)
+  }
+
+  useEffect(() => { loadCashiers(); loadStoreProducts(); loadVisibility(); loadBotSettings() }, [])
 
   // ── Helpers localStorage ──────────────────────────────────────────────
   function persist(key: string, value: string) {
@@ -603,6 +638,51 @@ export default function ConfiguracionPage() {
         {/* ── Pedidos de la tienda ── */}
         <Section title="Pedidos de la tienda">
           <StoreOrdersPanel />
+        </Section>
+
+        {/* ── Asistente IA ── */}
+        <Section title="Asistente IA">
+          <Field label="Bot habilitado" hint={botEnabled ? 'El asistente responde a los clientes en la tienda' : 'El asistente aparece como deshabilitado para los clientes'}>
+            <button
+              onClick={() => handleBotEnabled(!botEnabled)}
+              disabled={botSaving}
+              className="relative w-12 h-6 rounded-full transition-all"
+              style={{ background: botEnabled ? 'var(--accent)' : 'var(--border)', opacity: botSaving ? 0.6 : 1 }}
+            >
+              <div className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+                style={{ left: botEnabled ? '26px' : '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+            </button>
+          </Field>
+
+          <Field label="Modo de respuesta" hint={botMode === 'auto' ? 'La IA responde automáticamente' : 'Las respuestas son manuales — recibirás notificación en Telegram'}>
+            <button
+              onClick={() => handleBotMode(botMode === 'auto' ? 'manual' : 'auto')}
+              disabled={botSaving}
+              className="relative w-12 h-6 rounded-full transition-all"
+              style={{ background: botMode === 'manual' ? '#f97316' : 'var(--accent)', opacity: botSaving ? 0.6 : 1 }}
+            >
+              <div className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+                style={{ left: botMode === 'manual' ? '26px' : '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+            </button>
+            <span className="text-xs ml-3 font-semibold" style={{ color: botMode === 'manual' ? '#f97316' : 'var(--accent)' }}>
+              {botMode === 'auto' ? 'Automático (IA)' : 'Manual (humano)'}
+            </span>
+          </Field>
+
+          <Field label={`Llamadas de API hoy — ${botApiCalls} / ${botApiLimit}`}>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${Math.min((botApiCalls / botApiLimit) * 100, 100)}%`,
+                  background: botApiCalls / botApiLimit > 0.8 ? '#ef4444' : 'var(--accent)',
+                }}
+              />
+            </div>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', opacity: 0.6 }}>
+              Se resetea automáticamente cada día. Límite configurable en variables de entorno.
+            </p>
+          </Field>
         </Section>
 
       </div>

@@ -11,6 +11,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/genai": "^2.0.1",
     "@imgly/background-removal": "^1.7.0",
     "@supabase/supabase-js": "^2.103.0",
     "cloudinary": "^2.9.0",

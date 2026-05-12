@@ -4,6 +4,7 @@ import { StoreCartProvider } from '@/contexts/StoreCartContext'
 import { StoreAuthProvider } from '@/contexts/StoreAuthContext'
 import StoreNav from '@/components/tienda/StoreNav'
 import CartDrawer from '@/components/tienda/CartDrawer'
+import ChatWidget from '@/components/tienda/ChatWidget'
 
 const syne = Syne({
   subsets: ['latin'],
@@ -49,6 +50,7 @@ export default function TiendaLayout({ children }: { children: React.ReactNode }
           <StoreNav />
           <CartDrawer />
           {children}
+          <ChatWidget />
         </StoreCartProvider>
       </StoreAuthProvider>
     </div>

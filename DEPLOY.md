@@ -261,10 +261,30 @@ NEXT_PUBLIC_SUPABASE_URL=https://isbsckatvtangowdvjdl.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<tu_anon_key>
 SUPABASE_SERVICE_ROLE_KEY=<tu_service_role_key>
 RESEND_API_KEY=<tu_resend_key>
+NEXT_PUBLIC_STORE_WHATSAPP=524427086715
+CLOUDINARY_CLOUD_NAME=do90m24xe
+CLOUDINARY_API_KEY=<tu_cloudinary_key>
+CLOUDINARY_API_SECRET=<tu_cloudinary_secret>
+
+# ── Asistente IA ─────────────────────────────────────────────────────────────
+GEMINI_API_KEY=<tu_gemini_key>
+TELEGRAM_BOT_TOKEN=<tu_telegram_bot_token>
+TELEGRAM_ADMIN_CHAT_ID=<tu_telegram_chat_id>
 ```
 
 > Los valores reales están en `.env.local` de tu PC (nunca se commitean).  
 > Si cambias alguna variable, debes hacer `pm2 restart pos-v2` después de editar el archivo.
+
+### Webhook de Telegram (registrar una sola vez en producción)
+
+Después de hacer el primer deploy con el asistente IA, ejecutar en el VPS:
+
+```bash
+curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+  -d '{"url": "https://pos-storeonline.duckdns.org/api/telegram/webhook"}'
+```
+
+Respuesta esperada: `{"ok":true,"result":true}`. Solo se necesita hacer esto una vez.
 
 ---
 
