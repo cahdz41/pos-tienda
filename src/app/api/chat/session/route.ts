@@ -25,10 +25,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'bot_disabled' }, { status: 503 })
     }
 
-    // Límite: máximo 3 sesiones por día por usuario
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
+    // Reusar sesión activa del día si existe
+    const { data: existing } = await supabase
+      .from('chat_sessions')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('is_blocked', false)
+      .gte('created_at', today.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (existing) {
+      return NextResponse.json({ session_id: existing.id })
+    }
+
+    // Límite: máximo 3 sesiones por día por usuario
     const { count } = await supabase
       .from('chat_sessions')
       .select('id', { count: 'exact', head: true })
