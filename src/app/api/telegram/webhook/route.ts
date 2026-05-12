@@ -14,44 +14,47 @@ interface TelegramUpdate {
 export async function POST(req: NextRequest) {
   try {
     const body: TelegramUpdate = await req.json()
+    console.log('[telegram/webhook] update recibido:', JSON.stringify(body))
+
     const message = body.message
     if (!message?.text || !message.reply_to_message) {
-      // Solo procesamos respuestas a notificaciones (reply_to_message requerido)
+      console.log('[telegram/webhook] ignorado — no es reply o no tiene texto')
       return NextResponse.json({ ok: true })
     }
 
     const replyToId = message.reply_to_message.message_id
     const adminText = message.text.trim()
+    console.log('[telegram/webhook] reply_to_message_id:', replyToId, '| texto:', adminText)
 
     const supabase = createAdminClient()
 
-    // Encuentra la sesión que corresponde a ese mensaje de Telegram
-    const { data: session } = await supabase
+    const { data: session, error: sessionError } = await supabase
       .from('chat_sessions')
       .select('id')
       .eq('telegram_notification_id', replyToId)
       .single()
 
+    console.log('[telegram/webhook] sesión encontrada:', session?.id ?? 'NINGUNA', '| error:', sessionError?.message ?? 'none')
+
     if (!session) {
-      // El admin respondió a un mensaje que no era una notificación de chat
       return NextResponse.json({ ok: true })
     }
 
-    // Guarda la respuesta del admin
-    await supabase.from('chat_messages').insert({
+    const { error: insertError } = await supabase.from('chat_messages').insert({
       session_id: session.id,
       role: 'admin',
       content: adminText,
     })
+    console.log('[telegram/webhook] mensaje guardado, error:', insertError?.message ?? 'none')
 
-    // Actualiza last_activity_at
     await supabase
       .from('chat_sessions')
       .update({ last_activity_at: new Date().toISOString() })
       .eq('id', session.id)
 
     return NextResponse.json({ ok: true })
-  } catch {
-    return NextResponse.json({ ok: true }) // Telegram espera siempre 200
+  } catch (err) {
+    console.error('[telegram/webhook] ERROR:', err)
+    return NextResponse.json({ ok: true })
   }
 }
