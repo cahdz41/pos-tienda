@@ -124,7 +124,7 @@ export default function ConfiguracionPage() {
   async function saveBotSetting(key: string, value: string) {
     setBotSaving(true)
     const supabase = createClient()
-    await supabase.from('chat_settings').update({ value }).eq('key', key)
+    await supabase.from('chat_settings').upsert({ key, value }, { onConflict: 'key' })
     setBotSaving(false)
   }
 
