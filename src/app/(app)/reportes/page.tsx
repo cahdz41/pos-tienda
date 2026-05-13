@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
+import AnalyticsChat from '@/components/AnalyticsChat'
 
 type Period = 'today' | '7days' | 'month' | '30days'
 
@@ -148,10 +149,11 @@ const METHOD_META: Record<string, { label: string; color: string }> = {
 }
 
 export default function ReportesPage() {
-  const [period,  setPeriod]  = useState<Period>('7days')
-  const [loading, setLoading] = useState(true)
-  const [sales,   setSales]   = useState<SaleRow[]>([])
-  const [items,   setItems]   = useState<ItemRow[]>([])
+  const [period,   setPeriod]   = useState<Period>('7days')
+  const [loading,  setLoading]  = useState(true)
+  const [sales,    setSales]    = useState<SaleRow[]>([])
+  const [items,    setItems]    = useState<ItemRow[]>([])
+  const [showChat, setShowChat] = useState(false)
 
   useEffect(() => { loadData() }, [period])
 
@@ -263,22 +265,35 @@ export default function ReportesPage() {
       <div className="px-5 pt-5 pb-3 shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold" style={{ color: 'var(--text)' }}>Reportes</h1>
-          <div className="flex gap-0.5 p-1 rounded-xl"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            {PERIODS.map(p => (
-              <button key={p.key} onClick={() => setPeriod(p.key)}
-                className="px-3 py-1 rounded-lg text-xs font-semibold"
-                style={{
-                  background: period === p.key ? 'var(--accent)' : 'transparent',
-                  color:      period === p.key ? '#000' : 'var(--text-muted)',
-                }}>
-                {p.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowChat(v => !v)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+              style={{
+                background: showChat ? 'var(--accent)' : 'var(--surface)',
+                color: showChat ? '#000' : 'var(--text-muted)',
+                border: '1px solid var(--border)',
+              }}>
+              🤖 IA
+            </button>
+            <div className="flex gap-0.5 p-1 rounded-xl"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              {PERIODS.map(p => (
+                <button key={p.key} onClick={() => setPeriod(p.key)}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold"
+                  style={{
+                    background: period === p.key ? 'var(--accent)' : 'transparent',
+                    color:      period === p.key ? '#000' : 'var(--text-muted)',
+                  }}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       <div className="flex-1 overflow-auto px-5 pb-5">
         {loading ? (
           <div className="flex items-center justify-center h-40">
@@ -411,6 +426,8 @@ export default function ReportesPage() {
 
           </div>
         )}
+      </div>
+      {showChat && <AnalyticsChat period={period} />}
       </div>
     </div>
   )

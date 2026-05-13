@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Shift, CashMovement } from '@/types'
+import TurnSummaryModal from '@/components/TurnSummaryModal'
 
 interface ShiftSales {
   cash: number
@@ -381,7 +382,7 @@ export default function TurnosPage() {
   const [shift, setShift] = useState<Shift | null>(null)
   const [sales, setSales] = useState<ShiftSales>({ cash: 0, card: 0, credit: 0 })
   const [movements, setMovements] = useState<CashMovement[]>([])
-  const [view, setView] = useState<'main' | 'closing'>('main')
+  const [view, setView] = useState<'main' | 'summary' | 'closing'>('main')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -486,6 +487,14 @@ export default function TurnosPage() {
 
   if (!shift) return <NoShiftView onOpen={openShift} saving={saving} error={error} />
 
+  if (view === 'summary') {
+    return <TurnSummaryModal
+      shiftId={shift.id}
+      onContinue={() => setView('closing')}
+      onCancel={() => { setView('main'); setError(null) }}
+    />
+  }
+
   if (view === 'closing') {
     return <CloseShiftView shift={shift} sales={sales} movements={movements}
       onConfirm={closeShift} onCancel={() => { setView('main'); setError(null) }}
@@ -493,6 +502,6 @@ export default function TurnosPage() {
   }
 
   return <ActiveShiftView shift={shift} sales={sales} movements={movements}
-    onAddMovement={addMovement} onStartClose={() => { setView('closing'); setError(null) }}
+    onAddMovement={addMovement} onStartClose={() => { setView('summary'); setError(null) }}
     saving={saving} error={error} />
 }
