@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Customer } from '@/types'
 import VoiceSearchButton from '@/components/VoiceSearchButton'
+import { matchesSearch } from '@/lib/voiceNormalize'
 import CustomerModal from './CustomerModal'
 import AbonoModal from './AbonoModal'
 import HistorialModal from './HistorialModal'
@@ -75,8 +76,8 @@ export default function ClientesPage() {
     const historialParam = searchParams.get('historial')
 
     if (abonoParam) {
-      const q = decodeURIComponent(abonoParam).toLowerCase()
-      const customer = customers.find(c => c.full_name.toLowerCase().includes(q))
+      const q = decodeURIComponent(abonoParam)
+      const customer = customers.find(c => matchesSearch(q, c.full_name))
       if (customer) {
         setAbonoCustomer(customer)
         if (montoParam) {
@@ -87,8 +88,8 @@ export default function ClientesPage() {
     }
 
     if (historialParam) {
-      const q = decodeURIComponent(historialParam).toLowerCase()
-      const customer = customers.find(c => c.full_name.toLowerCase().includes(q))
+      const q = decodeURIComponent(historialParam)
+      const customer = customers.find(c => matchesSearch(q, c.full_name))
       if (customer) setHistorialCustomer(customer)
       router.replace('/clientes', { scroll: false })
     }

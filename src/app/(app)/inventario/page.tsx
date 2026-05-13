@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { ProductVariant } from '@/types'
 import VoiceSearchButton from '@/components/VoiceSearchButton'
+import { matchesSearch } from '@/lib/voiceNormalize'
 import AdjustModal from './AdjustModal'
 import ImportModal from './ImportModal'
 import ExportModal from './ExportModal'
@@ -268,12 +269,8 @@ export default function InventarioPage() {
     if (soloConExistencias) list = list.filter(v => v.stock > 0)
     if (categoryFilter) list = list.filter(v => (v.product?.category?.trim() ?? '') === categoryFilter)
     if (search.trim()) {
-      const q = search.toLowerCase()
       list = list.filter(v =>
-        v.product?.name?.toLowerCase().includes(q) ||
-        (v.flavor ?? '').toLowerCase().includes(q) ||
-        v.barcode.includes(q) ||
-        (v.product?.category ?? '').toLowerCase().includes(q)
+        matchesSearch(search, v.product?.name ?? '', v.flavor ?? '', v.barcode, v.product?.category ?? '')
       )
     }
     return list

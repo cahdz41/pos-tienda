@@ -1,6 +1,7 @@
 'use client'
 
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition'
+import { normalizeVoiceQuery } from '@/lib/voiceNormalize'
 
 interface Props {
   onResult: (text: string) => void
@@ -31,7 +32,7 @@ export default function VoiceSearchButton({ onResult }: Props) {
       `}</style>
       <button
         type="button"
-        onClick={() => listening ? stop() : start(onResult)}
+        onClick={() => listening ? stop() : start(text => onResult(normalizeVoiceQuery(text)))}
         title={
           errored   ? 'Micrófono no disponible' :
           listening ? 'Escuchando… (clic para cancelar)' :

@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Category } from '@/types'
 import VoiceSearchButton from '@/components/VoiceSearchButton'
+import { matchesSearch, normalizeVoiceQuery } from '@/lib/voiceNormalize'
 import ProductModal from './ProductModal'
 import CategoryModal from './CategoryModal'
 
@@ -96,8 +97,8 @@ export default function ProductosPage() {
     if (loading || !searchParams) return
     const editar = searchParams.get('editar')
     if (editar) {
-      const query = decodeURIComponent(editar).toLowerCase()
-      const match = products.find(p => p.name.toLowerCase().includes(query))
+      const query = normalizeVoiceQuery(decodeURIComponent(editar))
+      const match = products.find(p => matchesSearch(query, p.name))
       if (match) setEditProduct(match)
       router.replace('/productos', { scroll: false })
     }
@@ -234,13 +235,11 @@ export default function ProductosPage() {
 
     if (!search.trim()) return list
 
-    const q = search.toLowerCase().trim()
     const exact = search.trim()
 
     const matched = list.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      (p.category ?? '').toLowerCase().includes(q) ||
-      p.product_variants.some(v => v.barcode.includes(q))
+      matchesSearch(search, p.name, p.category ?? '') ||
+      p.product_variants.some(v => v.barcode.includes(exact))
     )
 
     // Coincidencia exacta de barcode primero, luego parcial, luego nombre
@@ -248,8 +247,8 @@ export default function ProductosPage() {
       const aExact = a.product_variants.some(v => v.barcode === exact)
       const bExact = b.product_variants.some(v => v.barcode === exact)
       if (aExact !== bExact) return aExact ? -1 : 1
-      const aBar = a.product_variants.some(v => v.barcode.includes(q))
-      const bBar = b.product_variants.some(v => v.barcode.includes(q))
+      const aBar = a.product_variants.some(v => v.barcode.includes(exact))
+      const bBar = b.product_variants.some(v => v.barcode.includes(exact))
       if (aBar !== bBar) return aBar ? -1 : 1
       return a.name.localeCompare(b.name)
     })

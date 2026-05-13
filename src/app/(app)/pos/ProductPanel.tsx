@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import type { ProductVariant, CartItem } from '@/types'
+import { matchesSearch } from '@/lib/voiceNormalize'
 
 const CATEGORY_PRIORITY = [
   'PROTEINAS', 'GANADORES', 'CREATINAS', 'PRE-ENTRENOS', 'PRE ENTRENOS',
@@ -161,11 +162,8 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0, v
       )
     }
     if (search.trim()) {
-      const q = search.toLowerCase()
       list = list.filter(v =>
-        v.product?.name?.toLowerCase().includes(q) ||
-        (v.flavor ?? '').toLowerCase().includes(q) ||
-        v.barcode.includes(q)
+        matchesSearch(search, v.product?.name ?? '', v.flavor ?? '', v.barcode)
       )
     }
     if (soloConStock) list = list.filter(v => v.stock > 0)
