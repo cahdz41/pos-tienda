@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { SpecialOrder, SpecialOrderWithCustomer, Customer } from '@/types'
+import VoiceSearchButton from '@/components/VoiceSearchButton'
 import OrderModal from './OrderModal'
 import { printOrderTicket, type OrderTicketData } from './OrderTicket'
 
@@ -254,16 +255,19 @@ export default function EncargosPage() {
 
         {/* Búsqueda + filtros */}
         <div className="flex flex-col gap-2">
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar por cliente o producto…"
-            className="w-full rounded-lg px-4 py-2 text-sm outline-none"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
-            onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-            onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-          />
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por cliente o producto…"
+              className="flex-1 rounded-lg px-4 py-2 text-sm outline-none"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
+              onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+              onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+            />
+            <VoiceSearchButton onResult={setSearch} />
+          </div>
           <div className="flex gap-2">
             {/* Filtro por tipo */}
             <button

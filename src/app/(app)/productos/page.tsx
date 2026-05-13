@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Category } from '@/types'
+import VoiceSearchButton from '@/components/VoiceSearchButton'
 import ProductModal from './ProductModal'
 import CategoryModal from './CategoryModal'
 
@@ -308,6 +309,7 @@ export default function ProductosPage() {
             onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
             onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
           />
+          <VoiceSearchButton onResult={setSearch} />
           <select
             value={categoryFilter}
             onChange={e => setCategoryFilter(e.target.value)}

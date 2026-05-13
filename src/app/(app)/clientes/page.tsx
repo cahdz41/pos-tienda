@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Customer } from '@/types'
+import VoiceSearchButton from '@/components/VoiceSearchButton'
 import CustomerModal from './CustomerModal'
 import AbonoModal from './AbonoModal'
 import HistorialModal from './HistorialModal'
@@ -186,6 +187,7 @@ export default function ClientesPage() {
             onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
             onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
           />
+          <VoiceSearchButton onResult={setSearch} />
           <button
             onClick={() => setFilterDebt(v => !v)}
             className="shrink-0 px-3 py-2 rounded-lg text-xs font-semibold"
