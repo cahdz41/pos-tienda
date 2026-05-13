@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chocholand-v1';
+const CACHE_NAME = 'chocholand-v2';
 
 // Assets estáticos de Next.js — inmutables (tienen hash en el nombre)
 const STATIC_PATTERN = /^\/_next\/static\//;

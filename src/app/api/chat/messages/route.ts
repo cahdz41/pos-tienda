@@ -45,7 +45,9 @@ export async function GET(req: NextRequest) {
 
     const { data: messages } = await query.limit(50)
 
-    return NextResponse.json({ messages: messages ?? [] })
+    return NextResponse.json({ messages: messages ?? [] }, {
+      headers: { 'Cache-Control': 'no-store' },
+    })
   } catch {
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }

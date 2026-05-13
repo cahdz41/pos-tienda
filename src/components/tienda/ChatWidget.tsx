@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useStoreAuth } from '@/contexts/StoreAuthContext'
 import { getStoreSupabase } from '@/lib/supabase-store'
 
@@ -48,6 +48,14 @@ function BotAvatar() {
   )
 }
 
+// Module-level guard: survives React StrictMode's simulated unmount/remount.
+// forUserId  — which user was last initialized
+// mountId    — which component instance ran init (UUID per mount, reused across StrictMode double-run)
+const chatInitState: { forUserId: string | null; mountId: string | null } = {
+  forUserId: null,
+  mountId: null,
+}
+
 export default function ChatWidget() {
   const { user, loading: authLoading } = useStoreAuth()
   const [minimized, setMinimized]         = useState(false)
@@ -58,60 +66,54 @@ export default function ChatWidget() {
   const [botMode, setBotMode]             = useState<'auto' | 'manual'>('auto')
   const [quickActionsUsed, setQuickActionsUsed] = useState(false)
 
-  const bottomRef      = useRef<HTMLDivElement>(null)
-  const pollRef        = useRef<ReturnType<typeof setInterval> | null>(null)
-  const lastMsgRef     = useRef<string>('')
-  const shownIdsRef    = useRef<Set<string>>(new Set())
-  const hasInitRef     = useRef(false)  // flag con ref para evitar dobles inits
+  const bottomRef    = useRef<HTMLDivElement>(null)
+  const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastMsgRef   = useRef<string>('')
+  const shownIdsRef  = useRef<Set<string>>(new Set())
 
+  // Unique ID for this component instance. Generated once on first render.
+  // Shared across StrictMode's double-invocation (same instance), but new on actual remount.
+  const mountIdRef = useRef<string | null>(null)
+  if (!mountIdRef.current) mountIdRef.current = crypto.randomUUID()
+
+  // ── Scroll to bottom ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!minimized) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, status, minimized])
 
-  const startPolling = useCallback((sid: string) => {
-    if (pollRef.current) clearInterval(pollRef.current)
-    pollRef.current = setInterval(async () => {
-      const { data: { session } } = await getStoreSupabase().auth.getSession()
-      const token = session?.access_token
-      if (!token) return
-
-      const after = lastMsgRef.current
-      const res = await fetch(
-        `/api/chat/messages?session_id=${sid}${after ? `&after=${after}` : ''}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
-      if (!res.ok) return
-
-      const { messages: newMsgs } = await res.json()
-      if (newMsgs?.length) {
-        const unseen = newMsgs.filter((m: Message) => !shownIdsRef.current.has(m.id))
-        if (unseen.length) {
-          unseen.forEach((m: Message) => shownIdsRef.current.add(m.id))
-          lastMsgRef.current = unseen.at(-1).created_at
-          setMessages((prev) => [...prev, ...unseen])
-          setStatus('idle')
-        }
-      }
-    }, POLL_INTERVAL)
-  }, [])
-
-  useEffect(() => () => {
-    if (pollRef.current) clearInterval(pollRef.current)
-  }, [])
-
-  // Auto-inicializa cuando la sesión de auth está lista, una sola vez
+  // ── Session init ──────────────────────────────────────────────────────────
+  // Guard fires when: same user + same component instance → already initialized.
+  // The IIFE has NO isMounted check on purpose: we let it complete even if
+  // StrictMode runs the cleanup between launch and resolution. React 18 silently
+  // drops state updates on unmounted components, then applies them on remount.
   useEffect(() => {
-    if (authLoading || !user || hasInitRef.current) return
-    hasInitRef.current = true
+    if (authLoading) return
 
-    let cancelled = false;
+    if (!user) {
+      // Logout: full reset so next login re-initializes
+      chatInitState.forUserId = null
+      chatInitState.mountId   = null
+      setSessionId(null)
+      setMessages([])
+      setStatus('idle')
+      setQuickActionsUsed(false)
+      shownIdsRef.current = new Set()
+      return
+    }
 
-    (async () => {
+    const myMountId = mountIdRef.current!
+    if (chatInitState.forUserId === user.id && chatInitState.mountId === myMountId) return
+
+    // Claim this init slot — all future runs for this user+mount return early.
+    chatInitState.forUserId = user.id
+    chatInitState.mountId   = myMountId
+
+    ;(async () => {
       setStatus('loading')
       try {
         const { data: { session } } = await getStoreSupabase().auth.getSession()
         const token = session?.access_token
-        if (!token || cancelled) { setStatus('idle'); return }
+        if (!token) { setStatus('idle'); return }
 
         const configRes = await fetch('/api/chat/session', {
           method: 'POST',
@@ -119,54 +121,79 @@ export default function ChatWidget() {
         })
 
         if (!configRes.ok) {
-          if (cancelled) return
           const { error } = await configRes.json()
           if (error === 'bot_disabled') { setStatus('disabled'); return }
-          if (error === 'daily_limit')  { setStatus('limit'); return }
+          if (error === 'daily_limit')  { setStatus('limit');    return }
           setStatus('idle'); return
         }
 
         const { session_id } = await configRes.json()
-        if (cancelled) return
 
-        setSessionId(session_id)
+        // Anchor polling to NOW — all messages before this moment are ignored.
+        lastMsgRef.current  = new Date().toISOString()
+        shownIdsRef.current = new Set()
 
-        // Carga mensajes existentes de la sesión de hoy
-        const modeRes = await fetch('/api/chat/messages?session_id=' + session_id, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-
-        if (!cancelled && modeRes.ok) {
-          const { messages: existing } = await modeRes.json()
-          if (existing?.length) {
-            existing.forEach((m: Message) => shownIdsRef.current.add(m.id))
-            lastMsgRef.current = existing.at(-1).created_at
-            setMessages(existing)
-            setStatus('idle')
-            startPolling(session_id)
-            return
-          }
-        }
-
-        // Sin historial: mostrar bienvenida
-        if (!cancelled) {
-          setMessages([{
-            id: 'welcome',
-            role: 'assistant',
-            content: '¡Hola! 👋 Soy el asistente de Chocholand. Puedo ayudarte a encontrar productos, revisar precios y recomendarte suplementos para tu objetivo fitness. ¿En qué te ayudo?',
-            created_at: new Date().toISOString(),
-          }])
-          setStatus('idle')
-          startPolling(session_id)
-        }
+        setQuickActionsUsed(false)
+        setMessages([{
+          id: 'welcome',
+          role: 'assistant',
+          content: '¡Hola! 👋 Soy el asistente de Chocholand. Puedo ayudarte a encontrar productos, revisar precios y recomendarte suplementos para tu objetivo fitness. ¿En qué te ayudo?',
+          created_at: new Date().toISOString(),
+        }])
+        setSessionId(session_id)   // triggers polling effect below
+        setStatus('idle')
       } catch {
-        if (!cancelled) setStatus('idle')
+        setStatus('idle')
       }
     })()
+    // No cleanup: let the IIFE complete regardless of StrictMode lifecycle.
+  }, [user, authLoading])
 
-    return () => { cancelled = true }
-  }, [user, authLoading, startPolling])
+  // ── Polling — driven by sessionId ─────────────────────────────────────────
+  // Starts/stops automatically whenever sessionId changes.
+  // StrictMode cleanup clears the interval; the re-run restarts it with the
+  // same sessionId (and the same lastMsgRef anchor set by the init IIFE).
+  useEffect(() => {
+    if (!sessionId) {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+      return
+    }
 
+    if (pollRef.current) clearInterval(pollRef.current)
+
+    pollRef.current = setInterval(async () => {
+      const { data: { session } } = await getStoreSupabase().auth.getSession()
+      const token = session?.access_token
+      if (!token) return
+
+      const after = lastMsgRef.current
+      const res = await fetch(
+        `/api/chat/messages?session_id=${sessionId}${after ? `&after=${encodeURIComponent(after)}` : ''}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!res.ok) return
+
+      const { messages: newMsgs } = await res.json()
+      if (!newMsgs?.length) return
+
+      // Filter: ignore user messages (shown optimistically) and already-seen IDs.
+      const unseen = (newMsgs as Message[]).filter(
+        (m) => !shownIdsRef.current.has(m.id) && m.role !== 'user'
+      )
+      if (!unseen.length) return
+
+      unseen.forEach((m) => shownIdsRef.current.add(m.id))
+      lastMsgRef.current = unseen.at(-1)!.created_at
+      setMessages((prev) => [...prev, ...unseen])
+      setStatus('idle')
+    }, POLL_INTERVAL)
+
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    }
+  }, [sessionId])
+
+  // ── Send message ──────────────────────────────────────────────────────────
   async function send(text: string) {
     if (!text || !sessionId || status === 'loading') return
 
@@ -349,7 +376,6 @@ export default function ChatWidget() {
                 </div>
               </div>
             </div>
-            {/* Indicador visual de que el header minimiza — no necesita ser un botón */}
             <span style={{ fontSize: 18, color: 'rgba(255,255,255,0.3)', lineHeight: 1, fontWeight: 300 }}>
               —
             </span>
