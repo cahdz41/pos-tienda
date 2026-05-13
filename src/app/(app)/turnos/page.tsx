@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Shift, CashMovement } from '@/types'
@@ -378,6 +379,8 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
 // ── Página principal ────────────────────────────────────────────────────────
 export default function TurnosPage() {
   const { user, loading: authLoading } = useAuth()
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const [loadingShift, setLoadingShift] = useState(true)
   const [shift, setShift] = useState<Shift | null>(null)
   const [sales, setSales] = useState<ShiftSales>({ cash: 0, card: 0, credit: 0 })
@@ -421,6 +424,14 @@ export default function TurnosPage() {
   useEffect(() => {
     if (!authLoading) loadShift()
   }, [authLoading, loadShift])
+
+  // Arrancar cierre de turno vía URL param (comando de voz)
+  useEffect(() => {
+    if (!loadingShift && shift && searchParams?.get('accion') === 'cerrar') {
+      setView('summary')
+      router.replace('/turnos', { scroll: false })
+    }
+  }, [loadingShift, shift, searchParams, router])
 
   async function openShift(amount: number) {
     if (!user) return

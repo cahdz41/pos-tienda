@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Customer } from '@/types'
@@ -41,6 +42,8 @@ function CreditBar({ balance, limit }: { balance: number; limit: number }) {
 export default function ClientesPage() {
   const { profile } = useAuth()
   const isOwner = profile?.role === 'owner'
+  const searchParams = useSearchParams()
+  const router = useRouter()
 
   const [customers,  setCustomers]  = useState<Customer[]>([])
   const [loading,    setLoading]    = useState(true)
@@ -54,6 +57,14 @@ export default function ClientesPage() {
   const [historialCustomer, setHistorialCustomer] = useState<Customer | null>(null)
 
   useEffect(() => { loadCustomers() }, [])
+
+  // Abrir modal de nuevo cliente vía URL param (comando de voz)
+  useEffect(() => {
+    if (!loading && searchParams?.get('nuevo') === 'true' && isOwner) {
+      setEditingCustomer('new')
+      router.replace('/clientes', { scroll: false })
+    }
+  }, [loading, searchParams, isOwner, router])
 
   async function loadCustomers() {
     setLoading(true)

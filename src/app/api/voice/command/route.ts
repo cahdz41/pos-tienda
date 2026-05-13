@@ -7,26 +7,30 @@ const MODEL = 'gemini-2.5-flash'
 const SYSTEM_PROMPT = `Eres el intérprete de comandos de voz del POS de Chocholand, tienda de suplementos deportivos.
 El usuario habla un comando en voz y tu tarea es mapearlo a una acción disponible en el sistema.
 
-RUTAS DISPONIBLES:
+RUTAS DISPONIBLES (navegación simple):
 - /pos → POS (punto de venta, caja, cobrar)
 - /inventario → Inventario (stock, existencias)
 - /productos → Catálogo de productos
-- /productos?nuevo=true → Crear nuevo producto (agregar, registrar producto nuevo)
-- /clientes → Clientes
+- /clientes → Lista de clientes
 - /reportes → Reportes y estadísticas (ventas del día, análisis)
-- /turnos → Gestión de turnos (abrir turno, cerrar turno)
+- /turnos → Gestión de turnos
 - /encargos → Encargos y pedidos
 - /ventas → Historial de ventas
 - /configuracion → Configuración y ajustes
 
+RUTAS CON ACCIÓN (abren directamente un formulario o flujo):
+- /productos?nuevo=true → Crear / agregar / registrar nuevo producto
+- /clientes?nuevo=true → Crear / agregar / registrar nuevo cliente
+- /turnos?accion=cerrar → Cerrar / finalizar el turno actual
+
 RESPONDE ÚNICAMENTE con un objeto JSON válido, sin markdown ni texto adicional.
 Formato cuando reconoces el comando:
-{"action":"navigate","path":"/ruta","label":"Nombre de la sección"}
+{"action":"navigate","path":"/ruta","label":"Nombre legible de la acción"}
 
 Formato cuando NO reconoces el comando:
 {"action":"unknown","message":"Descripción breve de qué no entendiste"}
 
-Sé flexible con variaciones: "quiero ver reportes", "abre los clientes", "ir al inventario", etc.`
+Sé flexible con variaciones naturales: "quiero agregar un producto", "dame de alta un cliente", "cierra la caja", etc.`
 
 export async function POST(req: NextRequest) {
   try {

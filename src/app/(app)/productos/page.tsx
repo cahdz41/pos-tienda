@@ -69,8 +69,8 @@ export default function ProductosPage() {
     if (!loading && searchParams) {
       const nuevo = searchParams.get('nuevo')
       const barcode = searchParams.get('barcode')
-      if (nuevo === 'true' && barcode) {
-        setPendingBarcode(barcode)
+      if (nuevo === 'true') {
+        if (barcode) setPendingBarcode(barcode)
         setEditProduct('new')
         setSearch('')
         router.replace('/productos', { scroll: false })
