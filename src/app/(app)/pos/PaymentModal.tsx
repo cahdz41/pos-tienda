@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { CartItem, Customer, Shift } from '@/types'
@@ -25,11 +25,12 @@ interface Props {
   cart: CartItem[]
   total: number
   activeShift: Shift
+  autoMode?: 'efectivo_exacto'
   onSuccess: () => void
   onClose: () => void
 }
 
-export default function PaymentModal({ cart, total, activeShift, onSuccess, onClose }: Props) {
+export default function PaymentModal({ cart, total, activeShift, autoMode, onSuccess, onClose }: Props) {
   const { user } = useAuth()
 
   // ── Métodos ───────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   const [processing, setProcessing] = useState(false)
   const [error, setError]           = useState<string | null>(null)
   const [success, setSuccess]       = useState<ReceiptData | null>(null)
+  const [autoPay, setAutoPay]       = useState(false)
 
   // ── Cliente + monedero ────────────────────────────────────────────────────
   const [customerQuery,    setCustomerQuery]    = useState('')
@@ -163,6 +165,22 @@ export default function PaymentModal({ cart, total, activeShift, onSuccess, onCl
   const varInputPlaceholder = hasCash
     ? 'Ej: 200 (el resto va a ' + (hasCard ? 'tarjeta' : 'transferencia') + ')'
     : 'Ej: 300 (el resto va a transferencia)'
+
+  // Auto mode: pre-fill efectivo exacto y ejecutar cobro
+  useEffect(() => {
+    if (autoMode !== 'efectivo_exacto' || total <= 0) return
+    setMethods(new Set(['cash']))
+    setMixedMode(false)
+    setCashAmount(String(total))
+    const t = setTimeout(() => setAutoPay(true), 500)
+    return () => clearTimeout(t)
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!autoPay || !canPay || processing) return
+    setAutoPay(false)
+    void handlePay()
+  }, [autoPay, canPay, processing])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Guardar venta ─────────────────────────────────────────────────────────
   async function handlePay() {

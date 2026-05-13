@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { SpecialOrder, SpecialOrderWithCustomer, Customer } from '@/types'
@@ -38,6 +39,8 @@ function TypeBadge({ type }: { type: SpecialOrder['type'] }) {
 export default function EncargosPage() {
   const { profile } = useAuth()
   const isOwner = profile?.role === 'owner'
+  const searchParams = useSearchParams()
+  const router = useRouter()
 
   const [orders, setOrders] = useState<SpecialOrderWithCustomer[]>([])
   const [loading, setLoading] = useState(true)
@@ -50,6 +53,15 @@ export default function EncargosPage() {
   const [editingOrder, setEditingOrder] = useState<SpecialOrder | 'new' | null>(null)
 
   useEffect(() => { loadOrders() }, [])
+
+  // Comando de voz: nuevo encargo
+  useEffect(() => {
+    if (loading || !searchParams) return
+    if (searchParams.get('nuevo') === 'true' && isOwner) {
+      setEditingOrder('new')
+      router.replace('/encargos', { scroll: false })
+    }
+  }, [loading, searchParams, isOwner, router])
 
   async function loadOrders() {
     setLoading(true)

@@ -55,6 +55,7 @@ export default function ClientesPage() {
   const [editingCustomer,  setEditingCustomer]  = useState<Customer | 'new' | null>(null)
   const [abonoCustomer,    setAbonoCustomer]    = useState<Customer | null>(null)
   const [historialCustomer, setHistorialCustomer] = useState<Customer | null>(null)
+  const [abonoInitialAmount, setAbonoInitialAmount] = useState<number | undefined>(undefined)
 
   useEffect(() => { loadCustomers() }, [])
 
@@ -65,6 +66,33 @@ export default function ClientesPage() {
       router.replace('/clientes', { scroll: false })
     }
   }, [loading, searchParams, isOwner, router])
+
+  // Comandos de voz: abono e historial
+  useEffect(() => {
+    if (loading || !searchParams) return
+    const abonoParam = searchParams.get('abono')
+    const montoParam = searchParams.get('monto')
+    const historialParam = searchParams.get('historial')
+
+    if (abonoParam) {
+      const q = decodeURIComponent(abonoParam).toLowerCase()
+      const customer = customers.find(c => c.full_name.toLowerCase().includes(q))
+      if (customer) {
+        setAbonoCustomer(customer)
+        if (montoParam) {
+          setAbonoInitialAmount(parseFloat(montoParam) || undefined)
+        }
+      }
+      router.replace('/clientes', { scroll: false })
+    }
+
+    if (historialParam) {
+      const q = decodeURIComponent(historialParam).toLowerCase()
+      const customer = customers.find(c => c.full_name.toLowerCase().includes(q))
+      if (customer) setHistorialCustomer(customer)
+      router.replace('/clientes', { scroll: false })
+    }
+  }, [loading, searchParams, customers, router])
 
   async function loadCustomers() {
     setLoading(true)
@@ -314,8 +342,9 @@ export default function ClientesPage() {
       {abonoCustomer && (
         <AbonoModal
           customer={abonoCustomer}
-          onClose={() => setAbonoCustomer(null)}
+          onClose={() => { setAbonoCustomer(null); setAbonoInitialAmount(undefined) }}
           onPaid={handlePaid}
+          initialAmount={abonoInitialAmount}
         />
       )}
       {historialCustomer && (

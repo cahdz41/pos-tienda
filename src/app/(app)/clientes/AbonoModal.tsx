@@ -15,11 +15,12 @@ interface Props {
   customer: Customer
   onClose: () => void
   onPaid: (customerId: string, newBalance: number) => void
+  initialAmount?: number
 }
 
-export default function AbonoModal({ customer, onClose, onPaid }: Props) {
+export default function AbonoModal({ customer, onClose, onPaid, initialAmount }: Props) {
   const { user } = useAuth()
-  const [amount,     setAmount]     = useState('')
+  const [amount,     setAmount]     = useState(initialAmount ? String(initialAmount) : '')
   const [method,     setMethod]     = useState<Method>('cash')
   const [saving,     setSaving]     = useState(false)
   const [error,      setError]      = useState<string | null>(null)

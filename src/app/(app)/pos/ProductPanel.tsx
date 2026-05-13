@@ -32,9 +32,11 @@ interface Props {
   onAdd: (variant: ProductVariant) => void | Promise<void>
   searchRef: React.RefObject<HTMLInputElement | null>
   refreshKey?: number
+  voiceCategory?: string | null
+  voiceSoloStock?: boolean
 }
 
-export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }: Props) {
+export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0, voiceCategory, voiceSoloStock }: Props) {
   const router = useRouter()
   const [allVariants, setAllVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
@@ -44,6 +46,14 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0 }:
   const [soloConStock, setSoloConStock] = useState(false)
   const [lastScanned, setLastScanned] = useState<ProductVariant | null>(null)
   const [noStockVariant, setNoStockVariant] = useState<ProductVariant | null>(null)
+
+  useEffect(() => {
+    if (voiceCategory !== undefined) setActiveCategory(voiceCategory)
+  }, [voiceCategory])
+
+  useEffect(() => {
+    if (voiceSoloStock !== undefined) setSoloConStock(voiceSoloStock)
+  }, [voiceSoloStock])
 
   // Foco automático al montar
   // eslint-disable-next-line react-hooks/exhaustive-deps

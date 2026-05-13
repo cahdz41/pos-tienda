@@ -44,6 +44,7 @@ export default function ProductosPage() {
   const [editProduct, setEditProduct] = useState<ProductRow | 'new' | null>(null)
   const [showCategories, setShowCategories] = useState(false)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const [voiceCategoryName, setVoiceCategoryName] = useState<string | undefined>(undefined)
 
   const searchRef = useRef<HTMLInputElement>(null)
   const needsFocusRef = useRef(false)
@@ -77,6 +78,30 @@ export default function ProductosPage() {
       }
     }
   }, [loading, searchParams, router])
+
+  // Abrir categorías (no depende de productos cargados)
+  useEffect(() => {
+    if (!searchParams) return
+    const categorias = searchParams.get('categorias')
+    const nueva = searchParams.get('nueva')
+    if (categorias === 'true') {
+      if (nueva) setVoiceCategoryName(decodeURIComponent(nueva))
+      setShowCategories(true)
+      router.replace('/productos', { scroll: false })
+    }
+  }, [searchParams, router])
+
+  // Editar producto (requiere productos cargados)
+  useEffect(() => {
+    if (loading || !searchParams) return
+    const editar = searchParams.get('editar')
+    if (editar) {
+      const query = decodeURIComponent(editar).toLowerCase()
+      const match = products.find(p => p.name.toLowerCase().includes(query))
+      if (match) setEditProduct(match)
+      router.replace('/productos', { scroll: false })
+    }
+  }, [loading, searchParams, products, router])
 
   function handleSaved() {
     setEditProduct(null)
@@ -440,8 +465,9 @@ export default function ProductosPage() {
 
       {showCategories && (
         <CategoryModal
-          onClose={() => setShowCategories(false)}
+          onClose={() => { setShowCategories(false); setVoiceCategoryName(undefined) }}
           onChanged={loadAll}
+          initialName={voiceCategoryName}
         />
       )}
     </div>

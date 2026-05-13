@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import ProductPanel from './ProductPanel'
 import CartPanel from './CartPanel'
 import PaymentModal from './PaymentModal'
@@ -23,7 +23,12 @@ function formatElapsed(ts: number): string {
 
 export default function PosPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, loading: authLoading } = useAuth()
+
+  const [voiceCategory,  setVoiceCategory]  = useState<string | null | undefined>(undefined)
+  const [voiceSoloStock, setVoiceSoloStock] = useState<boolean | undefined>(undefined)
+  const [payAutoMode,    setPayAutoMode]    = useState<'efectivo_exacto' | undefined>(undefined)
 
   // Cart persistente — lazy initializer para no perder el ticket activo al recargar
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -88,6 +93,27 @@ export default function PosPage() {
       .maybeSingle()
       .then(({ data }) => setActiveShift(data as Shift | null))
   }, [authLoading, user])
+
+  // Comandos de voz: filtros y cobro
+  useEffect(() => {
+    if (!searchParams) return
+    const filtro = searchParams.get('filtro')
+    const existencias = searchParams.get('existencias')
+    const cobrar = searchParams.get('cobrar')
+    if (filtro !== null) {
+      setVoiceCategory(filtro.toUpperCase())
+      router.replace('/pos', { scroll: false })
+    }
+    if (existencias === 'true') {
+      setVoiceSoloStock(true)
+      router.replace('/pos', { scroll: false })
+    }
+    if (cobrar === 'efectivo_exacto' && activeShift) {
+      setShowPayment(true)
+      setPayAutoMode('efectivo_exacto')
+      router.replace('/pos', { scroll: false })
+    }
+  }, [searchParams, router, activeShift])
 
   // ── Carrito ──────────────────────────────────────────────────────────────
 
@@ -229,7 +255,14 @@ export default function PosPage() {
     <div className="flex h-full relative"
       onClick={() => { if (!showPayment && !showVoid && !showHolds && !holdNameMode) searchRef.current?.focus() }}>
 
-      <ProductPanel cart={cart} onAdd={addToCart} searchRef={searchRef} refreshKey={refreshKey} />
+      <ProductPanel
+        cart={cart}
+        onAdd={addToCart}
+        searchRef={searchRef}
+        refreshKey={refreshKey}
+        voiceCategory={voiceCategory}
+        voiceSoloStock={voiceSoloStock}
+      />
 
       <CartPanel
         cart={cart}
@@ -253,8 +286,9 @@ export default function PosPage() {
           cart={cart}
           total={cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0)}
           activeShift={activeShift}
+          autoMode={payAutoMode}
           onSuccess={() => { clearCart(); setRefreshKey(k => k + 1) }}
-          onClose={() => setShowPayment(false)}
+          onClose={() => { setShowPayment(false); setPayAutoMode(undefined) }}
         />
       )}
 

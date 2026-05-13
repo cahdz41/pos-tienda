@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { printReceipt } from '../pos/Receipt'
 import { createClient } from '@/lib/supabase'
 import type { CartItem } from '@/types'
@@ -70,6 +71,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function ConfiguracionPage() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const fotosIaRef = useRef<HTMLDivElement>(null)
+
   // ── Negocio ───────────────────────────────────────────────────────────
   const [businessName, setBusinessName] = useState(() => load(K.businessName, 'Mi Negocio'))
   const [footer,       setFooter]       = useState(() => load(K.footer,       'Gracias por su compra'))
@@ -142,6 +147,27 @@ export default function ConfiguracionPage() {
   }
 
   useEffect(() => { loadCashiers(); loadStoreProducts(); loadVisibility(); loadBotSettings() }, [])
+
+  useEffect(() => {
+    if (!searchParams) return
+    const seccion = searchParams.get('seccion')
+    const botEnabled = searchParams.get('bot_enabled')
+    const botModo = searchParams.get('bot_modo')
+
+    if (seccion === 'fotos-ia' && fotosIaRef.current) {
+      fotosIaRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      router.replace('/configuracion', { scroll: false })
+    }
+    if (botEnabled !== null) {
+      void handleBotEnabled(botEnabled === 'true')
+      router.replace('/configuracion', { scroll: false })
+    }
+    if (botModo === 'auto' || botModo === 'manual') {
+      void handleBotMode(botModo)
+      router.replace('/configuracion', { scroll: false })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, router])
 
   // ── Helpers localStorage ──────────────────────────────────────────────
   function persist(key: string, value: string) {
@@ -634,9 +660,11 @@ export default function ConfiguracionPage() {
         </Section>
 
         {/* ── Fotos de productos ── */}
-        <Section title="Asignación de Fotos (IA)">
-          <PhotoManager />
-        </Section>
+        <div ref={fotosIaRef}>
+          <Section title="Asignación de Fotos (IA)">
+            <PhotoManager />
+          </Section>
+        </div>
 
         {/* ── Pedidos de la tienda ── */}
         <Section title="Pedidos de la tienda">

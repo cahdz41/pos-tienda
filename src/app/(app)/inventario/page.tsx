@@ -114,6 +114,19 @@ export default function InventarioPage() {
     }
   }, [searchParams, allVariants])
 
+  // Abrir modales desde comando de voz
+  useEffect(() => {
+    if (!searchParams) return
+    const modal = searchParams.get('modal')
+    if (modal === 'reporte') {
+      setShowReporte(true)
+      router.replace('/inventario', { scroll: false })
+    } else if (modal === 'exportar') {
+      setShowExport(true)
+      router.replace('/inventario', { scroll: false })
+    }
+  }, [searchParams, router])
+
   async function loadInventory() {
     setLoading(true)
     setError(null)

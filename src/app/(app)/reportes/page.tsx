@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import AnalyticsChat from '@/components/AnalyticsChat'
 
@@ -149,6 +150,8 @@ const METHOD_META: Record<string, { label: string; color: string }> = {
 }
 
 export default function ReportesPage() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
   const [period,   setPeriod]   = useState<Period>('7days')
   const [loading,  setLoading]  = useState(true)
   const [sales,    setSales]    = useState<SaleRow[]>([])
@@ -156,6 +159,15 @@ export default function ReportesPage() {
   const [showChat, setShowChat] = useState(false)
 
   useEffect(() => { loadData() }, [period])
+
+  useEffect(() => {
+    if (!searchParams) return
+    const periodo = searchParams.get('periodo') as Period | null
+    if (periodo && ['today', '7days', 'month', '30days'].includes(periodo)) {
+      setPeriod(periodo)
+      router.replace('/reportes', { scroll: false })
+    }
+  }, [searchParams, router])
 
   async function loadData() {
     setLoading(true)

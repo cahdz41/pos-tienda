@@ -7,15 +7,16 @@ import type { Category } from '@/types'
 interface Props {
   onClose: () => void
   onChanged: () => void
+  initialName?: string
 }
 
-export default function CategoryModal({ onClose, onChanged }: Props) {
+export default function CategoryModal({ onClose, onChanged, initialName }: Props) {
   const [categories, setCategories] = useState<Category[]>([])
   const [productCounts, setProductCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [newName, setNewName] = useState('')
+  const [newName, setNewName] = useState(initialName ?? '')
   const [creating, setCreating] = useState(false)
 
   const [editingId, setEditingId] = useState<string | null>(null)
