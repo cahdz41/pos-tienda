@@ -153,6 +153,38 @@ export interface StoreOrder {
   store_order_items: StoreOrderItem[]
 }
 
+// ── Ofertas y Paquetes ───────────────────────────────────────────────────────
+
+export interface Offer {
+  id: number
+  nombre: string
+  nombre_completo: string | null
+  variant_id: string | null
+  categoria: string
+  imagen: string | null
+  precio_lista: number
+  precio_oferta: number
+  created_at: string
+}
+
+export interface PackageProduct {
+  nombre: string
+  imagen: string | null
+  categoria: string
+  variant_id?: string | null
+}
+
+export interface Package {
+  id: number
+  nombre: string
+  productos: PackageProduct[]
+  precio_lista: number
+  precio_oferta: number
+  costo_real: number
+  activo: boolean
+  created_at: string
+}
+
 // ── Encargos (pedidos especiales tienda física) ─────────────────────────────
 
 export interface SpecialOrder {

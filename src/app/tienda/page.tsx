@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import type { StoreProduct } from '@/types'
+import type { StoreProduct, Offer, Package } from '@/types'
 import ProductGrid from '@/components/tienda/ProductGrid'
 
 const LOGO_URL = 'https://res.cloudinary.com/dflnist9g/image/upload/v1776893327/303479618_567324658514485_3402746677447074430_n_dujqec.jpg'
@@ -303,6 +303,14 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
 }
 
 const CATALOG_CSS = `
+  @keyframes offerBtnGlow {
+    0%, 100% { box-shadow: 0 0 8px rgba(255,80,0,0.6), 0 0 20px rgba(255,50,0,0.25); border-color: rgba(220,80,0,0.7); }
+    50%       { box-shadow: 0 0 18px rgba(255,130,0,1), 0 0 38px rgba(255,80,0,0.5); border-color: rgba(255,120,0,1); }
+  }
+  @keyframes pkgBtnGlow {
+    0%, 100% { box-shadow: 0 0 8px rgba(255,190,0,0.5), 0 0 18px rgba(255,160,0,0.2); border-color: rgba(245,158,11,0.6); }
+    50%       { box-shadow: 0 0 16px rgba(255,220,0,0.9), 0 0 30px rgba(255,190,0,0.4); border-color: rgba(255,210,0,0.9); }
+  }
   @keyframes catGlow {
     0%, 100% { box-shadow: inset 3px 0 0 rgba(200,20,20,0.9), 0 0 10px rgba(200,20,20,0.25); }
     50%       { box-shadow: inset 3px 0 0 rgba(200,20,20,1),   0 0 22px rgba(200,20,20,0.55); }
@@ -340,90 +348,382 @@ const CATALOG_CSS = `
   }
 `
 
-function Sidebar({ selected, onSelect }: { selected: string | null; onSelect: (c: string | null) => void }) {
+type TiendaView = 'catalogo' | 'ofertas' | 'paquetes'
+
+function Sidebar({ selected, onSelect, view, onViewChange }: {
+  selected: string | null
+  onSelect: (c: string | null) => void
+  view: TiendaView
+  onViewChange: (v: TiendaView) => void
+}) {
   const ALL_ITEMS = [{ label: 'TODOS', value: null as string | null }, ...STORE_CATEGORIES.map(c => ({ label: c.label, value: c.label }))]
+
+  const catBtnBase: React.CSSProperties = {
+    display: 'block', width: '100%', textAlign: 'left', padding: '11px 18px',
+    border: 'none', borderRadius: '6px', cursor: 'pointer',
+    transition: 'color 0.15s, background 0.15s',
+    fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))',
+    fontSize: '15px', fontWeight: 700, letterSpacing: '0.14em',
+  }
 
   return (
     <aside className="cat-aside" style={{ width: '210px', flexShrink: 0 }}>
       <style>{CATALOG_CSS}</style>
       <p className="cat-label" style={{
-        fontSize: '10px', fontWeight: 700,
-        color: 'rgba(200,20,20,0.65)',
+        fontSize: '10px', fontWeight: 700, color: 'rgba(200,20,20,0.65)',
         letterSpacing: '0.22em', textTransform: 'uppercase',
-        margin: '0 0 18px 4px',
-        fontFamily: 'var(--font-syne, system-ui)',
+        margin: '0 0 18px 4px', fontFamily: 'var(--font-syne, system-ui)',
       }}>
         — Categorías
       </p>
 
       <div className="cat-inner" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
         {ALL_ITEMS.map(({ label, value }) => {
-          const active = selected === value
+          const active = view === 'catalogo' && selected === value
           return (
-            <button
-              key={label}
+            <button key={label}
               className={`cat-btn${active ? ' cat-btn-active' : ''}`}
-              onClick={() => onSelect(value)}
+              onClick={() => { onSelect(value); onViewChange('catalogo') }}
               style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '11px 18px',
-                border: 'none',
-                borderRadius: '6px',
+                ...catBtnBase,
                 background: active ? 'rgba(200,20,20,0.1)' : 'transparent',
                 color: active ? '#ff4040' : 'rgba(255,255,255,0.38)',
-                fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))',
-                fontSize: '15px',
-                fontWeight: 700,
-                letterSpacing: '0.14em',
-                cursor: 'pointer',
-                transition: 'color 0.15s, background 0.15s',
                 textShadow: active ? '0 0 12px rgba(200,20,20,0.9), 0 0 28px rgba(200,20,20,0.45)' : 'none',
                 animation: active ? 'catGlow 2.5s ease-in-out infinite' : 'none',
               }}
-              onMouseEnter={e => {
-                if (!active) {
-                  const el = e.currentTarget as HTMLButtonElement
-                  el.style.color = 'rgba(255,255,255,0.9)'
-                  el.style.background = 'rgba(255,255,255,0.05)'
-                }
-              }}
-              onMouseLeave={e => {
-                if (!active) {
-                  const el = e.currentTarget as HTMLButtonElement
-                  el.style.color = 'rgba(255,255,255,0.38)'
-                  el.style.background = 'transparent'
-                }
-              }}
+              onMouseEnter={e => { if (!active) { const el = e.currentTarget as HTMLButtonElement; el.style.color = 'rgba(255,255,255,0.9)'; el.style.background = 'rgba(255,255,255,0.05)' } }}
+              onMouseLeave={e => { if (!active) { const el = e.currentTarget as HTMLButtonElement; el.style.color = 'rgba(255,255,255,0.38)'; el.style.background = 'transparent' } }}
             >
               {label}
             </button>
           )
         })}
+
+        {/* Separador */}
+        <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '10px 0' }} />
+
+        {/* Botón OFERTAS DEL MES */}
+        <button
+          className="cat-btn"
+          onClick={() => onViewChange('ofertas')}
+          style={{
+            ...catBtnBase,
+            padding: '12px 18px',
+            border: `1px solid ${view === 'ofertas' ? 'rgba(220,80,0,0.7)' : 'rgba(220,80,0,0.25)'}`,
+            background: view === 'ofertas' ? 'rgba(220,38,38,0.15)' : 'rgba(180,40,0,0.07)',
+            color: view === 'ofertas' ? '#ff6030' : 'rgba(255,120,60,0.6)',
+            animation: view === 'ofertas' ? 'offerBtnGlow 2.2s ease-in-out infinite' : 'none',
+            textShadow: view === 'ofertas' ? '0 0 10px rgba(255,80,0,0.8)' : 'none',
+          }}
+        >
+          🔥 OFERTAS DEL MES
+        </button>
+
+        {/* Botón PAQUETES EN OFERTA */}
+        <button
+          className="cat-btn"
+          onClick={() => onViewChange('paquetes')}
+          style={{
+            ...catBtnBase,
+            padding: '12px 18px',
+            marginTop: 4,
+            border: `1px solid ${view === 'paquetes' ? 'rgba(245,158,11,0.6)' : 'rgba(245,158,11,0.2)'}`,
+            background: view === 'paquetes' ? 'rgba(245,158,11,0.1)' : 'rgba(180,130,0,0.06)',
+            color: view === 'paquetes' ? '#fbbf24' : 'rgba(251,191,36,0.45)',
+            animation: view === 'paquetes' ? 'pkgBtnGlow 2.2s ease-in-out infinite' : 'none',
+            textShadow: view === 'paquetes' ? '0 0 10px rgba(255,200,0,0.7)' : 'none',
+          }}
+        >
+          🎁 PAQUETES EN OFERTA
+        </button>
       </div>
     </aside>
   )
 }
 
+// ── Ofertas ──────────────────────────────────────────────────────────────────
+
+function fmtMXN(n: number) {
+  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function OfertaCard({ offer }: { offer: Offer }) {
+  const pct   = offer.precio_lista > 0 ? Math.round(((offer.precio_lista - offer.precio_oferta) / offer.precio_lista) * 100) : 0
+  const ahorro = offer.precio_lista - offer.precio_oferta
+  return (
+    <div style={{ background: '#111', borderRadius: 16, overflow: 'hidden', position: 'relative',
+      border: '1px solid rgba(255,255,255,0.07)', transition: 'transform 0.2s, box-shadow 0.2s' }}
+      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 12px 32px rgba(0,0,0,0.5)' }}
+      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none' }}>
+
+      {/* Badge descuento */}
+      <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 2,
+        background: '#dc2626', color: '#fff', fontSize: 12, fontWeight: 800,
+        padding: '4px 10px', borderRadius: 20 }}>
+        -{pct}%
+      </div>
+
+      {/* Imagen */}
+      <div style={{ height: 190, background: '#0a0a0a', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {offer.imagen
+          ? <img src={offer.imagen} alt={offer.nombre}
+              style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
+          : <span style={{ fontSize: 48 }}>📦</span>
+        }
+      </div>
+
+      {/* Info */}
+      <div style={{ padding: '14px 16px 18px' }}>
+        <p style={{ fontSize: 10, color: '#cc2020', textTransform: 'uppercase', fontWeight: 700,
+          letterSpacing: '0.12em', margin: '0 0 5px',
+          fontFamily: 'var(--font-syne, system-ui)' }}>
+          {offer.categoria}
+        </p>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fff', margin: '0 0 12px',
+          lineHeight: 1.3, fontFamily: 'var(--font-syne, system-ui)' }}>
+          {offer.nombre}
+        </h3>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', textDecoration: 'line-through' }}>
+            {fmtMXN(offer.precio_lista)}
+          </span>
+          <span style={{ fontSize: 22, fontWeight: 800, color: '#ff4040',
+            fontFamily: 'var(--font-syne, system-ui)' }}>
+            {fmtMXN(offer.precio_oferta)}
+          </span>
+        </div>
+        {ahorro > 0 && (
+          <span style={{ display: 'inline-block', marginTop: 8,
+            background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)',
+            color: '#4ade80', fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20 }}>
+            ¡Ahorras {fmtMXN(ahorro)}!
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function OfertasSection({ offers, loading }: { offers: Offer[]; loading: boolean }) {
+  const [cat, setCat] = useState<string | null>(null)
+
+  const categories = useMemo(() => {
+    const s = new Set(offers.map(o => o.categoria).filter(Boolean))
+    return Array.from(s).sort() as string[]
+  }, [offers])
+
+  const filtered = useMemo(() =>
+    cat ? offers.filter(o => o.categoria === cat) : offers
+  , [offers, cat])
+
+  const pillActive: React.CSSProperties = {
+    padding: '7px 18px', borderRadius: 999, border: '1px solid rgba(220,38,38,0.5)',
+    cursor: 'pointer', fontWeight: 700, fontSize: 12, letterSpacing: '0.08em',
+    fontFamily: 'var(--font-barlow-condensed, system-ui)',
+    background: 'rgba(220,38,38,0.15)', color: '#ff5050',
+  }
+  const pillInactive: React.CSSProperties = {
+    ...pillActive, background: 'transparent', color: 'rgba(255,255,255,0.35)',
+    border: '1px solid rgba(255,255,255,0.1)',
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: 36 }}>
+        <p style={{ fontFamily: 'var(--font-syne, system-ui)', fontSize: 11, fontWeight: 600,
+          color: '#ff6030', letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px' }}>
+          Promociones
+        </p>
+        <h2 style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+          fontSize: 'clamp(28px, 4vw, 48px)', color: '#FFFFFF', margin: 0,
+          lineHeight: 1, letterSpacing: '-2px' }}>
+          OFERTAS DEL MES
+        </h2>
+      </div>
+
+      {/* Filtros por categoría */}
+      {categories.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 32 }}>
+          <button onClick={() => setCat(null)} style={cat === null ? pillActive : pillInactive}>TODOS</button>
+          {categories.map(c => (
+            <button key={c} onClick={() => setCat(c)} style={cat === c ? pillActive : pillInactive}>{c}</button>
+          ))}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
+          <div style={{ width: 28, height: 28, borderRadius: '50%',
+            border: '2px solid rgba(220,38,38,0.3)', borderTopColor: '#dc2626',
+            animation: 'spin 0.7s linear infinite' }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        </div>
+      ) : filtered.length === 0 ? (
+        <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14, textAlign: 'center', padding: '60px 0' }}>
+          No hay ofertas disponibles por el momento.
+        </p>
+      ) : (
+        <div style={{ display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>
+          {filtered.map(o => <OfertaCard key={o.id} offer={o} />)}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ── Paquetes ─────────────────────────────────────────────────────────────────
+
+function PaqueteCard({ pkg }: { pkg: Package }) {
+  const pct    = pkg.precio_lista > 0 ? Math.round(((pkg.precio_lista - pkg.precio_oferta) / pkg.precio_lista) * 100) : 0
+  const ahorro = pkg.precio_lista - pkg.precio_oferta
+  return (
+    <div style={{ background: '#111', borderRadius: 16, padding: '20px 22px', position: 'relative',
+      border: '1px solid rgba(255,200,0,0.15)', transition: 'transform 0.2s, box-shadow 0.2s' }}
+      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 12px 32px rgba(0,0,0,0.5), 0 0 24px rgba(255,190,0,0.08)' }}
+      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none' }}>
+
+      {/* Badges */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <span style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.35)',
+          color: '#fbbf24', fontSize: 10, fontWeight: 800, padding: '4px 10px', borderRadius: 20,
+          letterSpacing: '0.08em', fontFamily: 'var(--font-barlow-condensed, system-ui)' }}>
+          COMBO ESPECIAL
+        </span>
+        <span style={{ background: '#dc2626', color: '#fff', fontSize: 10, fontWeight: 800,
+          padding: '4px 10px', borderRadius: 20, fontFamily: 'var(--font-barlow-condensed, system-ui)' }}>
+          -{pct}%
+        </span>
+      </div>
+
+      {/* Nombre */}
+      <h3 style={{ fontSize: 20, fontWeight: 800, color: '#fff', textTransform: 'uppercase',
+        margin: '0 0 16px', letterSpacing: '-0.5px',
+        fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))' }}>
+        {pkg.nombre}
+      </h3>
+
+      {/* Productos: thumbnails + nombres */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+        {pkg.productos.map((p, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {p.imagen
+              ? <img src={p.imagen} alt="" style={{ width: 38, height: 38, objectFit: 'contain',
+                  borderRadius: 6, background: '#0a0a0a', flexShrink: 0 }} />
+              : <div style={{ width: 38, height: 38, borderRadius: 6, background: '#1a1a1a',
+                  flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📦</div>
+            }
+            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 1.3 }}>
+              {p.nombre.split(' — ')[0]}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Precios */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.3)', textDecoration: 'line-through' }}>
+            {fmtMXN(pkg.precio_lista)}
+          </span>
+          <span style={{ fontSize: 28, fontWeight: 800, color: '#4ade80',
+            fontFamily: 'var(--font-syne, system-ui)' }}>
+            {fmtMXN(pkg.precio_oferta)}
+          </span>
+        </div>
+        {ahorro > 0 && (
+          <span style={{ display: 'inline-block', marginTop: 8,
+            background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)',
+            color: '#4ade80', fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20 }}>
+            ¡Ahorras {fmtMXN(ahorro)}!
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PaquetesSection({ packages, loading }: { packages: Package[]; loading: boolean }) {
+  return (
+    <>
+      <div style={{ marginBottom: 36 }}>
+        <p style={{ fontFamily: 'var(--font-syne, system-ui)', fontSize: 11, fontWeight: 600,
+          color: '#fbbf24', letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px' }}>
+          Combos Exclusivos
+        </p>
+        <h2 style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+          fontSize: 'clamp(28px, 4vw, 48px)', color: '#FFFFFF', margin: 0,
+          lineHeight: 1, letterSpacing: '-2px' }}>
+          PAQUETES EN OFERTA
+        </h2>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
+          <div style={{ width: 28, height: 28, borderRadius: '50%',
+            border: '2px solid rgba(251,191,36,0.3)', borderTopColor: '#fbbf24',
+            animation: 'spin 0.7s linear infinite' }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        </div>
+      ) : packages.length === 0 ? (
+        <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14, textAlign: 'center', padding: '60px 0' }}>
+          No hay paquetes disponibles por el momento.
+        </p>
+      ) : (
+        <div style={{ display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 24 }}>
+          {packages.map(p => <PaqueteCard key={p.id} pkg={p} />)}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function TiendaPage() {
-  const [products, setProducts] = useState<StoreProduct[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [products,         setProducts]         = useState<StoreProduct[]>([])
+  const [productsLoading,  setProductsLoading]  = useState(true)
+  const [productsError,    setProductsError]    = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+
+  const [view,             setView]             = useState<TiendaView>('catalogo')
+  const [offers,           setOffers]           = useState<Offer[]>([])
+  const [offersLoading,    setOffersLoading]    = useState(false)
+  const [packages,         setPackages]         = useState<Package[]>([])
+  const [packagesLoading,  setPackagesLoading]  = useState(false)
 
   useEffect(() => {
     fetch('/api/store/products')
       .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error)
-        setProducts(data)
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
+      .then(data => { if (data.error) throw new Error(data.error); setProducts(data) })
+      .catch(e => setProductsError(e.message))
+      .finally(() => setProductsLoading(false))
   }, [])
 
-  const filtered = useMemo(() => {
+  // Lazy load ofertas/paquetes la primera vez que se accede a esa vista
+  useEffect(() => {
+    if (view === 'ofertas' && offers.length === 0 && !offersLoading) {
+      setOffersLoading(true)
+      fetch('/api/ofertas').then(r => r.json())
+        .then(d => setOffers(Array.isArray(d) ? d : []))
+        .finally(() => setOffersLoading(false))
+    }
+    if (view === 'paquetes' && packages.length === 0 && !packagesLoading) {
+      setPackagesLoading(true)
+      fetch('/api/paquetes').then(r => r.json())
+        .then(d => setPackages(Array.isArray(d) ? d.filter((p: Package) => p.activo) : []))
+        .finally(() => setPackagesLoading(false))
+    }
+  }, [view]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function goToView(v: TiendaView) {
+    setView(v)
+    document.getElementById('catalogo')?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const filteredProducts = useMemo(() => {
     if (!selectedCategory) return products
     const cat = STORE_CATEGORIES.find(c => c.label === selectedCategory)
     if (!cat) return products
@@ -437,42 +737,54 @@ export default function TiendaPage() {
       }} />
 
       <section id="catalogo" style={{ padding: '80px max(24px, calc(50vw - 680px)) 100px' }}>
-        <div style={{ marginBottom: '48px' }}>
-          <p style={{
-            fontFamily: 'var(--font-syne, system-ui)',
-            fontSize: '11px', fontWeight: 600, color: '#F0B429',
-            letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px',
-          }}>
-            Productos
-          </p>
-          <h2 style={{
-            fontFamily: 'var(--font-syne, system-ui)',
-            fontWeight: 800, fontSize: 'clamp(32px, 5vw, 56px)',
-            color: '#FFFFFF', margin: 0, lineHeight: 1, letterSpacing: '-2px',
-          }}>
-            CATÁLOGO
-          </h2>
-        </div>
+
+        {/* Header del catálogo (solo en vista catálogo) */}
+        {view === 'catalogo' && (
+          <div style={{ marginBottom: '48px' }}>
+            <p style={{ fontFamily: 'var(--font-syne, system-ui)', fontSize: '11px', fontWeight: 600,
+              color: '#F0B429', letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px' }}>
+              Productos
+            </p>
+            <h2 style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+              fontSize: 'clamp(32px, 5vw, 56px)', color: '#FFFFFF', margin: 0,
+              lineHeight: 1, letterSpacing: '-2px' }}>
+              CATÁLOGO
+            </h2>
+          </div>
+        )}
 
         <div className="cat-layout" style={{ display: 'flex', gap: '48px', alignItems: 'flex-start' }}>
-          <Sidebar selected={selectedCategory} onSelect={setSelectedCategory} />
+          <Sidebar
+            selected={selectedCategory}
+            onSelect={setSelectedCategory}
+            view={view}
+            onViewChange={goToView}
+          />
 
           <div style={{ flex: 1, minWidth: 0 }}>
-            {loading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '100px 0' }}>
-                <div style={{
-                  width: '28px', height: '28px', borderRadius: '50%',
-                  border: '2px solid #1A1A1A', borderTopColor: '#F0B429',
-                  animation: 'spin 0.7s linear infinite',
-                }} />
-                <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-              </div>
-            ) : error ? (
-              <div style={{ padding: '80px 0', color: '#FF6B6B' }}>
-                <p style={{ margin: 0 }}>Error: {error}</p>
-              </div>
-            ) : (
-              <ProductGrid products={filtered} />
+            {view === 'catalogo' && (
+              productsLoading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '100px 0' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '50%',
+                    border: '2px solid #1A1A1A', borderTopColor: '#F0B429',
+                    animation: 'spin 0.7s linear infinite' }} />
+                  <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+                </div>
+              ) : productsError ? (
+                <div style={{ padding: '80px 0', color: '#FF6B6B' }}>
+                  <p style={{ margin: 0 }}>Error: {productsError}</p>
+                </div>
+              ) : (
+                <ProductGrid products={filteredProducts} />
+              )
+            )}
+
+            {view === 'ofertas' && (
+              <OfertasSection offers={offers} loading={offersLoading} />
+            )}
+
+            {view === 'paquetes' && (
+              <PaquetesSection packages={packages} loading={packagesLoading} />
             )}
           </div>
         </div>

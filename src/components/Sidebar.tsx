@@ -17,6 +17,7 @@ const NAV_ITEMS = [
 ]
 
 const OWNER_ITEMS = [
+  { href: '/configuracion-tienda', label: 'Config. Tienda', icon: '🛍️' },
   { href: '/configuracion', label: 'Configuración', icon: '⚙️' },
 ]
 
