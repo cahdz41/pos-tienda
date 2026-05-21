@@ -1,1038 +1,2123 @@
-# Instrucciones para IA: Sistema de Fotos de Productos con Reutilización en Cloudinary
+# Instrucciones de Implementación — POS + Tienda Web (Next.js 16 + Supabase)
 
-> Documento COMPLETO para replicar el sistema de fotos del POS en otro proyecto, con la funcionalidad adicional de **verificar si una imagen ya existe en Cloudinary antes de subirla**, reutilizando la URL existente en lugar de crear un duplicado.
->
-> **Leer TODO el documento antes de implementar.** Contiene fixes críticos de producción.
+Este documento describe cómo portar las 4 features del Dashboard Chocholand al nuevo stack:
+- **Next.js 16** con App Router
+- **Supabase** (`createClient()` de `@/lib/supabase`)
+- **Tailwind CSS** + variables CSS inline (`style={{}}`)
+- Sin librería de componentes
+- Todo componente interactivo necesita `'use client'`
 
 ---
 
 ## Tabla de Contenidos
 
-1. [Visión General del Sistema](#1-visión-general-del-sistema)
-2. [Diferencias con el Sistema Original (POS)](#2-diferencias-con-el-sistema-original-pos)
-3. [Dependencias NPM](#3-dependencias-npm)
-4. [Variables de Entorno](#4-variables-de-entorno)
-5. [Script de Pre-Build (WASM ONNX)](#5-script-de-pre-build-wasm-onnx)
-6. [Configuración de Next.js (Webpack Fixes)](#6-configuración-de-nextjs-webpack-fixes)
-7. [Schema de Base de Datos](#7-schema-de-base-de-datos)
-8. [API Routes](#8-api-routes)
-   - [8.1 POST /api/cloudinary/upload](#81-post-apicloudinaryupload---subir-nueva-imagen)
-   - [8.2 POST /api/cloudinary/check](#82-post-apicloudinarycheck---verificar-si-imagen-ya-existe)
-   - [8.3 GET /api/cloudinary/list](#83-get-apicloudinarylist---listar-imágenes-existentes-en-una-carpeta)
-9. [Componente Principal: PhotoManager](#9-componente-principal-photomanager)
-10. [Flujo de Reutilización de Imágenes](#10-flujo-de-reutilización-de-imágenes)
-11. [Estrategias de Matching de Imágenes Existentes](#11-estrategias-de-matching-de-imágenes-existentes)
-12. [Checklist de Deploy a Producción](#12-checklist-de-deploy-a-producción)
-13. [Resumen de Problemas y Fixes](#13-resumen-de-problemas-y-fixes)
+1. [Esquema de Base de Datos (Supabase)](#1-esquema-de-base-de-datos-supabase)
+2. [Feature: Ofertas del Mes (Visualización Pública)](#2-feature-ofertas-del-mes-visualización-pública)
+3. [Feature: Crear Ofertas del Mes (Panel Admin)](#3-feature-crear-ofertas-del-mes-panel-admin)
+4. [Feature: Crear Paquetes del Mes (Panel Admin)](#4-feature-crear-paquetes-del-mes-panel-admin)
+5. [Feature: Generador de Imágenes Promocionales](#5-feature-generador-de-imágenes-promocionales)
+6. [Consideraciones de Migración](#6-consideraciones-de-migración)
 
 ---
 
-## 1. Visión General del Sistema
+## 1. Esquema de Base de Datos (Supabase)
 
-El sistema permite gestionar fotos de productos desde un panel de configuración/administración. El flujo es:
+Crear las siguientes tablas en Supabase. Reemplazar los archivos JSON (`ofertas.json`, `paquetes.json`) por tablas SQL.
 
-1. Usuario selecciona un producto de una lista con búsqueda.
-2. Sube una imagen (click o drag & drop).
-3. **La IA remueve el fondo automáticamente** con `@imgly/background-removal` (ONNX Runtime WASM, procesamiento 100% en el navegador).
-4. Se **verifica si esa imagen (o una similar) ya existe en Cloudinary**.
-5. Si existe → se **reutiliza la URL existente** sin subir nada nuevo.
-6. Si NO existe → se **sube a Cloudinary** y se guarda la nueva URL en la base de datos.
-7. La URL se guarda en la tabla de productos, aplicando a todas las variantes/sabores del mismo producto.
-
-La UI muestra miniaturas, badges "Sin foto", y estados de progreso con mensajes claros.
-
----
-
-## 2. Diferencias con el Sistema Original (POS)
-
-| Característica | Sistema Original (POS) | Nuevo Sistema (Este Documento) |
-|---|---|---|
-| Verificación previa en Cloudinary | ❌ No existe | ✅ Sí — antes de subir, se pregunta a Cloudinary si la imagen ya existe |
-| Guardado en BD | Solo `image_url` | `image_url` + `cloudinary_public_id` + `cloudinary_folder` |
-| API Routes | Solo 1 route (`POST /api/cloudinary`) | 3 routes: `upload`, `check`, `list` |
-| Sobrescritura | `overwrite: false` (Cloudinary no sobreescribe) | Controlado por BD + verificación previa |
-| Batch upload | No soportado | Puede extenderse fácilmente con `list` + `check` |
-
-### Por qué guardar `cloudinary_public_id`
-
-El `public_id` es el identificador único de Cloudinary para cada imagen (ej: `pos-tienda/productos/abc123`). Guardarlo en la BD permite:
-- Verificar si una imagen sigue existiendo en Cloudinary usando `cloudinary.api.resource(public_id)`
-- Eliminar imágenes de Cloudinary si se borran de la BD
-- Construir transformaciones dinámicas de la URL sin almacenar múltiples versiones
-- Evitar subidas duplicadas definitivamente
-
----
-
-## 3. Dependencias NPM
-
-```bash
-npm install cloudinary @imgly/background-removal @supabase/supabase-js
-npm install -D string-replace-loader
-```
-
-| Paquete | Versión probada | Propósito |
-|---------|-----------------|-----------|
-| `cloudinary` | `^2.9.0` | SDK server-side para subir y consultar imágenes |
-| `@imgly/background-removal` | `^1.7.0` | IA de remoción de fondo (client-side, ONNX WASM) |
-| `@supabase/supabase-js` | `^2.103.0` | Cliente de base de datos (adaptar según tu BD) |
-| `string-replace-loader` | `^3.3.0` | **FIX CRÍTICO** para onnxruntime-web en producción |
-
-> **NO instalar `onnxruntime-web` directamente** — es peer-dependency de `@imgly/background-removal` y se instala automáticamente.
-
----
-
-## 4. Variables de Entorno
-
-```env
-# Cloudinary — OBLIGATORIAS en local Y en producción
-CLOUDINARY_CLOUD_NAME=tu-cloud-name
-CLOUDINARY_API_KEY=tu-api-key
-CLOUDINARY_API_SECRET=tu-api-secret
-
-# Supabase (adaptar según tu base de datos)
-NEXT_PUBLIC_SUPABASE_URL=https://...supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-```
-
-### ⚠️ PROBLEMA EN PRODUCCIÓN #1 (CRÍTICO)
-
-**Síntoma:** Error 500 al subir imágenes en el servidor deployado.
-
-**Causa:** Las variables `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` **NO estaban en el archivo `.env.production` del VPS**. Solo existían las de Supabase. Cloudinary devolvía error silencioso.
-
-**Fix:** Agregar las 3 variables manualmente en el servidor de producción y reiniciar el proceso.
-
----
-
-## 5. Script de Pre-Build (WASM ONNX)
-
-Crear `scripts/copy-wasm.js`:
-
-```js
-const fs = require('fs');
-const path = require('path');
-
-const src  = path.join(__dirname, '../node_modules/onnxruntime-web/dist');
-const dest = path.join(__dirname, '../public/ort-wasm');
-
-fs.mkdirSync(dest, { recursive: true });
-
-const copied = [];
-fs.readdirSync(src).forEach(file => {
-  if (file.endsWith('.wasm') || file.endsWith('.mjs') || file.endsWith('.js')) {
-    fs.copyFileSync(path.join(src, file), path.join(dest, file));
-    copied.push(file);
-  }
-});
-
-console.log(`✅ ort-wasm: ${copied.length} archivos copiados a public/ort-wasm/`);
-```
-
-Agregar en `package.json`:
-
-```json
-{
-  "scripts": {
-    "predev": "node scripts/copy-wasm.js",
-    "prebuild": "node scripts/copy-wasm.js"
-  }
-}
-```
-
-> Esto copia los archivos WASM de ONNX Runtime a `public/ort-wasm/` para que el navegador los sirva localmente. **Sin esto, la IA de remoción de fondo no funciona.**
-
----
-
-## 6. Configuración de Next.js (Webpack Fixes)
-
-```ts
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  webpack: (config) => {
-    // 1. Excluir el módulo de Node.js de onnxruntime (solo usamos la versión web/WASM)
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      "onnxruntime-node": false,
-    };
-
-    // 2. Regla general para archivos .mjs — evita errores de módulos ESM
-    config.module.rules.push({
-      test: /\.m?js$/,
-      type: "javascript/auto",
-      resolve: { fullySpecified: false },
-    });
-
-    // 3. FIX CRÍTICO: reemplaza import.meta.url en onnxruntime-web
-    // Sin esto aparece en producción: TypeError: e.replace is not a function
-    config.module.rules.push({
-      test: /onnxruntime-web[\\/]dist[\\/].*\.m?js$/,
-      loader: "string-replace-loader",
-      options: {
-        search: "import.meta.url",
-        replace:
-          '((typeof window !== "undefined" ? window.location.href : "http://localhost/"))',
-        flags: "g",
-      },
-    });
-
-    return config;
-  },
-};
-
-export default nextConfig;
-```
-
-### ⚠️ PROBLEMA EN PRODUCCIÓN #2 (CRÍTICO)
-
-**Síntoma:** `TypeError: e.replace is not a function` al cargar la página de fotos en producción. La IA no arranca.
-
-**Causa:** `onnxruntime-web` usa `import.meta.url` internamente para resolver la ruta de los archivos WASM. Webpack no maneja bien `import.meta.url` en builds de producción.
-
-**Fix:** La regla `string-replace-loader` arriba reemplaza `import.meta.url` por una expresión segura. **Sin esto, el sistema de IA no funciona en producción.**
-
----
-
-## 7. Schema de Base de Datos
-
-### Tabla `products` (o como se llame en tu proyecto)
+### Tabla: `offers` (Ofertas del Mes)
 
 ```sql
-ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS cloudinary_public_id TEXT;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS cloudinary_folder TEXT DEFAULT 'mi-proyecto/productos';
+create table offers (
+  id bigint generated always as identity primary key,
+  nombre text not null,
+  nombre_original text, -- nombre completo para matching con inventario
+  categoria text not null,
+  imagen text,
+  precio_lista numeric(12,2) not null,
+  precio_oferta numeric(12,2) not null,
+  fecha timestamptz default now(),
+  created_at timestamptz default now()
+);
+
+-- Índice útil para filtrado por categoría
+CREATE INDEX idx_offers_categoria ON offers(categoria);
 ```
 
-| Columna | Tipo | Descripción |
+**Mapeo desde JSON antiguo:**
+| Campo JSON | Columna Supabase | Notas |
 |---|---|---|
-| `image_url` | `TEXT` | URL completa de Cloudinary (`https://res.cloudinary.com/...`) |
-| `cloudinary_public_id` | `TEXT` | Identificador único de Cloudinary (ej: `mi-proyecto/productos/abc123xyz`) |
-| `cloudinary_folder` | `TEXT` | Carpeta en Cloudinary donde se guardó (útil si tienes múltiples carpetas) |
+| `id` | `id` | Usar `generated always as identity` en vez de `time.time() * 1000` |
+| `nombre` | `nombre` | Nombre mostrado (puede omitir sabor) |
+| `nombre_original` | `nombre_original` | Nombre completo para sincronización con inventario |
+| `categoria` | `categoria` | Ej: PROTEINAS, CREATINA, PRE-ENTRENOS |
+| `imagen` | `imagen` | URL absoluta o path relativo |
+| `precio_lista` | `precio_lista` | Precio público original |
+| `precio_oferta` | `precio_oferta` | Precio rebajado |
+| `fecha` | `fecha` | Fecha de creación de la oferta |
 
-> **IMPORTANTE:** Guardar `cloudinary_public_id` es lo que permite verificar si la imagen sigue existiendo en Cloudinary sin tener que adivinar.
-
-### Ejemplo de consulta con los nuevos campos
+### Tabla: `packages` (Paquetes del Mes)
 
 ```sql
-SELECT 
-  id, name, category, 
-  image_url, 
-  cloudinary_public_id,
-  cloudinary_folder
-FROM products
-WHERE id = 'producto-123';
+create table packages (
+  id bigint generated always as identity primary key,
+  nombre text not null,
+  productos jsonb not null, -- array de objetos {nombre, imagen, categoria}
+  precio_lista numeric(12,2) not null,
+  precio_oferta numeric(12,2) not null,
+  costo_real numeric(12,2) not null,
+  fecha timestamptz default now(),
+  activo boolean default true,
+  created_at timestamptz default now()
+);
+
+-- Índice para filtrar solo activos en la tienda
+CREATE INDEX idx_packages_activo ON packages(activo);
 ```
+
+**Mapeo desde JSON antiguo:**
+| Campo JSON | Columna Supabase | Notas |
+|---|---|---|
+| `id` | `id` | `generated always as identity` |
+| `nombre` | `nombre` | Nombre del combo |
+| `productos` | `productos` | `jsonb` con array de objetos |
+| `precio_lista` | `precio_lista` | Suma de precios públicos |
+| `precio_oferta` | `precio_oferta` | Precio del combo |
+| `costo_real` | `costo_real` | Suma de precios costo (referencia admin) |
+| `fecha` | `fecha` | Fecha de creación |
+| `activo` | `activo` | `boolean default true` |
+
+### Tabla: `products` (Inventario POS)
+
+Asumimos que ya existe o se crea así:
+
+```sql
+create table products (
+  id bigint generated always as identity primary key,
+  nombre text not null unique,
+  precio numeric(12,2) not null,        -- precio público
+  precio_mayoreo numeric(12,2),
+  precio_costo numeric(12,2),
+  categoria text not null,
+  imagen text,
+  stock integer default 0,
+  created_at timestamptz default now()
+);
+
+CREATE INDEX idx_products_categoria ON products(categoria);
+CREATE INDEX idx_products_nombre ON products(nombre);
+```
+
+### Políticas RLS (Row Level Security)
+
+```sql
+-- Habilitar RLS en ambas tablas
+alter table offers enable row level security;
+alter table packages enable row level security;
+
+-- Política: cualquiera puede leer
+CREATE POLICY "Allow public read offers"
+  ON offers FOR SELECT TO anon, authenticated USING (true);
+
+CREATE POLICY "Allow public read packages"
+  ON packages FOR SELECT TO anon, authenticated USING (true);
+
+-- Política: solo admin puede insertar/actualizar/eliminar
+-- Asume que tienes una tabla `profiles` con rol o un claim en JWT
+CREATE POLICY "Allow admin write offers"
+  ON offers FOR ALL TO authenticated
+  USING (auth.jwt() ->> 'role' = 'admin')
+  WITH CHECK (auth.jwt() ->> 'role' = 'admin');
+
+CREATE POLICY "Allow admin write packages"
+  ON packages FOR ALL TO authenticated
+  USING (auth.jwt() ->> 'role' = 'admin')
+  WITH CHECK (auth.jwt() ->> 'role' = 'admin');
+```
+
+> **Nota:** Si no usas JWT claims, implementar la validación de admin en los Server Actions o Route Handlers de Next.js.
 
 ---
 
-## 8. API Routes
+## 2. Feature: Ofertas del Mes (Visualización Pública)
 
-### 8.1 POST /api/cloudinary/upload — Subir nueva imagen
+### Descripción
+Sección pública que muestra productos individuales con precio rebajado. Filtros por categoría. Diseño responsive tipo grid.
 
-```ts
-import { v2 as cloudinary } from 'cloudinary'
-import { NextRequest, NextResponse } from 'next/server'
+### Archivos a crear
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-})
-
-export async function POST(request: NextRequest) {
-  try {
-    const formData = await request.formData()
-    const file = formData.get('file') as File
-    const productId = formData.get('productId') as string | null
-    const folder = (formData.get('folder') as string) || 'mi-proyecto/productos'
-
-    if (!file) {
-      return NextResponse.json({ error: 'No se proporcionó archivo' }, { status: 400 })
-    }
-
-    const bytes  = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    const base64 = buffer.toString('base64')
-    const dataURI = `data:${file.type};base64,${base64}`
-
-    // Opcional: usar public_id predecible basado en productId para evitar duplicados
-    // Ejemplo: si productId = "prod-123", el public_id será "mi-proyecto/productos/prod-123"
-    const uploadOptions: any = {
-      folder,
-      transformation: [
-        {
-          width: 600,
-          height: 600,
-          crop: 'fill',
-          quality: 80,
-          format: 'webp',
-        },
-      ],
-      resource_type: 'image',
-      overwrite: false, // No sobreescribir si ya existe
-    }
-
-    // Si nos pasan un productId, usarlo para generar un public_id predecible
-    // Esto hace MUCHO más fácil verificar si la imagen ya existe después
-    if (productId) {
-      uploadOptions.public_id = `${folder}/${productId}`
-      uploadOptions.unique_filename = false
-      uploadOptions.use_filename = true
-    } else {
-      uploadOptions.unique_filename = true
-      uploadOptions.use_filename = false
-    }
-
-    const result = await cloudinary.uploader.upload(dataURI, uploadOptions)
-
-    return NextResponse.json({
-      success: true,
-      url: result.secure_url,
-      publicId: result.public_id,
-      folder: result.folder,
-      created: result.created_at,
-      // Si existing es true, Cloudinary devolvió la imagen existente (cuando overwrite: false y public_id coincide)
-      existing: result.existing,
-    })
-  } catch (error: any) {
-    const msg = error?.message || error?.error?.message || 'Error al subir la imagen'
-    console.error('Error Cloudinary upload:', msg)
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
-}
-```
-
-#### Notas sobre public_id predecible
-
-- Si defines `public_id` basado en el `productId` (ej: `mi-proyecto/productos/${productId}`), Cloudinary con `overwrite: false` **devolverá la imagen existente** si ya hay una con ese public_id, en lugar de crear un duplicado.
-- Esto es la forma más simple y robusta de evitar duplicados: la propia API de Cloudinary te lo resuelve.
-- El resultado incluirá `result.existing` si Cloudinary reutilizó una imagen existente.
-
----
-
-### 8.2 POST /api/cloudinary/check — Verificar si imagen ya existe
-
-Este endpoint recibe un `public_id` y verifica si esa imagen existe en Cloudinary.
-
-```ts
-import { v2 as cloudinary } from 'cloudinary'
-import { NextRequest, NextResponse } from 'next/server'
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-})
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const { publicId } = body
-
-    if (!publicId) {
-      return NextResponse.json({ error: 'publicId requerido' }, { status: 400 })
-    }
-
-    try {
-      // cloudinary.api.resource() lanza un error 404 si el recurso NO existe
-      const result = await cloudinary.api.resource(publicId, {
-        resource_type: 'image',
-      })
-
-      return NextResponse.json({
-        exists: true,
-        url: result.secure_url,
-        publicId: result.public_id,
-        folder: result.folder,
-        createdAt: result.created_at,
-        bytes: result.bytes,
-        format: result.format,
-      })
-    } catch (apiError: any) {
-      // Si el error es 404, la imagen NO existe
-      if (apiError?.http_code === 404 || apiError?.error?.http_code === 404) {
-        return NextResponse.json({
-          exists: false,
-          publicId,
-          message: 'La imagen no existe en Cloudinary',
-        })
-      }
-      // Otro error de la API de Cloudinary
-      throw apiError
-    }
-  } catch (error: any) {
-    const msg = error?.message || error?.error?.message || 'Error al verificar imagen'
-    console.error('Error Cloudinary check:', msg)
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
-}
-```
-
-#### Uso típico desde el cliente
-
-```ts
-// Antes de procesar/subir, verificar si ya existe
-const checkRes = await fetch('/api/cloudinary/check', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ publicId: `mi-proyecto/productos/${productId}` }),
-})
-const checkData = await checkRes.json()
-
-if (checkData.exists) {
-  // ✅ La imagen ya existe en Cloudinary
-  // Reutilizar checkData.url, guardar en BD, SIN subir nada nuevo
-  console.log('Imagen existente encontrada:', checkData.url)
-} else {
-  // ❌ La imagen NO existe
-  // Proceder con el flujo normal: remover fondo → subir a Cloudinary
-}
-```
-
----
-
-### 8.3 GET /api/cloudinary/list — Listar imágenes existentes en una carpeta
-
-Útil para sincronización en batch o para mostrar una galería de imágenes ya subidas.
-
-```ts
-import { v2 as cloudinary } from 'cloudinary'
-import { NextRequest, NextResponse } from 'next/server'
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-})
-
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const folder = searchParams.get('folder') || 'mi-proyecto/productos'
-    const maxResults = parseInt(searchParams.get('max') || '100')
-
-    const result = await cloudinary.api.resources({
-      type: 'upload',
-      prefix: folder, // Filtra por carpeta
-      max_results: Math.min(maxResults, 500),
-      resource_type: 'image',
-    })
-
-    const images = result.resources.map((r: any) => ({
-      url: r.secure_url,
-      publicId: r.public_id,
-      folder: r.folder,
-      createdAt: r.created_at,
-      bytes: r.bytes,
-      format: r.format,
-      width: r.width,
-      height: r.height,
-    }))
-
-    return NextResponse.json({
-      success: true,
-      images,
-      total: result.resources.length,
-      nextCursor: result.next_cursor,
-    })
-  } catch (error: any) {
-    const msg = error?.message || error?.error?.message || 'Error al listar imágenes'
-    console.error('Error Cloudinary list:', msg)
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
-}
-```
-
-#### Uso típico desde el cliente
-
-```ts
-// Obtener todas las imágenes de una carpeta
-const listRes = await fetch('/api/cloudinary/list?folder=mi-proyecto/productos&max=100')
-const listData = await listRes.json()
-
-if (listData.success) {
-  console.log(`Hay ${listData.total} imágenes en Cloudinary`)
-  for (const img of listData.images) {
-    console.log(img.publicId, img.url)
-  }
-}
-```
-
----
-
-## 9. Componente Principal: PhotoManager
-
-Este es el componente adaptado con la funcionalidad de **reutilización de imágenes existentes**. Antes de procesar y subir, verifica si el producto ya tiene un `cloudinary_public_id` guardado en la BD y si esa imagen sigue existiendo en Cloudinary.
+#### `app/ofertas/page.tsx` — Página pública
 
 ```tsx
-'use client'
+// app/ofertas/page.tsx
+// NO necesita 'use client' — hace data fetching en el servidor
 
-import { useState, useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase'
+import { createClient } from "@/lib/supabase/server";
+import OfertasGrid from "./OfertasGrid";
 
-// === ADAPTA ESTOS TIPOS A TU BASE DE DATOS ===
-interface ProductRow {
-  id: string
-  name: string
-  category: string | null
-  image_url: string | null
-  cloudinary_public_id: string | null
-  cloudinary_folder: string | null
+export const revalidate = 60; // ISR opcional
+
+export default async function OfertasPage() {
+  const supabase = await createClient();
+
+  const { data: offers, error } = await supabase
+    .from("offers")
+    .select("*")
+    .order("fecha", { ascending: false });
+
+  if (error) {
+    console.error(error);
+    return <div>Error cargando ofertas</div>;
+  }
+
+  return <OfertasGrid initialOffers={offers ?? []} />;
+}
+```
+
+#### `app/ofertas/OfertasGrid.tsx` — Componente cliente
+
+```tsx
+"use client";
+
+import { useState, useMemo } from "react";
+
+interface Offer {
+  id: number;
+  nombre: string;
+  categoria: string;
+  imagen: string | null;
+  precio_lista: number;
+  precio_oferta: number;
 }
 
-interface VariantRow {
-  id: string
-  product_id: string
-  barcode: string
-  flavor: string | null
-  product: ProductRow
+const CATEGORIAS = ["TODOS", "PROTEINAS", "CREATINA", "PRE-ENTRENOS", "OTROS"];
+
+export default function OfertasGrid({ initialOffers }: { initialOffers: Offer[] }) {
+  const [activeFilter, setActiveFilter] = useState("TODOS");
+
+  const filtered = useMemo(() => {
+    if (activeFilter === "TODOS") return initialOffers;
+    return initialOffers.filter((o) => o.categoria === activeFilter);
+  }, [activeFilter, initialOffers]);
+
+  return (
+    <div>
+      {/* Filtros */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+        {CATEGORIAS.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setActiveFilter(cat)}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 999,
+              border: "none",
+              cursor: "pointer",
+              background: activeFilter === cat ? "var(--accent)" : "var(--surface)",
+              color: activeFilter === cat ? "#fff" : "var(--text)",
+              fontWeight: 600,
+            }}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      {/* Grid */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+          gap: 20,
+        }}
+      >
+        {filtered.map((offer) => (
+          <OfertaCard key={offer.id} offer={offer} />
+        ))}
+      </div>
+
+      {filtered.length === 0 && (
+        <p style={{ textAlign: "center", color: "var(--muted)" }}>
+          No hay ofertas disponibles.
+        </p>
+      )}
+    </div>
+  );
 }
 
-type Stage = 'idle' | 'checking' | 'removing-bg' | 'uploading' | 'saving' | 'done' | 'error' | 'reused'
+function OfertaCard({ offer }: { offer: Offer }) {
+  const descuento = Math.round(
+    ((offer.precio_lista - offer.precio_oferta) / offer.precio_lista) * 100
+  );
+  const ahorro = offer.precio_lista - offer.precio_oferta;
 
-const STAGE_LABEL: Record<Stage, string> = {
-  idle:          '',
-  checking:      'Verificando si la imagen ya existe…',
-  'removing-bg': 'Recortando fondo con IA…',
-  uploading:     'Subiendo a la nube…',
-  saving:        'Guardando en base de datos…',
-  done:          '¡Imagen guardada!',
-  reused:        '✓ Imagen existente reutilizada',
-  error:         'Error al procesar',
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        borderRadius: 16,
+        overflow: "hidden",
+        position: "relative",
+        border: "1px solid var(--border)",
+      }}
+    >
+      {/* Badge descuento */}
+      <span
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 12,
+          background: "#ff4444",
+          color: "#fff",
+          padding: "4px 10px",
+          borderRadius: 8,
+          fontWeight: 700,
+          fontSize: 12,
+          zIndex: 2,
+        }}
+      >
+        -{descuento}%
+      </span>
+
+      {/* Imagen */}
+      <div style={{ height: 200, background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {offer.imagen ? (
+          <img
+            src={offer.imagen}
+            alt={offer.nombre}
+            style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain" }}
+          />
+        ) : (
+          <span style={{ fontSize: 48 }}>📦</span>
+        )}
+      </div>
+
+      {/* Info */}
+      <div style={{ padding: 16 }}>
+        <p style={{ fontSize: 11, color: "var(--accent)", textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>
+          {offer.categoria}
+        </p>
+        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, lineHeight: 1.3 }}>
+          {offer.nombre}
+        </h3>
+
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+          <span style={{ fontSize: 13, color: "var(--muted)", textDecoration: "line-through" }}>
+            ${offer.precio_lista.toFixed(2)}
+          </span>
+          <span style={{ fontSize: 20, fontWeight: 800, color: "var(--accent)" }}>
+            ${offer.precio_oferta.toFixed(2)}
+          </span>
+        </div>
+
+        {ahorro > 0 && (
+          <span
+            style={{
+              display: "inline-block",
+              background: "#22c55e",
+              color: "#fff",
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "3px 8px",
+              borderRadius: 6,
+              marginTop: 4,
+            }}
+          >
+            ¡Ahorras ${ahorro.toFixed(2)}!
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+### Endpoints equivalentes (Next.js)
+
+| Antes (Flask) | Ahora (Next.js / Supabase) |
+|---|---|
+| `GET /api/ofertas` | `supabase.from("offers").select("*")` en Server Component |
+| Filtro por categoría | Filtrar en cliente con `useMemo` (o en query con `.eq("categoria", cat)`) |
+| `imagen` relativa | Asegurar que sea URL absoluta o usar `/_next/image` con dominio configurado |
+
+### Variables CSS requeridas
+
+Asegurar que existan en `globals.css` o en el root:
+
+```css
+:root {
+  --accent: #cc44ff;      /* o el color primario del POS */
+  --surface: #1a1a1a;     /* fondo de tarjetas */
+  --bg: #0f0f0f;          /* fondo general */
+  --text: #f0f0f0;        /* texto principal */
+  --muted: #888888;       /* texto secundario */
+  --border: #333333;      /* bordes */
+}
+```
+
+---
+
+## 3. Feature: Crear Ofertas del Mes (Panel Admin)
+
+### Descripción
+Modal/página donde el admin busca un producto del inventario, selecciona categoría, opcionalmente omite el sabor del nombre, ingresa precio de oferta y guarda.
+
+### Archivos a crear
+
+#### `app/admin/ofertas/actions.ts` — Server Actions
+
+```tsx
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+
+export async function createOffer(formData: FormData) {
+  const supabase = await createClient();
+
+  // Validar rol admin (ejemplo básico, ajustar según tu auth)
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("No autenticado");
+
+  // Verificar rol admin en tabla profiles
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (profile?.role !== "admin") throw new Error("No autorizado");
+
+  const nombre = formData.get("nombre") as string;
+  const nombre_original = formData.get("nombre_original") as string;
+  const categoria = formData.get("categoria") as string;
+  const imagen = formData.get("imagen") as string;
+  const precio_lista = parseFloat(formData.get("precio_lista") as string);
+  const precio_oferta = parseFloat(formData.get("precio_oferta") as string);
+
+  const { error } = await supabase.from("offers").insert({
+    nombre,
+    nombre_original: nombre_original || nombre,
+    categoria,
+    imagen,
+    precio_lista,
+    precio_oferta,
+    fecha: new Date().toISOString(),
+  });
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/ofertas");
+  revalidatePath("/admin/ofertas");
 }
 
-// Carpeta en Cloudinary para este proyecto — CAMBIA ESTO
-const CLOUDINARY_FOLDER = 'mi-proyecto/productos'
+export async function deleteOffer(id: number) {
+  const supabase = await createClient();
 
-export default function PhotoManager() {
-  const [variants,  setVariants]  = useState<VariantRow[]>([])
-  const [loading,   setLoading]   = useState(true)
-  const [search,    setSearch]    = useState('')
-  const [selected,  setSelected]  = useState<VariantRow | null>(null)
-  const [preview,   setPreview]   = useState<string | null>(null)
-  const [stage,     setStage]     = useState<Stage>('idle')
-  const [errorMsg,  setErrorMsg]  = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const { error } = await supabase.from("offers").delete().eq("id", id);
+  if (error) throw new Error(error.message);
 
-  useEffect(() => { loadVariants() }, [])
+  revalidatePath("/ofertas");
+  revalidatePath("/admin/ofertas");
+}
 
-  async function loadVariants() {
-    setLoading(true)
-    const supabase = createClient()
-    // === ADAPTA ESTA CONSULTA A TU SCHEMA ===
-    const { data } = await supabase
-      .from('product_variants')
-      .select('id, product_id, barcode, flavor, product:products(id, name, category, image_url, cloudinary_public_id, cloudinary_folder)')
-      .order('product_id')
-    setVariants((data as any) ?? [])
-    setLoading(false)
+export async function deleteAllOffers() {
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("offers").delete().neq("id", 0);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/ofertas");
+  revalidatePath("/admin/ofertas");
+}
+```
+
+#### `app/admin/ofertas/page.tsx` — Página admin
+
+```tsx
+// app/admin/ofertas/page.tsx
+// Server Component que carga productos e ofertas
+
+import { createClient } from "@/lib/supabase/server";
+import OfertasAdminClient from "./OfertasAdminClient";
+
+export default async function AdminOfertasPage() {
+  const supabase = await createClient();
+
+  const [{ data: products }, { data: offers }] = await Promise.all([
+    supabase.from("products").select("nombre, precio, precio_costo, categoria, imagen").order("nombre"),
+    supabase.from("offers").select("*").order("fecha", { ascending: false }),
+  ]);
+
+  return (
+    <OfertasAdminClient
+      products={products ?? []}
+      offers={offers ?? []}
+    />
+  );
+}
+```
+
+#### `app/admin/ofertas/OfertasAdminClient.tsx` — Cliente
+
+```tsx
+"use client";
+
+import { useState, useMemo } from "react";
+import { createOffer, deleteOffer, deleteAllOffers } from "./actions";
+
+interface Product {
+  nombre: string;
+  precio: number;
+  precio_costo: number;
+  categoria: string;
+  imagen: string | null;
+}
+
+interface Offer {
+  id: number;
+  nombre: string;
+  categoria: string;
+  imagen: string | null;
+  precio_lista: number;
+  precio_oferta: number;
+}
+
+export default function OfertasAdminClient({
+  products,
+  offers,
+}: {
+  products: Product[];
+  offers: Offer[];
+}) {
+  const [showModal, setShowModal] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [omitirSabor, setOmitirSabor] = useState(true);
+  const [precioOferta, setPrecioOferta] = useState("");
+  const [categoria, setCategoria] = useState("");
+
+  const filteredProducts = useMemo(() => {
+    if (!search.trim()) return [];
+    return products.filter((p) =>
+      p.nombre.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [search, products]);
+
+  function handleSelectProduct(p: Product) {
+    setSelectedProduct(p);
+    setCategoria(p.categoria);
+    setSearch(p.nombre);
   }
 
-  const filtered = variants.filter(v => {
-    if (!v.product) return false
-    const q = search.toLowerCase()
-    return (
-      v.product.name.toLowerCase().includes(q) ||
-      v.barcode.toLowerCase().includes(q) ||
-      (v.flavor ?? '').toLowerCase().includes(q)
-    )
-  })
-
-  function selectVariant(v: VariantRow) {
-    setSelected(v)
-    setPreview(v.product.image_url ?? null)
-    setStage('idle')
-    setErrorMsg('')
+  function getDisplayName(p: Product, omit: boolean): string {
+    if (!omit) return p.nombre;
+    // Lógica para omitir sabor: quitar todo después del último " - "
+    const idx = p.nombre.lastIndexOf(" - ");
+    if (idx > 0) return p.nombre.substring(0, idx);
+    return p.nombre;
   }
 
-  function siblingsCount(productId: string) {
-    return variants.filter(v => v.product_id === productId).length
-  }
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selectedProduct) return;
 
-  // ============================================================
-  // NUEVA FUNCIÓN: Verificar si imagen ya existe en Cloudinary
-  // ============================================================
-  async function checkExistingImage(productId: string): Promise<{ exists: boolean; url?: string; publicId?: string }> {
-    try {
-      // Construir el public_id predecible
-      const publicId = `${CLOUDINARY_FOLDER}/${productId}`
+    const formData = new FormData();
+    formData.append("nombre", getDisplayName(selectedProduct, omitirSabor));
+    formData.append("nombre_original", selectedProduct.nombre);
+    formData.append("categoria", categoria);
+    formData.append("imagen", selectedProduct.imagen ?? "");
+    formData.append("precio_lista", selectedProduct.precio.toString());
+    formData.append("precio_oferta", precioOferta);
 
-      const res = await fetch('/api/cloudinary/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ publicId }),
-      })
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        console.warn('Error verificando imagen existente:', err.error)
-        return { exists: false }
-      }
-
-      const data = await res.json()
-      return {
-        exists: data.exists,
-        url: data.url,
-        publicId: data.publicId,
-      }
-    } catch (err) {
-      console.warn('Fallo la verificación de imagen existente:', err)
-      return { exists: false }
-    }
-  }
-
-  // ============================================================
-  // FLUJO PRINCIPAL MODIFICADO CON REUTILIZACIÓN
-  // ============================================================
-  async function handleFile(file: File) {
-    if (!selected) return
-    setErrorMsg('')
-
-    try {
-      // Paso 0: Verificar si YA existe una imagen para este producto en Cloudinary
-      setStage('checking')
-      const existing = await checkExistingImage(selected.product_id)
-
-      if (existing.exists && existing.url) {
-        // ✅ IMAGEN YA EXISTE — Reutilizarla, no subir nada nuevo
-        setStage('saving')
-
-        const supabase = createClient()
-        const { error } = await (supabase as any)
-          .from('products')
-          .update({
-            image_url: existing.url,
-            cloudinary_public_id: existing.publicId,
-            cloudinary_folder: CLOUDINARY_FOLDER,
-          })
-          .eq('id', selected.product_id)
-
-        if (error) throw new Error(`Error Supabase: ${error.message}`)
-
-        // Actualizar estado local
-        setVariants(prev =>
-          prev.map(v =>
-            v.product_id === selected.product_id
-              ? { ...v, product: { ...v.product, image_url: existing.url, cloudinary_public_id: existing.publicId, cloudinary_folder: CLOUDINARY_FOLDER } }
-              : v
-          )
-        )
-        setSelected(prev =>
-          prev ? { ...prev, product: { ...prev.product, image_url: existing.url, cloudinary_public_id: existing.publicId, cloudinary_folder: CLOUDINARY_FOLDER } } : prev
-        )
-        setPreview(existing.url)
-        setStage('reused')
-        setTimeout(() => setStage('idle'), 2500)
-        return
-      }
-
-      // ❌ No existe → Proceder con el flujo normal de subida
-      setPreview(URL.createObjectURL(file))
-      setStage('removing-bg')
-
-      // 1. Import dinámico — NUNCA en el top del archivo
-      const { removeBackground } = await import('@imgly/background-removal')
-      // @ts-ignore — onnxruntime-web no resuelve sus tipos via exports map
-      const ort = await import('onnxruntime-web')
-      ort.env.wasm.wasmPaths = '/ort-wasm/'
-
-      const blob = await removeBackground(file, {
-        publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
-        proxyToWorker: false,
-      })
-
-      setPreview(URL.createObjectURL(blob))
-      setStage('uploading')
-
-      // 2. Subir a Cloudinary con public_id predecible
-      const formData = new FormData()
-      formData.append('file', new File([blob], 'producto.png', { type: 'image/png' }))
-      formData.append('productId', selected.product_id)
-      formData.append('folder', CLOUDINARY_FOLDER)
-
-      const res = await fetch('/api/cloudinary/upload', { method: 'POST', body: formData })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Error al subir a Cloudinary')
-      const { url, publicId, folder } = json
-
-      setStage('saving')
-
-      // 3. Guardar en products (nivel producto, aplica a todos los sabores)
-      const supabase = createClient()
-      const { error } = await (supabase as any)
-        .from('products')
-        .update({
-          image_url: url,
-          cloudinary_public_id: publicId,
-          cloudinary_folder: folder,
-        })
-        .eq('id', selected.product_id)
-
-      if (error) throw new Error(`Error Supabase: ${error.message}`)
-
-      // 4. Actualizar estado local — todos los sabores del mismo producto
-      setVariants(prev =>
-        prev.map(v =>
-          v.product_id === selected.product_id
-            ? { ...v, product: { ...v.product, image_url: url, cloudinary_public_id: publicId, cloudinary_folder: folder } }
-            : v
-        )
-      )
-      setSelected(prev =>
-        prev ? { ...prev, product: { ...prev.product, image_url: url, cloudinary_public_id: publicId, cloudinary_folder: folder } } : prev
-      )
-      setPreview(url)
-      setStage('done')
-      setTimeout(() => setStage('idle'), 2500)
-
-    } catch (err: any) {
-      console.error('PhotoManager error:', err)
-      setStage('error')
-      setErrorMsg(err?.message ?? 'Error desconocido')
-    }
-  }
-
-  const busy = stage !== 'idle' && stage !== 'done' && stage !== 'error' && stage !== 'reused'
-  const siblings = selected ? siblingsCount(selected.product_id) : 0
-
-  const inputStyle = {
-    background: 'var(--bg)',
-    border: '1px solid var(--border)',
-    color: 'var(--text)',
+    await createOffer(formData);
+    setShowModal(false);
+    setSelectedProduct(null);
+    setSearch("");
+    setPrecioOferta("");
+    setOmitirSabor(true);
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-xs -mt-1" style={{ color: 'var(--text-muted)' }}>
-        Selecciona cualquier sabor del producto — la foto aplica a <strong style={{ color: 'var(--text)' }}>todos los sabores</strong> automáticamente.
-        {stage === 'reused' && <span style={{ color: '#4CAF50' }}> Las imágenes existentes se reutilizan sin subir de nuevo.</span>}
-      </p>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-
-        {/* ── Panel izquierdo: lista ── */}
-        <div className="flex flex-col gap-2">
-          <input
-            type="text"
-            placeholder="Buscar producto por nombre…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-            style={{ ...inputStyle, borderColor: 'var(--accent)' }}
-          />
-
-          <div className="rounded-xl overflow-hidden flex flex-col"
-            style={{ border: '1px solid var(--border)', maxHeight: 340, overflowY: 'auto' }}>
-            {loading ? (
-              <div className="flex items-center gap-2 px-3 py-4">
-                <div className="w-4 h-4 rounded-full border-2 animate-spin"
-                  style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Cargando…</span>
-              </div>
-            ) : filtered.length === 0 ? (
-              <p className="text-xs px-3 py-4" style={{ color: 'var(--text-muted)' }}>Sin resultados</p>
-            ) : (
-              filtered.map(v => {
-                const isSelected = selected?.id === v.id
-                const hasPhoto   = !!v.product.image_url
-                return (
-                  <button
-                    key={v.id}
-                    onClick={() => selectVariant(v)}
-                    className="flex items-center justify-between px-3 py-2.5 text-left transition-colors w-full"
-                    style={{
-                      background:  isSelected ? 'color-mix(in srgb, var(--accent) 15%, var(--bg))' : 'transparent',
-                      borderBottom: '1px solid var(--border)',
-                      borderLeft:   isSelected ? '3px solid var(--accent)' : '3px solid transparent',
-                    }}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-8 h-8 rounded shrink-0 overflow-hidden flex items-center justify-center"
-                        style={{ background: 'var(--surface)' }}>
-                        {hasPhoto
-                          ? <img src={v.product.image_url!} alt="" className="w-full h-full object-contain" />
-                          : <span style={{ fontSize: 16 }}>📷</span>
-                        }
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold truncate" style={{ color: 'var(--text)' }}>
-                          {v.product.name}
-                        </p>
-                        {v.flavor && (
-                          <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{v.flavor}</p>
-                        )}
-                      </div>
-                    </div>
-                    {!hasPhoto && (
-                      <span className="shrink-0 text-xs px-1.5 py-0.5 rounded font-semibold ml-2"
-                        style={{ background: '#2D1A00', color: '#F0B429', border: '1px solid #4D3000' }}>
-                        Sin foto
-                      </span>
-                    )}
-                  </button>
-                )
-              })
-            )}
-          </div>
-        </div>
-
-        {/* ── Panel derecho: upload ── */}
-        <div className="flex flex-col gap-3">
-          {selected ? (
-            <>
-              <div className="rounded-xl p-3 flex flex-col gap-1"
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                <p className="text-xs font-bold" style={{ color: 'var(--text)' }}>{selected.product.name}</p>
-                {selected.flavor && (
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Sabor: {selected.flavor}</p>
-                )}
-                {siblings > 1 && (
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--accent)' }}>
-                    ✓ La foto se aplicará a los {siblings} sabores de este producto
-                  </p>
-                )}
-                {selected.product.cloudinary_public_id && (
-                  <p className="text-xs mt-0.5" style={{ color: '#4CAF50' }}>
-                    ✓ Ya tiene imagen en Cloudinary
-                  </p>
-                )}
-              </div>
-
-              <div
-                className="rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer"
-                style={{
-                  border: `2px dashed ${busy ? 'var(--accent)' : 'var(--border)'}`,
-                  background: 'var(--bg)',
-                  minHeight: 180,
-                  padding: '1rem',
-                  opacity: busy ? 0.85 : 1,
-                }}
-                onClick={() => !busy && inputRef.current?.click()}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => {
-                  e.preventDefault()
-                  const file = e.dataTransfer.files[0]
-                  if (file && !busy) handleFile(file)
-                }}
-              >
-                {preview ? (
-                  <img src={preview} alt="preview"
-                    className="max-h-36 object-contain rounded"
-                    style={{ opacity: busy ? 0.5 : 1 }} />
-                ) : (
-                  <span style={{ fontSize: 40, opacity: 0.4 }}>🖼️</span>
-                )}
-
-                {busy ? (
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full border-2 animate-spin"
-                      style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
-                    <span className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
-                      {STAGE_LABEL[stage]}
-                    </span>
-                  </div>
-                ) : stage === 'done' ? (
-                  <span className="text-xs font-semibold" style={{ color: '#4CAF50' }}>
-                    ✓ {STAGE_LABEL.done}
-                  </span>
-                ) : stage === 'reused' ? (
-                  <span className="text-xs font-semibold" style={{ color: '#2196F3' }}>
-                    ↻ {STAGE_LABEL.reused}
-                  </span>
-                ) : stage === 'error' ? (
-                  <span className="text-xs text-center" style={{ color: '#FF6B6B' }}>
-                    {errorMsg || STAGE_LABEL.error}
-                  </span>
-                ) : (
-                  <div className="text-center">
-                    <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
-                      Click para elegir imagen
-                    </p>
-                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      Se quitará el fondo automáticamente
-                    </p>
-                    {selected.product.cloudinary_public_id && (
-                      <p className="text-xs mt-1" style={{ color: '#2196F3' }}>
-                        ↻ Se reutilizará si ya existe en Cloudinary
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {!busy && (
-                <button
-                  onClick={() => inputRef.current?.click()}
-                  className="py-2.5 rounded-xl text-sm font-bold"
-                  style={{ background: 'var(--accent)', color: '#000' }}>
-                  {selected.product.image_url ? 'Cambiar foto' : 'Subir foto'}
-                </button>
-              )}
-            </>
-          ) : (
-            <div className="rounded-xl flex flex-col items-center justify-center gap-2"
-              style={{ border: '2px dashed var(--border)', background: 'var(--bg)', minHeight: 260 }}>
-              <span style={{ fontSize: 36, opacity: 0.3 }}>👈</span>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                Selecciona un producto de la lista
-              </p>
-            </div>
-          )}
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800 }}>Ofertas del Mes</h1>
+        <div style={{ display: "flex", gap: 12 }}>
+          <button
+            onClick={() => setShowModal(true)}
+            style={{
+              padding: "10px 20px",
+              background: "var(--accent)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            + Nueva Oferta
+          </button>
+          <button
+            onClick={async () => {
+              if (confirm("¿Eliminar TODAS las ofertas?")) await deleteAllOffers();
+            }}
+            style={{
+              padding: "10px 20px",
+              background: "#ff4444",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            Borrar Todas
+          </button>
         </div>
       </div>
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={e => {
-          const file = e.target.files?.[0]
-          if (file) { handleFile(file); e.target.value = '' }
-        }}
-      />
+      {/* Lista de ofertas existentes */}
+      <div style={{ display: "grid", gap: 12 }}>
+        {offers.map((o) => (
+          <div
+            key={o.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+              padding: 16,
+              background: "var(--surface)",
+              borderRadius: 12,
+              border: "1px solid var(--border)",
+            }}
+          >
+            {o.imagen && (
+              <img src={o.imagen} alt="" style={{ width: 60, height: 60, objectFit: "contain", borderRadius: 8 }} />
+            )}
+            <div style={{ flex: 1 }}>
+              <p style={{ fontWeight: 700 }}>{o.nombre}</p>
+              <p style={{ fontSize: 13, color: "var(--muted)" }}>
+                ${o.precio_lista} → <strong style={{ color: "var(--accent)" }}>${o.precio_oferta}</strong>
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                if (confirm("¿Eliminar esta oferta?")) await deleteOffer(o.id);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#ff4444",
+                fontSize: 20,
+                cursor: "pointer",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Modal Crear Oferta */}
+      {showModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+          onClick={() => setShowModal(false)}
+        >
+          <div
+            style={{
+              background: "var(--surface)",
+              padding: 32,
+              borderRadius: 16,
+              width: "100%",
+              maxWidth: 520,
+              maxHeight: "90vh",
+              overflow: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ marginBottom: 20 }}>Nueva Oferta</h2>
+            <form onSubmit={handleSubmit}>
+              {/* Buscador de producto */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600 }}>
+                  Buscar Producto
+                </label>
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setSelectedProduct(null);
+                  }}
+                  placeholder="Escribe para buscar..."
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg)",
+                    color: "var(--text)",
+                    fontSize: 14,
+                  }}
+                />
+                {filteredProducts.length > 0 && !selectedProduct && (
+                  <div
+                    style={{
+                      marginTop: 4,
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      maxHeight: 200,
+                      overflow: "auto",
+                    }}
+                  >
+                    {filteredProducts.map((p) => (
+                      <div
+                        key={p.nombre}
+                        onClick={() => handleSelectProduct(p)}
+                        style={{
+                          padding: "10px 14px",
+                          cursor: "pointer",
+                          borderBottom: "1px solid var(--border)",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "var(--bg)")}
+                      >
+                        {p.nombre} — ${p.precio}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Categoría */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600 }}>
+                  Categoría
+                </label>
+                <select
+                  value={categoria}
+                  onChange={(e) => setCategoria(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg)",
+                    color: "var(--text)",
+                    fontSize: 14,
+                  }}
+                >
+                  <option value="">Seleccionar...</option>
+                  <option value="PROTEINAS">PROTEINAS</option>
+                  <option value="CREATINA">CREATINA</option>
+                  <option value="PRE-ENTRENOS">PRE-ENTRENOS</option>
+                  <option value="OTROS">OTROS</option>
+                </select>
+              </div>
+
+              {/* Omitir sabor */}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 16,
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={omitirSabor}
+                  onChange={(e) => setOmitirSabor(e.target.checked)}
+                />
+                Omitir sabor del nombre
+              </label>
+
+              {/* Preview nombre */}
+              {selectedProduct && (
+                <div
+                  style={{
+                    padding: 12,
+                    background: "var(--bg)",
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    fontSize: 13,
+                    color: "var(--muted)",
+                  }}
+                >
+                  Nombre final: <strong>{getDisplayName(selectedProduct, omitirSabor)}</strong>
+                </div>
+              )}
+
+              {/* Precio oferta */}
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600 }}>
+                  Precio de Oferta
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={precioOferta}
+                  onChange={(e) => setPrecioOferta(e.target.value)}
+                  placeholder="Ej: 650.00"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg)",
+                    color: "var(--text)",
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  style={{
+                    padding: "10px 20px",
+                    background: "transparent",
+                    border: "1px solid var(--border)",
+                    color: "var(--text)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!selectedProduct}
+                  style={{
+                    padding: "10px 20px",
+                    background: "var(--accent)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    cursor: selectedProduct ? "pointer" : "not-allowed",
+                    fontWeight: 700,
+                    opacity: selectedProduct ? 1 : 0.5,
+                  }}
+                >
+                  Guardar Oferta
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
-  )
+  );
 }
 ```
 
+### Endpoints equivalentes
+
+| Antes (Flask) | Ahora (Next.js) |
+|---|---|
+| `POST /api/ofertas` | Server Action `createOffer(formData)` |
+| `DELETE /api/ofertas/<id>` | Server Action `deleteOffer(id)` |
+| `DELETE /api/ofertas/all` | Server Action `deleteAllOffers()` |
+| Búsqueda de productos | `supabase.from("products").select(...)` en Server Component |
+
+### Lógica de negocio clave a preservar
+
+1. **Checkbox "Omitir sabor"**: Quita todo después del último `" - "` del nombre del producto. Guardar `nombre_original` con el nombre completo para sincronización futura.
+2. **`precio_lista`**: Se toma del `precio` (precio público) del producto seleccionado, no se edita manualmente.
+3. **Sincronización con inventario**: Cuando se actualice un producto (precio o imagen), buscar en `offers` por `nombre_original` y actualizar `precio_lista` / `imagen`.
+
 ---
 
-## 10. Flujo de Reutilización de Imágenes
+## 4. Feature: Crear Paquetes del Mes (Panel Admin)
 
-### Flujo paso a paso con el componente PhotoManager
+### Descripción
+Modal/página donde el admin crea combos de 2 a 5 productos. Nombre del combo, productos seleccionados (con categoría + producto), cálculo automático de suma de costos y precio público, y precio de oferta manual.
 
+### Archivos a crear
+
+#### `app/admin/paquetes/actions.ts` — Server Actions
+
+```tsx
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+
+export async function createPackage(formData: FormData) {
+  const supabase = await createClient();
+
+  const nombre = formData.get("nombre") as string;
+  const productos = JSON.parse(formData.get("productos") as string);
+  const precio_lista = parseFloat(formData.get("precio_lista") as string);
+  const precio_oferta = parseFloat(formData.get("precio_oferta") as string);
+  const costo_real = parseFloat(formData.get("costo_real") as string);
+
+  const { error } = await supabase.from("packages").insert({
+    nombre,
+    productos,
+    precio_lista,
+    precio_oferta,
+    costo_real,
+    fecha: new Date().toISOString(),
+    activo: true,
+  });
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/paquetes");
+  revalidatePath("/admin/paquetes");
+}
+
+export async function deletePackage(id: number) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("packages").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/paquetes");
+  revalidatePath("/admin/paquetes");
+}
+
+export async function togglePackage(id: number, current: boolean) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("packages")
+    .update({ activo: !current })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/paquetes");
+  revalidatePath("/admin/paquetes");
+}
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 1. Usuario selecciona un producto de la lista                                │
-│    - El componente ya sabe el product_id                                     │
-│    - Muestra si ya tiene image_url o cloudinary_public_id en la BD           │
-└──────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 2. Usuario selecciona/arrastra una imagen nueva                              │
-│    - El usuario QUIERE asignar una foto a este producto                      │
-└──────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 3. VERIFICACIÓN EN CLOUDINARY (nuevo paso)                                   │
-│    - Se construye el public_id predecible: "mi-proyecto/productos/{productId}"│
-│    - POST /api/cloudinary/check con ese public_id                            │
-│    - Cloudinary responde: ¿existe esta imagen?                               │
-└──────────────────────────────────────────────────────────────────────────────┘
-                                      ↓
-                    ┌─────────────────┴─────────────────┐
-                    ↓                                   ↓
-         ┌──────────────────────┐          ┌──────────────────────────┐
-         │  EXISTS = true       │          │  EXISTS = false          │
-         │  (imagen encontrada) │          │  (no existe)             │
-         └──────────────────────┘          └──────────────────────────┘
-                    ↓                                   ↓
-         ┌──────────────────────┐          ┌──────────────────────────┐
-         │ Reutilizar URL       │          │ Procesamiento local      │
-         │ Guardar en BD        │          │ Remover fondo con IA     │
-         │ Stage = 'reused'     │          │                          │
-         │ NO se sube nada      │          │                          │
-         └──────────────────────┘          └──────────────────────────┘
-                                                      ↓
-                                          ┌──────────────────────────┐
-                                          │ Subir a Cloudinary       │
-                                          │ POST /api/cloudinary/upload│
-                                          │ con productId predefinido│
-                                          └──────────────────────────┘
-                                                      ↓
-                                          ┌──────────────────────────┐
-                                          │ Guardar en BD:           │
-                                          │ image_url, public_id,    │
-                                          │ folder                   │
-                                          └──────────────────────────┘
+
+#### `app/admin/paquetes/page.tsx` — Server Component
+
+```tsx
+// app/admin/paquetes/page.tsx
+import { createClient } from "@/lib/supabase/server";
+import PaquetesAdminClient from "./PaquetesAdminClient";
+
+export default async function AdminPaquetesPage() {
+  const supabase = await createClient();
+
+  const [{ data: products }, { data: packages }] = await Promise.all([
+    supabase.from("products").select("nombre, precio, precio_costo, categoria, imagen").order("nombre"),
+    supabase.from("packages").select("*").order("fecha", { ascending: false }),
+  ]);
+
+  return (
+    <PaquetesAdminClient
+      products={products ?? []}
+      packages={packages ?? []}
+    />
+  );
+}
 ```
 
-### Ventajas de este flujo
+#### `app/admin/paquetes/PaquetesAdminClient.tsx` — Cliente
 
-1. **Sin duplicados**: Al usar `public_id` predecible basado en `productId`, Cloudinary con `overwrite: false` nunca crea duplicados para el mismo producto.
-2. **Recuperación automática**: Si la BD se pierde o se migra, puedes reconstruir las URLs simplemente conociendo el `productId` y la carpeta.
-3. **Detección de imágenes huérfanas**: Si alguien borra una imagen de Cloudinary manualmente, el sistema lo detecta en la próxima verificación y la vuelve a subir.
-4. **Sincronización batch**: Puedes correr un script que verifique todos los `cloudinary_public_id` de la BD contra Cloudinary y reporte cuáles faltan.
+```tsx
+"use client";
+
+import { useState } from "react";
+import { createPackage, deletePackage, togglePackage } from "./actions";
+
+interface Product {
+  nombre: string;
+  precio: number;
+  precio_costo: number;
+  categoria: string;
+  imagen: string | null;
+}
+
+interface PackageItem {
+  id: number;
+  nombre: string;
+  productos: { nombre: string; imagen: string | null; categoria: string }[];
+  precio_lista: number;
+  precio_oferta: number;
+  costo_real: number;
+  activo: boolean;
+}
+
+interface PackageRow {
+  categoria: string;
+  producto: Product | null;
+}
+
+const CATEGORIAS = ["PROTEINAS", "CREATINA", "PRE-ENTRENOS", "OTROS"];
+
+export default function PaquetesAdminClient({
+  products,
+  packages,
+}: {
+  products: Product[];
+  packages: PackageItem[];
+}) {
+  const [showModal, setShowModal] = useState(false);
+  const [nombre, setNombre] = useState("");
+  const [rows, setRows] = useState<PackageRow[]>([
+    { categoria: "", producto: null },
+    { categoria: "", producto: null },
+  ]);
+  const [precioOferta, setPrecioOferta] = useState("");
+
+  function addRow() {
+    if (rows.length < 5) setRows([...rows, { categoria: "", producto: null }]);
+  }
+
+  function removeRow(index: number) {
+    if (rows.length > 2) setRows(rows.filter((_, i) => i !== index));
+  }
+
+  function updateRow(index: number, categoria: string, producto: Product | null) {
+    const next = [...rows];
+    next[index] = { categoria, producto };
+    setRows(next);
+  }
+
+  const sumCosto = rows.reduce((sum, r) => sum + (r.producto?.precio_costo ?? 0), 0);
+  const sumPublico = rows.reduce((sum, r) => sum + (r.producto?.precio ?? 0), 0);
+
+  const filteredByCat = (cat: string) =>
+    cat ? products.filter((p) => p.categoria === cat) : [];
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (rows.some((r) => !r.producto)) return;
+
+    const productos = rows.map((r) => ({
+      nombre: r.producto!.nombre,
+      imagen: r.producto!.imagen,
+      categoria: r.producto!.categoria,
+    }));
+
+    const formData = new FormData();
+    formData.append("nombre", nombre);
+    formData.append("productos", JSON.stringify(productos));
+    formData.append("precio_lista", sumPublico.toString());
+    formData.append("precio_oferta", precioOferta);
+    formData.append("costo_real", sumCosto.toString());
+
+    await createPackage(formData);
+    setShowModal(false);
+    resetForm();
+  }
+
+  function resetForm() {
+    setNombre("");
+    setRows([
+      { categoria: "", producto: null },
+      { categoria: "", producto: null },
+    ]);
+    setPrecioOferta("");
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800 }}>Paquetes del Mes</h1>
+        <button
+          onClick={() => setShowModal(true)}
+          style={{
+            padding: "10px 20px",
+            background: "var(--accent)",
+            color: "#fff",
+            border: "none",
+            borderRadius: 8,
+            cursor: "pointer",
+            fontWeight: 700,
+          }}
+        >
+          + Nuevo Paquete
+        </button>
+      </div>
+
+      {/* Lista paquetes */}
+      <div style={{ display: "grid", gap: 12 }}>
+        {packages.map((pkg) => (
+          <div
+            key={pkg.id}
+            style={{
+              padding: 16,
+              background: "var(--surface)",
+              borderRadius: 12,
+              border: `1px solid ${pkg.activo ? "var(--border)" : "#ff4444"}`,
+              opacity: pkg.activo ? 1 : 0.6,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+              <span
+                style={{
+                  background: pkg.activo ? "#cc44ff" : "#ff4444",
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "3px 10px",
+                  borderRadius: 6,
+                }}
+              >
+                {pkg.activo ? "ACTIVO" : "INACTIVO"}
+              </span>
+              <h3 style={{ fontWeight: 700 }}>{pkg.nombre}</h3>
+            </div>
+            <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>
+              {pkg.productos.map((p) => p.nombre).join(" + ")}
+            </p>
+            <p style={{ fontSize: 13, marginBottom: 8 }}>
+              Público: ${pkg.precio_lista} → Oferta: <strong>${pkg.precio_oferta}</strong>
+              {" | "}Costo: ${pkg.costo_real}
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => togglePackage(pkg.id, pkg.activo)}
+                style={{
+                  padding: "6px 14px",
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 13,
+                }}
+              >
+                {pkg.activo ? "🚫 Desactivar" : "👁️ Activar"}
+              </button>
+              <button
+                onClick={async () => {
+                  if (confirm("¿Eliminar permanentemente?")) await deletePackage(pkg.id);
+                }}
+                style={{
+                  padding: "6px 14px",
+                  background: "#ff4444",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 13,
+                }}
+              >
+                ✕ Eliminar
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Modal */}
+      {showModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+          onClick={() => setShowModal(false)}
+        >
+          <div
+            style={{
+              background: "var(--surface)",
+              padding: 32,
+              borderRadius: 16,
+              width: "100%",
+              maxWidth: 600,
+              maxHeight: "90vh",
+              overflow: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ marginBottom: 20 }}>Nuevo Paquete</h2>
+            <form onSubmit={handleSubmit}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600 }}>
+                  Nombre del Combo
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                  placeholder="Ej: Combo Fuerza"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg)",
+                    color: "var(--text)",
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              {rows.map((row, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "flex-end",
+                    marginBottom: 12,
+                    padding: 12,
+                    background: "var(--bg)",
+                    borderRadius: 8,
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: "block", marginBottom: 4, fontSize: 12, fontWeight: 600 }}>
+                      Categoría
+                    </label>
+                    <select
+                      value={row.categoria}
+                      onChange={(e) => updateRow(i, e.target.value, null)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        borderRadius: 6,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface)",
+                        color: "var(--text)",
+                      }}
+                    >
+                      <option value="">Seleccionar...</option>
+                      {CATEGORIAS.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 2 }}>
+                    <label style={{ display: "block", marginBottom: 4, fontSize: 12, fontWeight: 600 }}>
+                      Producto
+                    </label>
+                    <select
+                      value={row.producto?.nombre ?? ""}
+                      onChange={(e) => {
+                        const p = products.find((p) => p.nombre === e.target.value) ?? null;
+                        updateRow(i, row.categoria, p);
+                      }}
+                      disabled={!row.categoria}
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        borderRadius: 6,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface)",
+                        color: "var(--text)",
+                      }}
+                    >
+                      <option value="">Seleccionar...</option>
+                      {filteredByCat(row.categoria).map((p) => (
+                        <option key={p.nombre} value={p.nombre}>
+                          {p.nombre} — ${p.precio}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeRow(i)}
+                    disabled={rows.length <= 2}
+                    style={{
+                      padding: "8px 14px",
+                      background: "#ff4444",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 6,
+                      cursor: rows.length > 2 ? "pointer" : "not-allowed",
+                      opacity: rows.length > 2 ? 1 : 0.4,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+
+              {rows.length < 5 && (
+                <button
+                  type="button"
+                  onClick={addRow}
+                  style={{
+                    padding: "8px 16px",
+                    background: "transparent",
+                    border: "1px dashed var(--border)",
+                    color: "var(--text)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    marginBottom: 16,
+                    fontSize: 13,
+                  }}
+                >
+                  + Agregar Producto
+                </button>
+              )}
+
+              {/* Resumen automático */}
+              <div
+                style={{
+                  padding: 14,
+                  background: "var(--bg)",
+                  borderRadius: 8,
+                  marginBottom: 16,
+                  fontSize: 13,
+                }}
+              >
+                <p>
+                  Suma costo: <strong>${sumCosto.toFixed(2)}</strong>
+                </p>
+                <p>
+                  Suma público: <strong>${sumPublico.toFixed(2)}</strong>
+                </p>
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600 }}>
+                  Precio de Oferta del Paquete
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={precioOferta}
+                  onChange={(e) => setPrecioOferta(e.target.value)}
+                  placeholder="Ej: 1680.00"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg)",
+                    color: "var(--text)",
+                    fontSize: 14,
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  style={{
+                    padding: "10px 20px",
+                    background: "transparent",
+                    border: "1px solid var(--border)",
+                    color: "var(--text)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: "10px 20px",
+                    background: "var(--accent)",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Guardar Paquete
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### Endpoints equivalentes
+
+| Antes (Flask) | Ahora (Next.js) |
+|---|---|
+| `POST /api/paquetes` | Server Action `createPackage(formData)` |
+| `DELETE /api/paquetes/<id>` | Server Action `deletePackage(id)` |
+| `POST /api/paquetes/<id>/toggle` | Server Action `togglePackage(id, current)` |
+
+### Lógica de negocio clave a preservar
+
+1. **Mínimo 2, máximo 5 productos** por paquete.
+2. **`costo_real`**: Suma de `precio_costo` de cada producto seleccionado (referencia para el admin).
+3. **`precio_lista`**: Suma de `precio` (público) de cada producto.
+4. **`precio_oferta`**: Ingresado manualmente por el admin.
+5. **`activo`**: `true` por defecto. Solo los paquetes activos se muestran en la tienda pública.
+6. Insertar al **principio** de la lista (en Supabase se logra con `.order("fecha", { ascending: false })`).
 
 ---
 
-## 11. Estrategias de Matching de Imágenes Existentes
+## 5. Feature: Generador de Imágenes Promocionales
 
-Según tus necesidades, puedes elegir una o combinar varias:
+### Descripción
+Endpoint que genera imágenes cuadradas (1080×1080) listas para redes sociales, combinando ofertas y paquetes en layouts automáticos, y las empaqueta en un ZIP descargable.
 
-### Estrategia A: Public ID Predecible (Recomendada — Ya implementada arriba)
+### Archivos a crear
 
-- Cada producto tiene un `public_id` fijo basado en su ID: `carpeta/{productId}`
-- Antes de subir, verificar si `carpeta/{productId}` existe en Cloudinary
-- **Pros**: Simple, 100% confiable, sin duplicados posibles
-- **Cons**: Si quieres múltiples imágenes por producto, necesitas un sufijo (ej: `carpeta/{productId}_1`)
+#### `app/api/generar-imagenes/route.ts` — Route Handler
 
-### Estrategia B: Tags en Cloudinary
+```tsx
+// app/api/generar-imagenes/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { generateAllImages } from "@/lib/image-generator";
 
-- Al subir, asignar tags: `cloudinary.uploader.upload(..., { tags: ['producto', productId] })`
-- Buscar por tag: `cloudinary.api.resources_by_tag(productId)`
-- **Pros**: Flexible, permite múltiples imágenes por producto
-- **Cons**: Requiere mantener tags consistentes
+export async function POST(_req: NextRequest) {
+  const supabase = await createClient();
 
-### Estrategia C: Hash/Checksum del archivo (Avanzada)
+  // Auth check (admin)
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-- Calcular un hash MD5/SHA256 del archivo de imagen en el cliente
-- Guardar el hash en BD junto con `image_url`
-- Antes de subir, comparar el hash del archivo nuevo con los hashes en BD
-- **Pros**: Detecta imágenes idénticas incluso con nombres diferentes
-- **Cons**: Más compleja, no detecta imágenes "similares" (solo idénticas)
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
 
-### Estrategia D: Búsqueda por nombre de archivo
+  if (profile?.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-- Usar `cloudinary.api.resources({ prefix: 'carpeta/' })` para listar todo
-- Buscar en la lista por nombre de archivo que coincida con el producto
-- **Pros**: No requiere guardar public_id en BD
-- **Cons**: Más lenta (trae lista completa), menos confiable
+  // Fetch data from Supabase
+  const [{ data: offers }, { data: packages }] = await Promise.all([
+    supabase.from("offers").select("*"),
+    supabase.from("packages").select("*").eq("activo", true),
+  ]);
+
+  const zipBuffer = await generateAllImages({
+    offers: offers ?? [],
+    packages: packages ?? [],
+    baseUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
+  });
+
+  const now = new Date();
+  const month = now.toLocaleString("es-ES", { month: "long" }).toUpperCase();
+  const year = now.getFullYear();
+
+  return new NextResponse(zipBuffer, {
+    headers: {
+      "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="Imagenes_Promo_${month}_${year}.zip"`,
+    },
+  });
+}
+```
+
+#### `lib/image-generator.ts` — Motor de generación (Node.js compatible)
+
+> **IMPORTANTE:** En Node.js (Next.js API Route) se usa `sharp` en lugar de `Pillow`. Sharp es nativo de Node y mucho más rápido.
+
+```bash
+npm install sharp
+npm install -D @types/sharp
+```
+
+```ts
+// lib/image-generator.ts
+import sharp from "sharp";
+import { createCanvas, loadImage, registerFont } from "canvas";
+import fs from "fs/promises";
+import path from "path";
+import { Readable } from "stream";
+import archiver from "archiver"; // npm install archiver @types/archiver
+
+interface Offer {
+  nombre: string;
+  categoria: string;
+  precio_lista: number;
+  precio_oferta: number;
+  imagen: string | null;
+}
+
+interface PackageItem {
+  nombre: string;
+  productos: { nombre: string; imagen: string | null }[];
+  precio_lista: number;
+  precio_oferta: number;
+}
+
+interface GeneratorInput {
+  offers: Offer[];
+  packages: PackageItem[];
+  baseUrl: string;
+}
+
+const CANVAS_SIZE = 1080;
+
+// Descargar imagen a buffer
+async function fetchImageBuffer(url: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+function formatImageUrl(imagen: string | null, baseUrl: string): string {
+  if (!imagen) return "";
+  if (imagen.startsWith("http://") || imagen.startsWith("https://")) return imagen;
+  // Si es relativa tipo static/images/..., armar URL absoluta
+  if (imagen.startsWith("/")) return `${baseUrl}${imagen}`;
+  return `${baseUrl}/${imagen}`;
+}
+
+export async function generateAllImages(input: GeneratorInput): Promise<Buffer> {
+  const { offers, packages, baseUrl } = input;
+  const now = new Date();
+  const month = now.toLocaleString("es-ES", { month: "long" }).toUpperCase();
+  const year = now.getFullYear();
+
+  const zipParts: { name: string; buffer: Buffer }[] = [];
+
+  // ─── Imágenes de Ofertas (8 por imagen, grid 4x2) ───
+  const offerBatchSize = 8;
+  for (let i = 0; i < offers.length; i += offerBatchSize) {
+    const batch = offers.slice(i, i + offerBatchSize);
+    const buffer = await generateOfferImage(batch, month, year, baseUrl, Math.floor(i / offerBatchSize) + 1);
+    zipParts.push({ name: `oferta_${month}_${year}_${String(Math.floor(i / offerBatchSize) + 1).padStart(2, "0")}.jpg`, buffer });
+  }
+
+  // ─── Imágenes de Paquetes (2 por imagen) ───
+  const pkgBatchSize = 2;
+  for (let i = 0; i < packages.length; i += pkgBatchSize) {
+    const batch = packages.slice(i, i + pkgBatchSize);
+    const buffer = await generatePackageImage(batch, month, year, baseUrl, Math.floor(i / pkgBatchSize) + 1);
+    zipParts.push({ name: `paquete_${month}_${year}_${String(Math.floor(i / pkgBatchSize) + 1).padStart(2, "0")}.jpg`, buffer });
+  }
+
+  // ─── Crear ZIP en memoria ───
+  return createZip(zipParts);
+}
+
+// ============================================================
+// GENERAR IMAGEN DE OFERTAS (grid 4x2)
+// ============================================================
+async function generateOfferImage(
+  batch: Offer[],
+  month: string,
+  year: number,
+  baseUrl: string,
+  idx: number
+): Promise<Buffer> {
+  const canvas = createCanvas(CANVAS_SIZE, CANVAS_SIZE);
+  const ctx = canvas.getContext("2d");
+
+  // Fondo oscuro con ruido sutil
+  ctx.fillStyle = "#111111";
+  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+  // Header
+  const headerH = 160;
+  const gradient = ctx.createLinearGradient(0, 0, CANVAS_SIZE, 0);
+  gradient.addColorStop(0, "#cc44ff");
+  gradient.addColorStop(1, "#8800ff");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_SIZE, headerH);
+
+  // Título
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 56px BebasNeue, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(`OFERTAS DEL MES`, CANVAS_SIZE / 2, 70);
+  ctx.font = "32px Inter, Arial, sans-serif";
+  ctx.fillStyle = "#ffd700";
+  ctx.fillText(`${month} ${year}`, CANVAS_SIZE / 2, 115);
+
+  // Grid 4x2
+  const cols = 4;
+  const rows = 2;
+  const cellW = CANVAS_SIZE / cols;
+  const cellH = (CANVAS_SIZE - headerH - 60) / rows; // 60px footer
+  const startY = headerH + 10;
+
+  for (let i = 0; i < batch.length; i++) {
+    const offer = batch[i];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = col * cellW + 8;
+    const y = startY + row * cellH + 8;
+    const w = cellW - 16;
+    const h = cellH - 16;
+
+    // Celda fondo
+    ctx.fillStyle = "#1a1a1a";
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 12);
+    ctx.fill();
+
+    // Descuento badge
+    const descuento = Math.round(((offer.precio_lista - offer.precio_oferta) / offer.precio_lista) * 100);
+    ctx.fillStyle = "#ff4444";
+    ctx.beginPath();
+    ctx.roundRect(x + 6, y + 6, 50, 24, 6);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 12px Inter, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(`-${descuento}%`, x + 31, y + 22);
+
+    // Imagen producto
+    if (offer.imagen) {
+      const imgUrl = formatImageUrl(offer.imagen, baseUrl);
+      const imgBuf = await fetchImageBuffer(imgUrl);
+      if (imgBuf) {
+        try {
+          const img = await loadImage(imgBuf);
+          const imgH = h * 0.45;
+          const aspect = img.width / img.height;
+          const drawW = imgH * aspect;
+          const drawX = x + (w - drawW) / 2;
+          ctx.drawImage(img, drawX, y + 36, drawW, imgH);
+        } catch {
+          // skip
+        }
+      }
+    }
+
+    // Categoría badge
+    ctx.fillStyle = "var(--accent)";
+    ctx.beginPath();
+    ctx.roundRect(x + w - 80, y + 6, 74, 20, 4);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "10px Inter, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(offer.categoria.substring(0, 10), x + w - 43, y + 19);
+
+    // Nombre
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 13px Inter, Arial, sans-serif";
+    ctx.textAlign = "left";
+    const nameY = y + h - 50;
+    wrapText(ctx, offer.nombre, x + 8, nameY, w - 16, 16, 2);
+
+    // Precios
+    ctx.fillStyle = "#888";
+    ctx.font = "12px Inter, Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(`$${offer.precio_lista.toFixed(2)}`, x + 8, y + h - 18);
+    const listW = ctx.measureText(`$${offer.precio_lista.toFixed(2)}`).width;
+
+    ctx.fillStyle = "#ffaa00";
+    ctx.font = "bold 16px Inter, Arial, sans-serif";
+    ctx.fillText(`$${offer.precio_oferta.toFixed(2)}`, x + 12 + listW, y + h - 18);
+  }
+
+  // Footer
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(0, CANVAS_SIZE - 50, CANVAS_SIZE, 50);
+  ctx.fillStyle = "#666";
+  ctx.font = "12px Inter, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(`Válido durante ${month} ${year} | Precios en efectivo o transferencia`, CANVAS_SIZE / 2, CANVAS_SIZE - 22);
+
+  return canvas.toBuffer("image/jpeg", { quality: 0.92 });
+}
+
+// ============================================================
+// GENERAR IMAGEN DE PAQUETES (2 por imagen)
+// ============================================================
+async function generatePackageImage(
+  batch: PackageItem[],
+  month: string,
+  year: number,
+  baseUrl: string,
+  idx: number
+): Promise<Buffer> {
+  const canvas = createCanvas(CANVAS_SIZE, CANVAS_SIZE);
+  const ctx = canvas.getContext("2d");
+
+  // Fondo lila oscuro
+  ctx.fillStyle = "#1a0a2e";
+  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+  // Header
+  const headerH = 160;
+  const gradient = ctx.createLinearGradient(0, 0, CANVAS_SIZE, 0);
+  gradient.addColorStop(0, "#cc44ff");
+  gradient.addColorStop(1, "#6600cc");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, CANVAS_SIZE, headerH);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 56px BebasNeue, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(`PAQUETES EN OFERTA`, CANVAS_SIZE / 2, 80);
+  ctx.font = "28px Inter, Arial, sans-serif";
+  ctx.fillStyle = "#ffd700";
+  ctx.fillText(`${month} ${year}`, CANVAS_SIZE / 2, 125);
+
+  // Tarjetas (máx 2)
+  const cardW = 460;
+  const cardH = 380;
+  const gap = 40;
+  const startY = headerH + 30;
+  const totalWidth = batch.length * cardW + (batch.length - 1) * gap;
+  let startX = (CANVAS_SIZE - totalWidth) / 2;
+
+  for (const pkg of batch) {
+    // Card bg
+    ctx.fillStyle = "#2a1a3e";
+    ctx.beginPath();
+    ctx.roundRect(startX, startY, cardW, cardH, 16);
+    ctx.fill();
+
+    // Badge COMBO EXTRA
+    ctx.fillStyle = "#cc44ff";
+    ctx.beginPath();
+    ctx.roundRect(startX + 12, startY + 12, 100, 26, 6);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 11px Inter, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("COMBO EXTRA", startX + 62, startY + 29);
+
+    // Descuento
+    const descuento = Math.round(((pkg.precio_lista - pkg.precio_oferta) / pkg.precio_lista) * 100);
+    ctx.fillStyle = "#ff4444";
+    ctx.beginPath();
+    ctx.roundRect(startX + cardW - 70, startY + 12, 58, 26, 6);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 12px Inter, Arial, sans-serif";
+    ctx.fillText(`-${descuento}%`, startX + cardW - 41, startY + 29);
+
+    // Nombre paquete
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 22px BebasNeue, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(pkg.nombre.toUpperCase(), startX + cardW / 2, startY + 65);
+
+    // Imágenes de productos en fila
+    const thumbSize = 70;
+    const thumbGap = 8;
+    const totalThumbs = pkg.productos.length;
+    const thumbsWidth = totalThumbs * thumbSize + (totalThumbs - 1) * thumbGap;
+    let thumbX = startX + (cardW - thumbsWidth) / 2;
+    const thumbY = startY + 85;
+
+    for (const prod of pkg.productos) {
+      if (prod.imagen) {
+        const imgUrl = formatImageUrl(prod.imagen, baseUrl);
+        const imgBuf = await fetchImageBuffer(imgUrl);
+        if (imgBuf) {
+          try {
+            const img = await loadImage(imgBuf);
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(thumbX, thumbY, thumbSize, thumbSize, 8);
+            ctx.clip();
+            const aspect = img.width / img.height;
+            const drawW = thumbSize * aspect;
+            const drawX = thumbX + (thumbSize - drawW) / 2;
+            ctx.drawImage(img, drawX, thumbY, drawW, thumbSize);
+            ctx.restore();
+          } catch {
+            // skip
+          }
+        }
+      }
+      thumbX += thumbSize + thumbGap;
+    }
+
+    // Lista nombres
+    ctx.fillStyle = "#ccc";
+    ctx.font = "13px Inter, Arial, sans-serif";
+    ctx.textAlign = "center";
+    const listY = thumbY + thumbSize + 20;
+    pkg.productos.forEach((p, i) => {
+      ctx.fillText(`• ${p.nombre.substring(0, 35)}`, startX + cardW / 2, listY + i * 20);
+    });
+
+    // Precios
+    const priceY = startY + cardH - 30;
+    ctx.fillStyle = "#888";
+    ctx.font = "16px Inter, Arial, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(`$${pkg.precio_lista.toFixed(2)}`, startX + 20, priceY);
+    const listW = ctx.measureText(`$${pkg.precio_lista.toFixed(2)}`).width;
+
+    ctx.fillStyle = "#22c55e";
+    ctx.font = "bold 24px Inter, Arial, sans-serif";
+    ctx.fillText(`$${pkg.precio_oferta.toFixed(2)}`, startX + 28 + listW, priceY);
+
+    const ahorro = pkg.precio_lista - pkg.precio_oferta;
+    ctx.fillStyle = "#22c55e";
+    ctx.font = "bold 12px Inter, Arial, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`¡Ahorras $${ahorro.toFixed(2)}!`, startX + cardW - 20, priceY);
+
+    startX += cardW + gap;
+  }
+
+  // Footer
+  ctx.fillStyle = "#0a0a0a";
+  ctx.fillRect(0, CANVAS_SIZE - 50, CANVAS_SIZE, 50);
+  ctx.fillStyle = "#666";
+  ctx.font = "12px Inter, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(`Válido durante ${month} ${year} | Precios en efectivo o transferencia`, CANVAS_SIZE / 2, CANVAS_SIZE - 22);
+
+  return canvas.toBuffer("image/jpeg", { quality: 0.92 });
+}
+
+// ============================================================
+// UTILIDADES
+// ============================================================
+
+function wrapText(
+  ctx: any,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines: number
+) {
+  const words = text.split(" ");
+  let line = "";
+  let lineCount = 0;
+
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line + words[n] + " ";
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && n > 0) {
+      if (lineCount >= maxLines - 1) {
+        ctx.fillText(line.trim() + "...", x, y + lineCount * lineHeight);
+        return;
+      }
+      ctx.fillText(line.trim(), x, y + lineCount * lineHeight);
+      line = words[n] + " ";
+      lineCount++;
+    } else {
+      line = testLine;
+    }
+  }
+  if (lineCount < maxLines) {
+    ctx.fillText(line.trim(), x, y + lineCount * lineHeight);
+  }
+}
+
+async function createZip(parts: { name: string; buffer: Buffer }[]): Promise<Buffer> {
+  const { default: archiver } = await import("archiver");
+  const { PassThrough } = await import("stream");
+
+  const pass = new PassThrough();
+  const chunks: Buffer[] = [];
+
+  pass.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+  const archive = archiver("zip", { zlib: { level: 6 } });
+  archive.pipe(pass);
+
+  for (const part of parts) {
+    archive.append(part.buffer, { name: part.name });
+  }
+
+  await archive.finalize();
+
+  return new Promise((resolve) => {
+    pass.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+}
+```
+
+> **Nota sobre fuentes:** `canvas` necesita fuentes registradas en el sistema o archivos `.ttf` locales. Copiar `BebasNeue-Regular.ttf` e `Inter-Regular.ttf` a `public/fonts/` y registrarlas:
+>
+> ```ts
+> import { registerFont } from "canvas";
+> import path from "path";
+> registerFont(path.join(process.cwd(), "public/fonts/BebasNeue-Regular.ttf"), { family: "BebasNeue" });
+> registerFont(path.join(process.cwd(), "public/fonts/Inter-Regular.ttf"), { family: "Inter" });
+> ```
+
+#### `app/admin/generador/page.tsx` — Página del generador
+
+```tsx
+"use client";
+
+import { useState, useEffect } from "react";
+
+export default function GeneradorPage() {
+  const [stats, setStats] = useState({ offers: 0, packages: 0 });
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    async function loadStats() {
+      const [r1, r2] = await Promise.all([
+        fetch("/api/ofertas").then((r) => r.json()),
+        fetch("/api/paquetes").then((r) => r.json()),
+      ]);
+      setStats({
+        offers: Array.isArray(r1) ? r1.length : 0,
+        packages: Array.isArray(r2) ? r2.length : 0,
+      });
+    }
+    loadStats();
+  }, []);
+
+  async function handleGenerate() {
+    setLoading(true);
+    setProgress(0);
+
+    // Simular progreso (el backend no hace streaming real)
+    const interval = setInterval(() => {
+      setProgress((p) => {
+        if (p >= 90) { clearInterval(interval); return 90; }
+        return p + Math.random() * 15;
+      });
+    }, 400);
+
+    try {
+      const res = await fetch("/api/generar-imagenes", { method: "POST" });
+      clearInterval(interval);
+      setProgress(100);
+
+      if (!res.ok) throw new Error("Error generando imágenes");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g, "") ?? "imagenes.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Error: " + (err as Error).message);
+    } finally {
+      setLoading(false);
+      setProgress(0);
+    }
+  }
+
+  const imgOfertas = Math.ceil(stats.offers / 8);
+  const imgPaquetes = Math.ceil(stats.packages / 2);
+  const totalImgs = imgOfertas + imgPaquetes;
+
+  return (
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: 40 }}>
+      <h1 style={{ fontSize: 32, fontWeight: 800, marginBottom: 24 }}>
+        🎨 Generador de Imágenes
+      </h1>
+
+      <div
+        style={{
+          background: "var(--surface)",
+          padding: 24,
+          borderRadius: 16,
+          border: "1px solid var(--border)",
+          marginBottom: 24,
+        }}
+      >
+        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Resumen</h2>
+        <div style={{ display: "grid", gap: 8, fontSize: 15 }}>
+          <p>📦 Productos en oferta: <strong>{stats.offers}</strong></p>
+          <p>🎁 Paquetes activos: <strong>{stats.packages}</strong></p>
+          <p>🖼️ Imágenes de ofertas: <strong>{imgOfertas}</strong></p>
+          <p>🖼️ Imágenes de paquetes: <strong>{imgPaquetes}</strong></p>
+          <p style={{ marginTop: 8, fontWeight: 700, color: "var(--accent)" }}>
+            Total imágenes a generar: {totalImgs}
+          </p>
+        </div>
+      </div>
+
+      {loading && (
+        <div style={{ marginBottom: 24 }}>
+          <div
+            style={{
+              height: 8,
+              background: "var(--bg)",
+              borderRadius: 4,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${Math.min(progress, 100)}%`,
+                height: "100%",
+                background: "var(--accent)",
+                transition: "width 0.3s ease",
+              }}
+            />
+          </div>
+          <p style={{ textAlign: "center", marginTop: 8, fontSize: 13, color: "var(--muted)" }}>
+            Generando imágenes... {Math.round(progress)}%
+          </p>
+        </div>
+      )}
+
+      <button
+        onClick={handleGenerate}
+        disabled={loading || totalImgs === 0}
+        style={{
+          width: "100%",
+          padding: "16px 24px",
+          background: loading ? "var(--muted)" : "linear-gradient(135deg, #cc44ff, #8800ff)",
+          color: "#fff",
+          border: "none",
+          borderRadius: 12,
+          fontSize: 18,
+          fontWeight: 700,
+          cursor: loading || totalImgs === 0 ? "not-allowed" : "pointer",
+          opacity: totalImgs === 0 ? 0.5 : 1,
+        }}
+      >
+        {loading ? "Generando..." : "Generar y Descargar ZIP"}
+      </button>
+
+      {totalImgs === 0 && (
+        <p style={{ textAlign: "center", marginTop: 16, color: "var(--muted)", fontSize: 14 }}>
+          No hay ofertas ni paquetes para generar imágenes.
+        </p>
+      )}
+    </div>
+  );
+}
+```
+
+### Endpoints equivalentes
+
+| Antes (Flask) | Ahora (Next.js) |
+|---|---|
+| `POST /api/generar-imagenes` | Route Handler `app/api/generar-imagenes/route.ts` |
+| `GET /generar-imagenes` | `app/admin/generador/page.tsx` (o la ruta que prefieras) |
+| Descarga ZIP | `NextResponse` con `Content-Type: application/zip` |
+
+### Dependencias npm requeridas
+
+```bash
+npm install sharp canvas archiver
+npm install -D @types/sharp @types/canvas @types/archiver
+```
+
+> **Nota sobre `canvas` en Windows:** Puede requerir `windows-build-tools` o `node-gyp`. En Vercel/Node.js Linux funciona nativamente. Si da problemas, considerar usar `sharp` puro para composición sin `canvas`, o usar una API Route en un contenedor Docker.
 
 ---
 
-## 12. Checklist de Deploy a Producción
+## 6. Consideraciones de Migración
 
-- [ ] `npm install` ejecutado (instala `cloudinary`, `@imgly/background-removal`, `string-replace-loader`)
-- [ ] `npm run build` ejecutado (dispara `prebuild` → copia WASM a `public/ort-wasm/`)
-- [ ] Carpeta `public/ort-wasm/` existe y contiene archivos `.wasm` y `.mjs`
-- [ ] Variables `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` están en `.env.local`
-- [ ] **Las mismas 3 variables están en `.env.production` del VPS**
-- [ ] `next.config.ts` tiene las 3 reglas de webpack (alias onnxruntime-node, regla .mjs, string-replace-loader)
-- [ ] Tabla `products` tiene las columnas: `image_url`, `cloudinary_public_id`, `cloudinary_folder`
-- [ ] API routes creadas: `upload`, `check`, `list`
-- [ ] Componente `PhotoManager` adaptado a tu schema de BD
-- [ ] Carpeta en Cloudinary configurada (cambiar `CLOUDINARY_FOLDER` en el componente)
-- [ ] El panel funciona en local: seleccionar producto → verificar existencia → subir/reutilizar
-- [ ] Después del deploy al VPS, reiniciar el proceso (`pm2 restart ...` o equivalente)
-- [ ] Probar flujo completo en producción: subir nueva imagen, luego reutilizar la misma
+### De JSON a Supabase
+
+| Aspecto | Antes (JSON) | Ahora (Supabase) |
+|---|---|---|
+| IDs | `time.time() * 1000` | `bigint generated always as identity` |
+| Fechas | `new Date().toISOString()` | `timestamptz default now()` |
+| Arrays en paquetes | `productos: [...]` | `jsonb` column |
+| Lectura | `json.load(open(...))` | `supabase.from("...").select("*")` |
+| Escritura | `json.dump(...)` | `supabase.from("...").insert/update/delete` |
+
+### De Flask a Next.js
+
+| Aspecto | Antes (Flask) | Ahora (Next.js 16) |
+|---|---|---|
+| Backend | Python Flask | Server Components + Server Actions |
+| API REST | `@app.route(...)` | Route Handlers `app/api/.../route.ts` |
+| Form submissions | `request.form` / `request.json` | Server Actions con `FormData` |
+| Revalidación | N/A (siempre lee archivo) | `revalidatePath()` + ISR |
+| Auth | Password hardcodeado | Supabase Auth + RLS / JWT claims |
+
+### De Vanilla JS a React + Next.js
+
+| Aspecto | Antes | Ahora |
+|---|---|---|
+| Estado | Variables globales | `useState`, `useMemo` |
+| DOM | `document.getElementById` | JSX + refs |
+| Eventos | `onclick="..."` | `onClick={...}` handlers |
+| Rendering | Template strings HTML | JSX components |
+| Modales | CSS manual + JS | Componente con `position: fixed` inline |
+
+### Sincronización con Inventario
+
+Implementar un trigger o una función que se ejecute cuando se actualice un producto:
+
+```sql
+-- Opción A: Trigger en PostgreSQL
+CREATE OR REPLACE FUNCTION sync_offers_on_product_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE offers
+  SET precio_lista = NEW.precio,
+      imagen = NEW.imagen
+  WHERE nombre_original = NEW.nombre;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_sync_offers
+AFTER UPDATE ON products
+FOR EACH ROW
+EXECUTE FUNCTION sync_offers_on_product_update();
+```
+
+```ts
+// Opción B: Server Action que actualiza todo al subir Excel
+export async function syncOffersWithInventory() {
+  const supabase = await createClient();
+  const { data: products } = await supabase.from("products").select("nombre, precio, imagen");
+  const { data: offers } = await supabase.from("offers").select("id, nombre_original");
+
+  for (const offer of offers ?? []) {
+    const prod = products?.find((p) => p.nombre === offer.nombre_original);
+    if (prod) {
+      await supabase
+        .from("offers")
+        .update({ precio_lista: prod.precio, imagen: prod.imagen })
+        .eq("id", offer.id);
+    }
+  }
+}
+```
+
+### Variables de entorno necesarias
+
+```bash
+# .env.local
+NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+NEXT_PUBLIC_SITE_URL=https://tudominio.com
+```
 
 ---
 
-## 13. Resumen de Problemas y Fixes
+## Checklist de Implementación
 
-| # | Problema | Causa | Fix |
-|---|----------|-------|-----|
-| 1 | Error 500 al subir imágenes en producción | Variables de Cloudinary no estaban en `.env.production` del VPS | Agregarlas manualmente + reiniciar |
-| 2 | Transformación de Cloudinary fallaba | `crop: 'pad'` + `background: 'auto'` requiere plan pago; `fetch_format` es parámetro incorrecto del SDK | Usar `crop: 'fill'` + `format: 'webp'` |
-| 3 | Error silencioso, no se sabía qué fallaba | El route retornaba error genérico | Route retorna `error.message`; PhotoManager lo muestra en UI |
-| 4 | `TypeError: e.replace is not a function` en producción | `import.meta.url` en `onnxruntime-web` no funciona con Webpack | `string-replace-loader` reemplaza `import.meta.url` |
-| 5 | onnxruntime-node intentaba cargarse en el cliente | Webpack bundlea la versión Node de ONNX | Alias `"onnxruntime-node": false` en webpack |
-| 6 | Archivos WASM no encontrados en producción | No se copiaron los `.wasm` a `public/` | Script `copy-wasm.js` en `predev` y `prebuild` |
-| 7 | Build roto por `@imgly/background-removal` en SSR | El paquete inicializa ONNX al importarse | Import dinámico `await import(...)` dentro de función, nunca top-level |
-| 8 | Imágenes duplicadas en Cloudinary | Se subía sin verificar si ya existía | Usar `public_id` predecible + `overwrite: false` + endpoint `/api/cloudinary/check` |
-
----
-
-## Notas Finales para la IA Implementadora
-
-1. **Este documento asume Next.js + Supabase** — adaptar el cliente de BD y las consultas SQL si usas PostgreSQL directo, Prisma, Drizzle, etc.
-2. **La carpeta de Cloudinary es configurable** — cambia `CLOUDINARY_FOLDER` en el componente y en las API routes según tu convención de nombres.
-3. **El sistema de reutilización es opcional pero recomendado** — si no lo necesitas, puedes omitir el endpoint `/api/cloudinary/check` y el paso de verificación en `PhotoManager`, pero perderás la capacidad de detectar duplicados.
-4. **Las imágenes resultantes son 600×600px, WebP, calidad 80**, con fondo removido por IA. Ajusta las transformaciones en `upload` según tus necesidades.
-5. **NO usar `@supabase/ssr`** en este contexto — usar `@supabase/supabase-js` directo.
-6. **El `public_id` predecible es la clave** — gracias a él, el sistema puede reconstruir la referencia a Cloudinary sin depender exclusivamente de la base de datos.
+- [ ] Crear tablas `offers`, `packages`, `products` en Supabase
+- [ ] Configurar RLS policies
+- [ ] Implementar página pública `/ofertas`
+- [ ] Implementar admin `/admin/ofertas` (CRUD)
+- [ ] Implementar admin `/admin/paquetes` (CRUD + toggle activo)
+- [ ] Implementar Route Handler `/api/generar-imagenes`
+- [ ] Implementar página `/admin/generador`
+- [ ] Copiar fuentes a `public/fonts/`
+- [ ] Instalar dependencias: `sharp`, `canvas`, `archiver`
+- [ ] Configurar variables CSS en `globals.css`
+- [ ] Implementar sincronización ofertas ↔ inventario
+- [ ] Probar flujo completo end-to-end

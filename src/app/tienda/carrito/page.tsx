@@ -16,6 +16,17 @@ function buildWhatsAppMessage(
   items: StoreCartItem[],
   total: number,
 ): string {
+  const normalItems = items.filter(i => !i.packageId)
+  const packageGroups = new Map<number, StoreCartItem[]>()
+  for (const item of items) {
+    if (item.packageId) {
+      if (!packageGroups.has(item.packageId)) {
+        packageGroups.set(item.packageId, [])
+      }
+      packageGroups.get(item.packageId)!.push(item)
+    }
+  }
+
   const lines: string[] = [
     'Hola! Quiero confirmar mi pedido:',
     '',
@@ -23,12 +34,26 @@ function buildWhatsAppMessage(
     `Tel: ${phone}`,
     '',
     'Artículos:',
-    ...items.map(i =>
-      `• ${i.quantity}x ${i.productName}${i.flavor ? ` (${i.flavor})` : ''} — $${(i.price * i.quantity).toFixed(2)}`
-    ),
-    '',
-    `Total: $${total.toFixed(2)} MXN`,
   ]
+
+  for (const item of normalItems) {
+    const suffix = item.offerId ? ' (Oferta del mes)' : ''
+    lines.push(`• ${item.quantity}x ${item.productName}${item.flavor ? ` (${item.flavor})` : ''}${suffix} — $${(item.price * item.quantity).toFixed(2)}`)
+  }
+
+  for (const [, pkgItems] of packageGroups) {
+    const pkgName = pkgItems[0].packageName ?? 'Paquete'
+    lines.push('', `📦 ${pkgName}:`)
+    let pkgTotal = 0
+    for (const item of pkgItems) {
+      pkgTotal += item.price * item.quantity
+      lines.push(`  • ${item.quantity}x ${item.productName}${item.flavor ? ` (${item.flavor})` : ''}`)
+    }
+    lines.push(`  Subtotal paquete: $${pkgTotal.toFixed(2)}`)
+  }
+
+  lines.push('', `Total: $${total.toFixed(2)} MXN`)
+
   if (notes.trim()) {
     lines.push('', `Notas: ${notes.trim()}`)
   }
@@ -177,51 +202,165 @@ export default function CarritoPage() {
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {items.map(item => (
-            <div key={item.variantId} style={{
-              display: 'flex', gap: '16px', padding: '16px',
-              background: '#111111', border: '1px solid #1A1A1A',
-              borderRadius: '12px', alignItems: 'center',
-            }}>
-              <div style={{
-                width: '56px', height: '56px', background: '#1A1A1A',
-                borderRadius: '8px', flexShrink: 0, overflow: 'hidden',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.productName}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
+          {(() => {
+            const normalItems = items.filter(i => !i.packageId)
+            const packageGroups = new Map<number, StoreCartItem[]>()
+            for (const item of items) {
+              if (item.packageId) {
+                if (!packageGroups.has(item.packageId)) {
+                  packageGroups.set(item.packageId, [])
+                }
+                packageGroups.get(item.packageId)!.push(item)
+              }
+            }
+
+            const elements: React.ReactNode[] = []
+
+            // Items normales
+            for (const item of normalItems) {
+              elements.push(
+                <div key={item.variantId} style={{
+                  display: 'flex', gap: '16px', padding: '16px',
+                  background: '#111111', border: '1px solid #1A1A1A',
+                  borderRadius: '12px', alignItems: 'center',
+                }}>
+                  <div style={{
+                    width: '56px', height: '56px', background: '#1A1A1A',
+                    borderRadius: '8px', flexShrink: 0, overflow: 'hidden',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.productName}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <span style={{
+                        fontFamily: 'var(--font-syne, system-ui)',
+                        fontWeight: 800, fontSize: '22px', color: '#2A2A2A',
+                      }}>
+                        {item.productName.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                      {item.offerId && (
+                        <span style={{
+                          fontSize: '9px', fontWeight: 800,
+                          background: 'rgba(220,38,38,0.15)', color: '#ff5050',
+                          padding: '2px 8px', borderRadius: 10,
+                          textTransform: 'uppercase', letterSpacing: '0.08em',
+                        }}>Oferta</span>
+                      )}
+                    </div>
+                    <p style={{
+                      margin: 0, fontSize: '14px', color: '#FFFFFF', fontWeight: 600,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {item.productName}
+                    </p>
+                    {item.flavor && (
+                      <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#555555' }}>{item.flavor}</p>
+                    )}
+                    <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#666666' }}>
+                      {item.quantity} × ${item.price.toFixed(2)}
+                      {item.originalPrice && item.originalPrice !== item.price && (
+                        <span style={{ textDecoration: 'line-through', marginLeft: '6px', color: 'rgba(255,255,255,0.25)' }}>
+                          ${item.originalPrice.toFixed(2)}
+                        </span>
+                      )}
+                    </p>
+                  </div>
                   <span style={{
                     fontFamily: 'var(--font-syne, system-ui)',
-                    fontWeight: 800, fontSize: '22px', color: '#2A2A2A',
+                    fontWeight: 700, fontSize: '16px', color: '#F0B429', flexShrink: 0,
                   }}>
-                    {item.productName.charAt(0).toUpperCase()}
+                    ${(item.price * item.quantity).toFixed(2)}
                   </span>
-                )}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{
-                  margin: 0, fontSize: '14px', color: '#FFFFFF', fontWeight: 600,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                </div>
+              )
+            }
+
+            // Paquetes
+            for (const [pkgId, pkgItems] of packageGroups) {
+              const pkgName = pkgItems[0].packageName ?? 'Paquete'
+              const pkgTotal = pkgItems.reduce((s, i) => s + i.price * i.quantity, 0)
+              elements.push(
+                <div key={`pkg-${pkgId}`} style={{
+                  background: 'rgba(251,191,36,0.04)',
+                  border: '1px solid rgba(251,191,36,0.18)',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  display: 'flex', flexDirection: 'column', gap: '10px',
                 }}>
-                  {item.productName}
-                </p>
-                {item.flavor && (
-                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#555555' }}>{item.flavor}</p>
-                )}
-                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#666666' }}>
-                  {item.quantity} × ${item.price.toFixed(2)}
-                </p>
-              </div>
-              <span style={{
-                fontFamily: 'var(--font-syne, system-ui)',
-                fontWeight: 700, fontSize: '16px', color: '#F0B429', flexShrink: 0,
-              }}>
-                ${(item.price * item.quantity).toFixed(2)}
-              </span>
-            </div>
-          ))}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    paddingBottom: '10px',
+                    borderBottom: '1px solid rgba(251,191,36,0.12)',
+                  }}>
+                    <span style={{ fontSize: '14px' }}>📦</span>
+                    <span style={{
+                      fontSize: '13px', fontWeight: 700, color: '#fbbf24',
+                      textTransform: 'uppercase', letterSpacing: '0.08em',
+                    }}>
+                      {pkgName}
+                    </span>
+                  </div>
+                  {pkgItems.map(item => (
+                    <div key={item.variantId} style={{
+                      display: 'flex', gap: '12px', alignItems: 'center',
+                      padding: '8px 10px',
+                      background: '#0D0D0D',
+                      borderRadius: '8px',
+                    }}>
+                      <div style={{
+                        width: '40px', height: '40px', background: '#1A1A1A',
+                        borderRadius: '6px', flexShrink: 0, overflow: 'hidden',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {item.imageUrl ? (
+                          <img src={item.imageUrl} alt={item.productName}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <span style={{ fontWeight: 800, fontSize: '16px', color: '#2A2A2A' }}>
+                            {item.productName.charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{
+                          margin: 0, fontSize: '13px', color: '#CCCCCC', fontWeight: 600,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}>
+                          {item.productName}
+                        </p>
+                        {item.flavor && (
+                          <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#555555' }}>{item.flavor}</p>
+                        )}
+                      </div>
+                      <span style={{
+                        fontFamily: 'var(--font-syne, system-ui)',
+                        fontWeight: 700, fontSize: '14px', color: '#F0B429', flexShrink: 0,
+                      }}>
+                        ${(item.price * item.quantity).toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{
+                    display: 'flex', justifyContent: 'flex-end',
+                    paddingTop: '4px',
+                  }}>
+                    <span style={{
+                      fontSize: '12px', color: '#fbbf24', fontWeight: 700,
+                    }}>
+                      Subtotal paquete: ${pkgTotal.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )
+            }
+
+            return elements
+          })()}
         </div>
 
         {/* Total + botón principal */}
@@ -446,6 +585,8 @@ export default function CarritoPage() {
               background: 'rgba(255,102,102,0.07)',
               border: '1px solid rgba(255,102,102,0.15)',
               borderRadius: '10px',
+              whiteSpace: 'pre-line',
+              lineHeight: 1.6,
             }}>
               {error}
             </p>

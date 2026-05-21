@@ -6,6 +6,17 @@ import CartItem from './CartItem'
 export default function CartDrawer() {
   const { items, total, itemCount, isOpen, closeCart } = useStoreCart()
 
+  // Agrupar items para detectar el primero de cada paquete
+  const seenPackages = new Set<number>()
+  const itemMeta = items.map(item => {
+    if (item.packageId) {
+      const isFirst = !seenPackages.has(item.packageId)
+      if (isFirst) seenPackages.add(item.packageId)
+      return { isFirstInPackage: isFirst }
+    }
+    return { isFirstInPackage: false }
+  })
+
   return (
     <>
       {/* Backdrop */}
@@ -86,7 +97,13 @@ export default function CartDrawer() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {items.map(item => <CartItem key={item.variantId} item={item} />)}
+              {items.map((item, i) => (
+                <CartItem
+                  key={item.variantId + (item.packageId ?? '')}
+                  item={item}
+                  isFirstInPackage={itemMeta[i]?.isFirstInPackage ?? false}
+                />
+              ))}
             </div>
           )}
         </div>

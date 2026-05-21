@@ -10,6 +10,12 @@ export interface StoreCartItem {
   price: number
   quantity: number
   imageUrl: string | null
+  // Ofertas del mes
+  offerId?: number
+  // Paquetes
+  packageId?: number
+  packageName?: string
+  originalPrice?: number   // precio normal del producto (para mostrar tachado)
 }
 
 interface StoreCartContextType {
@@ -20,6 +26,7 @@ interface StoreCartContextType {
   openCart: () => void
   closeCart: () => void
   addItem: (item: Omit<StoreCartItem, 'quantity'>) => void
+  addPackageItems: (items: Omit<StoreCartItem, 'quantity'>[], packageId: number, packageName: string, packagePrice: number) => void
   removeItem: (variantId: string) => void
   updateQuantity: (variantId: string, quantity: number) => void
   clearCart: () => void
@@ -49,10 +56,10 @@ export function StoreCartProvider({ children }: { children: React.ReactNode }) {
 
   const addItem = useCallback((newItem: Omit<StoreCartItem, 'quantity'>) => {
     setItems(prev => {
-      const existing = prev.find(i => i.variantId === newItem.variantId)
-      if (existing) {
+      const existing = prev.find(i => i.variantId === newItem.variantId && !i.packageId)
+      if (existing && !newItem.packageId) {
         return prev.map(i =>
-          i.variantId === newItem.variantId ? { ...i, quantity: i.quantity + 1 } : i
+          i.variantId === newItem.variantId && !i.packageId ? { ...i, quantity: i.quantity + 1 } : i
         )
       }
       return [...prev, { ...newItem, quantity: 1 }]
@@ -60,16 +67,69 @@ export function StoreCartProvider({ children }: { children: React.ReactNode }) {
     setIsOpen(true)
   }, [])
 
+  const addPackageItems = useCallback((
+    packageItems: Omit<StoreCartItem, 'quantity'>[],
+    packageId: number,
+    packageName: string,
+    packagePrice: number,
+  ) => {
+    setItems(prev => {
+      // Eliminar items previos del mismo paquete si existen
+      const cleaned = prev.filter(i => i.packageId !== packageId)
+
+      // Calcular precios proporcionales
+      const totalNormal = packageItems.reduce((sum, it) => sum + (it.originalPrice ?? it.price), 0)
+      let remaining = packagePrice
+
+      const pricedItems = packageItems.map((it, idx) => {
+        const normalPrice = it.originalPrice ?? it.price
+        let proportionalPrice: number
+        if (idx === packageItems.length - 1) {
+          // Último item absorbe el redondeo
+          proportionalPrice = Math.max(0, remaining)
+        } else {
+          proportionalPrice = totalNormal > 0
+            ? Math.round((normalPrice / totalNormal) * packagePrice * 100) / 100
+            : 0
+          remaining -= proportionalPrice
+        }
+        return {
+          ...it,
+          quantity: 1,
+          price: proportionalPrice,
+          packageId,
+          packageName,
+        }
+      })
+
+      return [...cleaned, ...pricedItems]
+    })
+    setIsOpen(true)
+  }, [])
+
   const removeItem = useCallback((variantId: string) => {
-    setItems(prev => prev.filter(i => i.variantId !== variantId))
+    setItems(prev => {
+      const target = prev.find(i => i.variantId === variantId)
+      // Si es parte de un paquete, eliminar todo el paquete
+      if (target?.packageId) {
+        return prev.filter(i => i.packageId !== target.packageId)
+      }
+      return prev.filter(i => i.variantId !== variantId)
+    })
   }, [])
 
   const updateQuantity = useCallback((variantId: string, quantity: number) => {
-    if (quantity <= 0) {
-      setItems(prev => prev.filter(i => i.variantId !== variantId))
-    } else {
-      setItems(prev => prev.map(i => i.variantId === variantId ? { ...i, quantity } : i))
-    }
+    setItems(prev => {
+      const target = prev.find(i => i.variantId === variantId)
+      // No permitir cambiar cantidad individual de items en paquete
+      if (target?.packageId) {
+        return prev
+      }
+      if (quantity <= 0) {
+        return prev.filter(i => i.variantId !== variantId)
+      }
+      return prev.map(i => i.variantId === variantId ? { ...i, quantity } : i)
+    })
   }, [])
 
   const clearCart = useCallback(() => setItems([]), [])
@@ -82,7 +142,7 @@ export function StoreCartProvider({ children }: { children: React.ReactNode }) {
       items, itemCount, total, isOpen,
       openCart: () => setIsOpen(true),
       closeCart: () => setIsOpen(false),
-      addItem, removeItem, updateQuantity, clearCart,
+      addItem, addPackageItems, removeItem, updateQuantity, clearCart,
     }}>
       {children}
     </StoreCartContext.Provider>

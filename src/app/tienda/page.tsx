@@ -1,8 +1,11 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import type { StoreProduct, Offer, Package } from '@/types'
 import ProductGrid from '@/components/tienda/ProductGrid'
+import { ProductGridSkeleton } from '@/components/tienda/ProductSkeleton'
+import StoreSearch from '@/components/tienda/StoreSearch'
 
 const LOGO_URL = 'https://res.cloudinary.com/dflnist9g/image/upload/v1776893327/303479618_567324658514485_3402746677447074430_n_dujqec.jpg'
 
@@ -448,14 +451,17 @@ function fmtMXN(n: number) {
 }
 
 function OfertaCard({ offer }: { offer: Offer }) {
+  const router = useRouter()
   const pct   = offer.precio_lista > 0 ? Math.round(((offer.precio_lista - offer.precio_oferta) / offer.precio_lista) * 100) : 0
   const ahorro = offer.precio_lista - offer.precio_oferta
   return (
-    <div style={{ background: '#111', borderRadius: 16, overflow: 'hidden', position: 'relative',
-      border: '1px solid rgba(255,255,255,0.07)', transition: 'transform 0.2s, box-shadow 0.2s' }}
+    <div
+      onClick={() => router.push(`/tienda/ofertas/${offer.id}`)}
+      style={{ background: '#111', borderRadius: 16, overflow: 'hidden', position: 'relative',
+        border: '1px solid rgba(255,255,255,0.07)', transition: 'transform 0.2s, box-shadow 0.2s', cursor: 'pointer' }}
       onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 12px 32px rgba(0,0,0,0.5)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none' }}>
-
+      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none' }}
+    >
       {/* Badge descuento */}
       <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 2,
         background: '#dc2626', color: '#fff', fontSize: 12, fontWeight: 800,
@@ -576,14 +582,17 @@ function OfertasSection({ offers, loading }: { offers: Offer[]; loading: boolean
 // ── Paquetes ─────────────────────────────────────────────────────────────────
 
 function PaqueteCard({ pkg }: { pkg: Package }) {
+  const router = useRouter()
   const pct    = pkg.precio_lista > 0 ? Math.round(((pkg.precio_lista - pkg.precio_oferta) / pkg.precio_lista) * 100) : 0
   const ahorro = pkg.precio_lista - pkg.precio_oferta
   return (
-    <div style={{ background: '#111', borderRadius: 16, padding: '20px 22px', position: 'relative',
-      border: '1px solid rgba(255,200,0,0.15)', transition: 'transform 0.2s, box-shadow 0.2s' }}
+    <div
+      onClick={() => router.push(`/tienda/paquetes/${pkg.id}`)}
+      style={{ background: '#111', borderRadius: 16, padding: '20px 22px', position: 'relative',
+        border: '1px solid rgba(255,200,0,0.15)', transition: 'transform 0.2s, box-shadow 0.2s', cursor: 'pointer' }}
       onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-3px)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 12px 32px rgba(0,0,0,0.5), 0 0 24px rgba(255,190,0,0.08)' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none' }}>
-
+      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'none'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none' }}
+    >
       {/* Badges */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
         <span style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.35)',
@@ -745,11 +754,16 @@ export default function TiendaPage() {
               color: '#F0B429', letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px' }}>
               Productos
             </p>
-            <h2 style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
-              fontSize: 'clamp(32px, 5vw, 56px)', color: '#FFFFFF', margin: 0,
-              lineHeight: 1, letterSpacing: '-2px' }}>
-              CATÁLOGO
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '24px', flexWrap: 'wrap', marginBottom: '32px' }}>
+              <h2 style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+                fontSize: 'clamp(32px, 5vw, 56px)', color: '#FFFFFF', margin: 0,
+                lineHeight: 1, letterSpacing: '-2px' }}>
+                CATÁLOGO
+              </h2>
+              {!productsLoading && !productsError && products.length > 0 && (
+                <StoreSearch products={products} />
+              )}
+            </div>
           </div>
         )}
 
@@ -764,12 +778,7 @@ export default function TiendaPage() {
           <div style={{ flex: 1, minWidth: 0 }}>
             {view === 'catalogo' && (
               productsLoading ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: '100px 0' }}>
-                  <div style={{ width: '28px', height: '28px', borderRadius: '50%',
-                    border: '2px solid #1A1A1A', borderTopColor: '#F0B429',
-                    animation: 'spin 0.7s linear infinite' }} />
-                  <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-                </div>
+                <ProductGridSkeleton count={8} />
               ) : productsError ? (
                 <div style={{ padding: '80px 0', color: '#FF6B6B' }}>
                   <p style={{ margin: 0 }}>Error: {productsError}</p>

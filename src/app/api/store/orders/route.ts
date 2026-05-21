@@ -58,6 +58,52 @@ export async function POST(request: Request) {
     { auth: { persistSession: false, autoRefreshToken: false } }
   )
 
+  // ── Validar stock disponible antes de crear la orden ──
+  const variantIds = items.map(i => i.variantId)
+  const { data: variants, error: variantsError } = await supabase
+    .from('product_variants')
+    .select('id, flavor, stock, product:products(name)')
+    .in('id', variantIds)
+
+  if (variantsError) {
+    return NextResponse.json({ error: 'Error al verificar stock: ' + variantsError.message }, { status: 500 })
+  }
+
+  const stockMap = new Map(variants?.map(v => [v.id, v]) ?? [])
+  const outOfStock: { name: string; flavor: string | null; requested: number; available: number }[] = []
+
+  for (const item of items) {
+    const variant = stockMap.get(item.variantId)
+    if (!variant) {
+      outOfStock.push({
+        name: item.productName,
+        flavor: item.flavor,
+        requested: item.quantity,
+        available: 0,
+      })
+      continue
+    }
+    if ((variant.stock ?? 0) < item.quantity) {
+      outOfStock.push({
+        name: (variant.product as { name: string })?.name ?? item.productName,
+        flavor: variant.flavor,
+        requested: item.quantity,
+        available: variant.stock ?? 0,
+      })
+    }
+  }
+
+  if (outOfStock.length > 0) {
+    const details = outOfStock.map(o =>
+      `• ${o.name}${o.flavor ? ` (${o.flavor})` : ''}: solicitado ${o.requested}, disponible ${o.available}`
+    ).join('\n')
+    return NextResponse.json(
+      { error: 'Algunos productos no tienen stock suficiente:\n' + details, outOfStock },
+      { status: 409 }
+    )
+  }
+
+  // ── Crear orden ──
   const { data: order, error: orderError } = await supabase
     .from('store_orders')
     .insert({ customer_name, customer_phone, notes: notes || null, total, status: 'pending', customer_id: customer_id || null })

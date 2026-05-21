@@ -8,10 +8,23 @@ interface Props {
   variants: StoreVariant[]
   productId: string
   productName: string
-  fallbackImageUrl?: string | null
+  offerPrice: number
+  originalPrice: number
+  offerId: number
+  hasRealVariants: boolean
+  fallbackImageUrl: string | null
 }
 
-export default function FlavorSelector({ variants, productId, productName, fallbackImageUrl }: Props) {
+export default function OfferFlavorSelector({
+  variants,
+  productId,
+  productName,
+  offerPrice,
+  originalPrice,
+  offerId,
+  hasRealVariants,
+  fallbackImageUrl,
+}: Props) {
   const [selected, setSelected] = useState<StoreVariant>(variants[0])
   const [added, setAdded] = useState(false)
   const { addItem } = useStoreCart()
@@ -23,8 +36,10 @@ export default function FlavorSelector({ variants, productId, productName, fallb
       productId,
       productName,
       flavor: selected.flavor,
-      price: selected.sale_price,
+      price: offerPrice,
       imageUrl: selected.image_url ?? fallbackImageUrl,
+      offerId,
+      originalPrice,
     })
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)
@@ -32,7 +47,7 @@ export default function FlavorSelector({ variants, productId, productName, fallb
 
   return (
     <div>
-      {hasFlavors && (
+      {hasFlavors && hasRealVariants && (
         <div style={{ marginBottom: '24px' }}>
           <p style={{
             fontSize: '11px', color: '#555555',
@@ -60,32 +75,37 @@ export default function FlavorSelector({ variants, productId, productName, fallb
         </div>
       )}
 
-      <div style={{ marginBottom: '16px' }}>
+      <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
         <span style={{
           fontFamily: 'var(--font-syne, system-ui)',
-          fontWeight: 700, fontSize: '36px', color: '#F0B429',
+          fontWeight: 700, fontSize: '36px', color: '#ff4040',
         }}>
-          ${selected.sale_price.toFixed(2)}
+          ${offerPrice.toFixed(2)}
         </span>
-        <span style={{ fontSize: '13px', color: '#444444', marginLeft: '8px' }}>MXN</span>
+        <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.35)', textDecoration: 'line-through' }}>
+          ${originalPrice.toFixed(2)}
+        </span>
+        <span style={{ fontSize: '13px', color: '#444444' }}>MXN</span>
       </div>
 
-      <div style={{ marginBottom: '32px' }}>
-        {selected.stock > 10 ? (
-          <span style={{ fontSize: '13px', color: '#4CAF50' }}>● En stock</span>
-        ) : (
-          <span style={{ fontSize: '13px', color: '#F0B429' }}>● Últimas {selected.stock} unidades</span>
-        )}
-      </div>
+      {hasRealVariants && (
+        <div style={{ marginBottom: '32px' }}>
+          {selected.stock > 10 ? (
+            <span style={{ fontSize: '13px', color: '#4CAF50' }}>● En stock</span>
+          ) : (
+            <span style={{ fontSize: '13px', color: '#F0B429' }}>● Últimas {selected.stock} unidades</span>
+          )}
+        </div>
+      )}
 
       <button
         onClick={handleAddToCart}
         style={{
           width: '100%', padding: '16px',
-          background: added ? '#1A3A1A' : '#F0B429',
+          background: added ? '#1A3A1A' : '#ff4040',
           border: added ? '1px solid #2D5A2D' : 'none',
           borderRadius: '10px',
-          color: added ? '#4CAF50' : '#000000',
+          color: added ? '#4CAF50' : '#FFFFFF',
           fontSize: '15px', fontWeight: 700,
           fontFamily: 'var(--font-syne, system-ui)',
           cursor: 'pointer', transition: 'all 0.2s',

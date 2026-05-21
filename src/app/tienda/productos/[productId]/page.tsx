@@ -3,9 +3,63 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import FlavorSelector from '@/components/tienda/FlavorSelector'
 import type { StoreVariant } from '@/types'
+import type { Metadata } from 'next'
 
 interface Props {
   params: Promise<{ productId: string }>
+}
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://chocholand.com'
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { productId } = await params
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  )
+
+  const { data: product } = await supabase
+    .from('products')
+    .select('id, name, category, image_url, store_description')
+    .eq('id', productId)
+    .eq('store_visible', true)
+    .single()
+
+  if (!product) {
+    return {
+      title: 'Producto no encontrado — Chocholand',
+    }
+  }
+
+  const imageUrl = product.image_url ?? null
+  const description = product.store_description ?? `Compra ${product.name} en Chocholand. Suplementos y nutrición deportiva de calidad.`
+
+  return {
+    title: `${product.name} — Chocholand`,
+    description,
+    openGraph: {
+      title: `${product.name} — Chocholand`,
+      description,
+      url: `${SITE_URL}/tienda/productos/${product.id}`,
+      siteName: 'Chocholand',
+      locale: 'es_MX',
+      type: 'article',
+      images: imageUrl
+        ? [{ url: imageUrl, alt: product.name }]
+        : undefined,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: `${product.name} — Chocholand`,
+      description,
+      images: imageUrl ? [imageUrl] : undefined,
+    },
+    alternates: {
+      canonical: `${SITE_URL}/tienda/productos/${product.id}`,
+    },
+  }
 }
 
 export default async function ProductoPage({ params }: Props) {
@@ -125,6 +179,7 @@ export default async function ProductoPage({ params }: Props) {
             variants={variants}
             productId={product.id}
             productName={product.name}
+            fallbackImageUrl={imageUrl}
           />
         </div>
       </div>
