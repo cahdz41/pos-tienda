@@ -444,6 +444,94 @@ function Sidebar({ selected, onSelect, view, onViewChange }: {
   )
 }
 
+// ── Skeletons shimmer ─────────────────────────────────────────────────────────
+
+const SHIMMER_CSS = `
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+`
+
+function ShimmerBlock({ width = '100%', height }: { width?: string; height: number }) {
+  return (
+    <div style={{ width, height, borderRadius: 6, background: '#1A1A1A', position: 'relative', overflow: 'hidden' }}>
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'linear-gradient(90deg, #1A1A1A 25%, #252525 50%, #1A1A1A 75%)',
+        backgroundSize: '200% 100%',
+        animation: 'shimmer 1.5s infinite',
+      }} />
+    </div>
+  )
+}
+
+function OfertaCardSkeleton() {
+  return (
+    <div style={{ background: '#111', borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.07)' }}>
+      <div style={{ height: 190, background: '#0a0a0a', position: 'relative', overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(90deg, #0a0a0a 25%, #141414 50%, #0a0a0a 75%)',
+          backgroundSize: '200% 100%',
+          animation: 'shimmer 1.5s infinite',
+        }} />
+      </div>
+      <div style={{ padding: '14px 16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <ShimmerBlock width="40%" height={10} />
+        <ShimmerBlock width="85%" height={14} />
+        <ShimmerBlock width="55%" height={14} />
+        <ShimmerBlock width="35%" height={22} />
+      </div>
+    </div>
+  )
+}
+
+function OfertasGridSkeleton() {
+  return (
+    <>
+      <style>{SHIMMER_CSS}</style>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>
+        {Array.from({ length: 6 }).map((_, i) => <OfertaCardSkeleton key={i} />)}
+      </div>
+    </>
+  )
+}
+
+function PaqueteCardSkeleton() {
+  return (
+    <div style={{ background: '#111', borderRadius: 16, padding: '20px 22px', border: '1px solid rgba(255,200,0,0.08)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <ShimmerBlock width="100px" height={22} />
+        <ShimmerBlock width="50px" height={22} />
+      </div>
+      <ShimmerBlock width="75%" height={22} />
+      {[0, 1, 2].map(i => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 6, background: '#1A1A1A', flexShrink: 0, position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, #1A1A1A 25%, #252525 50%, #1A1A1A 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
+          </div>
+          <ShimmerBlock width="70%" height={12} />
+        </div>
+      ))}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: 14 }}>
+        <ShimmerBlock width="50%" height={28} />
+      </div>
+    </div>
+  )
+}
+
+function PaquetesGridSkeleton() {
+  return (
+    <>
+      <style>{SHIMMER_CSS}</style>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 24 }}>
+        {Array.from({ length: 4 }).map((_, i) => <PaqueteCardSkeleton key={i} />)}
+      </div>
+    </>
+  )
+}
+
 // ── Ofertas ──────────────────────────────────────────────────────────────────
 
 function fmtMXN(n: number) {
@@ -559,12 +647,7 @@ function OfertasSection({ offers, loading }: { offers: Offer[]; loading: boolean
       )}
 
       {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
-          <div style={{ width: 28, height: 28, borderRadius: '50%',
-            border: '2px solid rgba(220,38,38,0.3)', borderTopColor: '#dc2626',
-            animation: 'spin 0.7s linear infinite' }} />
-          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-        </div>
+        <OfertasGridSkeleton />
       ) : filtered.length === 0 ? (
         <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14, textAlign: 'center', padding: '60px 0' }}>
           No hay ofertas disponibles por el momento.
@@ -669,12 +752,7 @@ function PaquetesSection({ packages, loading }: { packages: Package[]; loading: 
       </div>
 
       {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
-          <div style={{ width: 28, height: 28, borderRadius: '50%',
-            border: '2px solid rgba(251,191,36,0.3)', borderTopColor: '#fbbf24',
-            animation: 'spin 0.7s linear infinite' }} />
-          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-        </div>
+        <PaquetesGridSkeleton />
       ) : packages.length === 0 ? (
         <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14, textAlign: 'center', padding: '60px 0' }}>
           No hay paquetes disponibles por el momento.

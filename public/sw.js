@@ -31,6 +31,9 @@ self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // En desarrollo no interceptamos nada — el dev server regenera chunks constantemente
+  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return;
+
   // Solo interceptar peticiones del mismo origen
   if (url.origin !== location.origin) return;
 

@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase'
 import { printReceipt } from '../pos/Receipt'
 import type { CartItem } from '@/types'
 
-// ── Tipos ────────────────────────────────────────────────────────────────────
+// ── Tipos ─────────────────────────────────────────────────────────────────────
 
 interface SaleRow {
   id: string
@@ -18,6 +18,8 @@ interface SaleRow {
   cashier_name: string
   item_count: number
   item_names: string
+  item_categories: string[]
+  sale_profit: number
 }
 
 interface SaleDetail {
@@ -41,15 +43,14 @@ interface SaleDetail {
   }[]
 }
 
-interface Cashier {
-  id: string
-  name: string
-}
+interface Cashier  { id: string; name: string }
+interface Category { id: string; name: string }
 
-type ExportRange   = 'day' | 'week' | 'month' | 'custom'
-type MethodFilter  = 'all' | 'cash' | 'card' | 'transfer' | 'credit' | 'mixed'
+type ExportRange  = 'day' | 'week' | 'month' | 'custom'
+type MethodFilter = 'all' | 'cash' | 'card' | 'transfer' | 'credit' | 'mixed'
+type PeriodFilter = 'today' | 'lastMonth' | 'lastWeek' | 'thisMonth' | 'custom'
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const METHOD_LABEL: Record<string, string> = {
   cash:     'Efectivo',
@@ -69,6 +70,14 @@ const METHOD_COLOR: Record<string, string> = {
   wallet:   '#e879f9',
 }
 
+const PERIOD_OPTS: { id: PeriodFilter; label: string }[] = [
+  { id: 'today',     label: 'Hoy'           },
+  { id: 'lastMonth', label: 'Último mes'    },
+  { id: 'lastWeek',  label: 'Última semana' },
+  { id: 'thisMonth', label: 'Mes en curso'  },
+  { id: 'custom',    label: 'Personalizado' },
+]
+
 function toLocalDateStr(date: Date): string {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
@@ -77,114 +86,145 @@ function toLocalDateStr(date: Date): string {
 }
 
 function formatHour(iso: string) {
-  return new Date(iso).toLocaleTimeString('es-MX', {
-    hour: '2-digit', minute: '2-digit', hour12: true,
-  })
+  return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true })
 }
 
-function formatDateLabel(dateStr: string) {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  const today     = new Date(); today.setHours(0, 0, 0, 0)
-  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
-  const target    = new Date(y, m - 1, d)
-  if (target.getTime() === today.getTime())     return 'Hoy'
-  if (target.getTime() === yesterday.getTime()) return 'Ayer'
-  return target.toLocaleDateString('es-MX', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-  })
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
 }
 
 function fmt(n: number) {
   return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function getRangeISO(range: ExportRange, selectedDate: string, customFrom: string, customTo: string) {
-  const now = new Date()
-  if (range === 'day') {
-    const [y, m, d] = selectedDate.split('-').map(Number)
-    return {
-      start: new Date(y, m - 1, d, 0, 0, 0, 0).toISOString(),
-      end:   new Date(y, m - 1, d, 23, 59, 59, 999).toISOString(),
-      label: selectedDate,
-    }
+function normalize(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+function flexibleMatch(sale: SaleRow, term: string): boolean {
+  if (!term.trim()) return true
+  const words  = normalize(term).split(/\s+/).filter(Boolean)
+  const target = normalize(
+    `${sale.id.slice(-6)} ${sale.cashier_name} ${sale.item_names} ${METHOD_LABEL[sale.payment_method] ?? sale.payment_method}`
+  )
+  return words.every(w => target.includes(w))
+}
+
+function getSearchRange(period: PeriodFilter, customFrom: string, customTo: string) {
+  const now      = new Date()
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+  if (period === 'today') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+    return { start: start.toISOString(), end: todayEnd.toISOString() }
   }
-  if (range === 'week') {
-    const monday = new Date(now)
-    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7))
-    monday.setHours(0, 0, 0, 0)
-    return {
-      start: monday.toISOString(),
-      end:   new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString(),
-      label: `semana-${toLocalDateStr(monday)}`,
-    }
+  if (period === 'lastMonth') {
+    const start = new Date(now); start.setDate(now.getDate() - 30); start.setHours(0, 0, 0, 0)
+    return { start: start.toISOString(), end: todayEnd.toISOString() }
   }
-  if (range === 'month') {
-    const first = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
-    return {
-      start: first.toISOString(),
-      end:   new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString(),
-      label: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
-    }
+  if (period === 'lastWeek') {
+    const start = new Date(now); start.setDate(now.getDate() - 7); start.setHours(0, 0, 0, 0)
+    return { start: start.toISOString(), end: todayEnd.toISOString() }
+  }
+  if (period === 'thisMonth') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+    return { start: start.toISOString(), end: todayEnd.toISOString() }
   }
   const [fy, fm, fd] = customFrom.split('-').map(Number)
   const [ty, tm, td] = customTo.split('-').map(Number)
   return {
     start: new Date(fy, fm - 1, fd, 0, 0, 0, 0).toISOString(),
     end:   new Date(ty, tm - 1, td, 23, 59, 59, 999).toISOString(),
-    label: `${customFrom}_${customTo}`,
   }
 }
 
-// ── Componente principal ─────────────────────────────────────────────────────
+function getRangeISO(range: ExportRange, customFrom: string, customTo: string) {
+  const now = new Date()
+  if (range === 'day') {
+    const today = toLocalDateStr(now)
+    const [y, m, d] = today.split('-').map(Number)
+    return { start: new Date(y, m-1, d, 0,0,0,0).toISOString(), end: new Date(y, m-1, d, 23,59,59,999).toISOString(), label: today }
+  }
+  if (range === 'week') {
+    const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay()+6)%7)); monday.setHours(0,0,0,0)
+    return { start: monday.toISOString(), end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23,59,59,999).toISOString(), label: `semana-${toLocalDateStr(monday)}` }
+  }
+  if (range === 'month') {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1, 0,0,0,0)
+    return { start: first.toISOString(), end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23,59,59,999).toISOString(), label: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}` }
+  }
+  const [fy,fm,fd] = customFrom.split('-').map(Number)
+  const [ty,tm,td] = customTo.split('-').map(Number)
+  return { start: new Date(fy,fm-1,fd,0,0,0,0).toISOString(), end: new Date(ty,tm-1,td,23,59,59,999).toISOString(), label: `${customFrom}_${customTo}` }
+}
+
+// ── Componente principal ──────────────────────────────────────────────────────
 
 export default function VentasPage() {
-  const [selectedDate, setSelectedDate]   = useState<string>(toLocalDateStr(new Date()))
-  const [cashiers, setCashiers]           = useState<Cashier[]>([])
-  const [cashierFilter, setCashierFilter] = useState<string>('all')
-  const [methodFilter, setMethodFilter]   = useState<MethodFilter>('all')
-  const [sales, setSales]                 = useState<SaleRow[]>([])
-  const [loading, setLoading]             = useState(true)
+  // Búsqueda
+  const [hasSearched, setHasSearched]         = useState(false)
+  const [searchText, setSearchText]           = useState('')
+  const [periodFilter, setPeriodFilter]       = useState<PeriodFilter>('today')
+  const [customFrom, setCustomFrom]           = useState(toLocalDateStr(new Date()))
+  const [customTo, setCustomTo]               = useState(toLocalDateStr(new Date()))
+  const [categories, setCategories]           = useState<Category[]>([])
+  const [selectedCats, setSelectedCats]       = useState<string[]>([])
+  const [showCatDropdown, setShowCatDropdown] = useState(false)
+  const catRef = useRef<HTMLDivElement>(null)
+
+  // Filtros
+  const [cashiers, setCashiers]             = useState<Cashier[]>([])
+  const [cashierFilter, setCashierFilter]   = useState('all')
+  const [methodFilter, setMethodFilter]     = useState<MethodFilter>('all')
+
+  // Datos
+  const [rawSales, setRawSales]           = useState<SaleRow[]>([])
+  const [loading, setLoading]             = useState(false)
   const [detail, setDetail]               = useState<SaleDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [showDatePicker, setShowDatePicker] = useState(false)
 
-  // Export
+  // Exportar
   const [showExport, setShowExport]   = useState(false)
-  const [exportRange, setExportRange] = useState<ExportRange>('day')
-  const [exportFrom, setExportFrom]   = useState<string>(toLocalDateStr(new Date()))
-  const [exportTo, setExportTo]       = useState<string>(toLocalDateStr(new Date()))
+  const [exportRange, setExportRange] = useState<ExportRange>('month')
+  const [exportFrom, setExportFrom]   = useState(toLocalDateStr(new Date()))
+  const [exportTo, setExportTo]       = useState(toLocalDateStr(new Date()))
   const [exporting, setExporting]     = useState(false)
 
-  // Ventas filtradas por método (el resto de las stats siempre usan `sales` completo)
-  const displayedSales = useMemo(() => {
-    if (methodFilter === 'all') return sales
-    return sales.filter(s => s.payment_method === methodFilter)
-  }, [sales, methodFilter])
-
-  // Cajeros
+  // Carga inicial: cajeros, categorías y ventas de hoy
   useEffect(() => {
     const supabase = createClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(supabase as any)
-      .from('profiles')
-      .select('id, name')
-      .order('name')
+    ;(supabase as any).from('profiles').select('id, name').order('name')
       .then(({ data }: { data: Cashier[] | null }) => { if (data) setCashiers(data) })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(supabase as any).from('categories').select('id, name').order('name')
+      .then(({ data }: { data: Category[] | null }) => { if (data) setCategories(data) })
   }, [])
 
-  const loadSales = useCallback(async () => {
+  // Cargar ventas de hoy al entrar a la página
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { handleSearch() }, [])
+
+  // Cerrar dropdown de categorías al hacer click fuera
+  useEffect(() => {
+    function onOutsideClick(e: MouseEvent) {
+      if (catRef.current && !catRef.current.contains(e.target as Node))
+        setShowCatDropdown(false)
+    }
+    document.addEventListener('mousedown', onOutsideClick)
+    return () => document.removeEventListener('mousedown', onOutsideClick)
+  }, [])
+
+  async function handleSearch() {
     setLoading(true)
+    setHasSearched(true)
     setDetail(null)
     const supabase = createClient()
-
-    const [y, m, d] = selectedDate.split('-').map(Number)
-    const start = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString()
-    const end   = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString()
+    const { start, end } = getSearchRange(periodFilter, customFrom, customTo)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query = (supabase as any)
       .from('sales')
-      .select('id, total, payment_method, status, created_at, cashier_id, sale_items(id, quantity)')
+      .select('id, total, payment_method, status, created_at, cashier_id')
       .gte('created_at', start)
       .lte('created_at', end)
       .order('created_at', { ascending: false })
@@ -194,9 +234,9 @@ export default function VentasPage() {
     const { data: salesData, error } = await query
     if (error || !salesData) { setLoading(false); return }
 
+    // Nombres de cajeros
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cashierIds = [...new Set((salesData as any[]).map((s: any) => s.cashier_id))]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cashierMap: Record<string, string> = {}
     if (cashierIds.length > 0) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,24 +246,37 @@ export default function VentasPage() {
       if (profiles) for (const p of profiles) cashierMap[p.id] = p.name
     }
 
+    // Nombres de productos + categorías por venta
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const saleIds = (salesData as any[]).map((s: any) => s.id)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const itemPreviewMap: Record<string, string> = {}
+    const itemPreviewMap: Record<string, string>    = {}
+    const itemCountMap: Record<string, number>       = {}
+    const saleCatMap: Record<string, Set<string>>    = {}
+    const saleProfitMap: Record<string, number>      = {}
+
     if (saleIds.length > 0) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: items } = await (supabase as any)
         .from('sale_items')
-        .select('sale_id, product_variants(flavor, products(name))')
+        .select('sale_id, quantity, unit_price, product_variants(cost_price, flavor, products(name, category))')
         .in('sale_id', saleIds)
       if (items) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const grouped: Record<string, string[]> = {}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const item of items) {
-          const name = item.product_variants?.products?.name ?? 'Sin nombre'
+        for (const item of items as any[]) {
+          const prod      = item.product_variants?.products
+          const name      = prod?.name ?? 'Sin nombre'
+          const cat       = prod?.category as string | null
+          const costPrice = (item.product_variants?.cost_price as number) ?? 0
+          const profit    = (item.unit_price - costPrice) * item.quantity
           if (!grouped[item.sale_id]) grouped[item.sale_id] = []
           if (!grouped[item.sale_id].includes(name)) grouped[item.sale_id].push(name)
+          itemCountMap[item.sale_id]  = (itemCountMap[item.sale_id] ?? 0) + 1
+          saleProfitMap[item.sale_id] = (saleProfitMap[item.sale_id] ?? 0) + profit
+          if (cat) {
+            if (!saleCatMap[item.sale_id]) saleCatMap[item.sale_id] = new Set()
+            saleCatMap[item.sale_id].add(cat)
+          }
         }
         for (const id of Object.keys(grouped))
           itemPreviewMap[id] = grouped[id].slice(0, 3).join(', ') + (grouped[id].length > 3 ? '…' : '')
@@ -231,21 +284,21 @@ export default function VentasPage() {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setSales((salesData as any[]).map((s: any) => ({
-      id:             s.id,
-      total:          s.total,
-      payment_method: s.payment_method,
-      status:         s.status,
-      created_at:     s.created_at,
-      cashier_id:     s.cashier_id,
-      cashier_name:   cashierMap[s.cashier_id] ?? 'Desconocido',
-      item_count:     (s.sale_items ?? []).length,
-      item_names:     itemPreviewMap[s.id] ?? '—',
+    setRawSales((salesData as any[]).map((s: any) => ({
+      id:              s.id,
+      total:           s.total,
+      payment_method:  s.payment_method,
+      status:          s.status,
+      created_at:      s.created_at,
+      cashier_id:      s.cashier_id,
+      cashier_name:    cashierMap[s.cashier_id] ?? 'Desconocido',
+      item_count:      itemCountMap[s.id] ?? 0,
+      item_names:      itemPreviewMap[s.id] ?? '—',
+      item_categories: saleCatMap[s.id] ? Array.from(saleCatMap[s.id]) : [],
+      sale_profit:     saleProfitMap[s.id] ?? 0,
     })))
     setLoading(false)
-  }, [selectedDate, cashierFilter])
-
-  useEffect(() => { loadSales() }, [loadSales])
+  }
 
   async function loadDetail(saleId: string) {
     setDetailLoading(true)
@@ -267,14 +320,11 @@ export default function VentasPage() {
     const { data: cashierProfile } = await (supabase as any)
       .from('profiles').select('name').eq('id', sale.cashier_id).single()
 
-    // Desglose de pago (tabla sale_payments — no-fatal si no existe)
     let payments: { method: string; amount: number }[] = []
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: paymentsData } = await (supabase as any)
-        .from('sale_payments')
-        .select('method, amount')
-        .eq('sale_id', saleId)
+        .from('sale_payments').select('method, amount').eq('sale_id', saleId)
       if (paymentsData) payments = paymentsData
     } catch { /* tabla puede no existir en instancias antiguas */ }
 
@@ -302,80 +352,51 @@ export default function VentasPage() {
     setDetailLoading(false)
   }
 
-  // Reimprimir ticket desde el historial
   function handleReprint() {
     if (!detail) return
-
     const fakeCart: CartItem[] = detail.items.map(item => ({
       variant: {
-        id:              item.id,
-        product_id:      '',
-        barcode:         '',
-        flavor:          item.flavor,
-        sale_price:      item.unit_price,
-        wholesale_price: item.unit_price,
-        cost_price:      0,
-        stock:           0,
-        min_stock:       0,
-        expiration_date: null,
-        image_url:       null,
+        id: item.id, product_id: '', barcode: '', flavor: item.flavor,
+        sale_price: item.unit_price, wholesale_price: item.unit_price,
+        cost_price: 0, stock: 0, min_stock: 0, expiration_date: null, image_url: null,
         product: { id: '', name: item.name, category: null },
       },
-      quantity:     item.quantity,
-      unitPrice:    item.unit_price,
-      useWholesale: false,
+      quantity: item.quantity, unitPrice: item.unit_price, useWholesale: false,
     }))
-
-    const pm = (['cash', 'card', 'transfer', 'mixed'] as const).includes(
-      detail.payment_method as 'cash' | 'card' | 'transfer' | 'mixed'
-    ) ? detail.payment_method as 'cash' | 'card' | 'transfer' | 'mixed'
-      : 'mixed'
-
-    const cashPaid     = detail.payments.find(p => p.method === 'cash')?.amount
-    const cardPaid     = detail.payments.find(p => p.method === 'card')?.amount
-    const transferPaid = detail.payments.find(p => p.method === 'transfer')?.amount
-
+    const pm = (['cash','card','transfer','mixed'] as const).includes(
+      detail.payment_method as 'cash'|'card'|'transfer'|'mixed'
+    ) ? detail.payment_method as 'cash'|'card'|'transfer'|'mixed' : 'mixed'
     printReceipt({
-      cart:          fakeCart,
-      total:         detail.total,
-      paymentMethod: pm,
-      amountPaid:    detail.amount_paid,
-      change:        detail.change_given,
-      cashPaid,
-      cardPaid,
-      transferPaid,
-      notes:         detail.notes ?? undefined,
-      date:          new Date(detail.created_at),
+      cart: fakeCart, total: detail.total, paymentMethod: pm,
+      amountPaid: detail.amount_paid, change: detail.change_given,
+      cashPaid:     detail.payments.find(p => p.method === 'cash')?.amount,
+      cardPaid:     detail.payments.find(p => p.method === 'card')?.amount,
+      transferPaid: detail.payments.find(p => p.method === 'transfer')?.amount,
+      notes: detail.notes ?? undefined, date: new Date(detail.created_at),
     })
   }
 
-  // ── Exportar Excel ───────────────────────────────────────────────────────
+  // ── Exportar Excel ─────────────────────────────────────────────────────────
 
   async function handleExport() {
     setExporting(true)
     const supabase = createClient()
-    const { start, end, label } = getRangeISO(exportRange, selectedDate, exportFrom, exportTo)
+    const { start, end, label } = getRangeISO(exportRange, exportFrom, exportTo)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: salesData } = await (supabase as any)
       .from('sales')
       .select('id, total, payment_method, amount_paid, change_given, status, created_at, cashier_id')
-      .gte('created_at', start)
-      .lte('created_at', end)
-      .order('created_at', { ascending: true })
+      .gte('created_at', start).lte('created_at', end).order('created_at', { ascending: true })
 
-    if (!salesData || salesData.length === 0) {
-      setExporting(false); setShowExport(false); return
-    }
+    if (!salesData || salesData.length === 0) { setExporting(false); setShowExport(false); return }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cashierIds = [...new Set((salesData as any[]).map((s: any) => s.cashier_id))]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cashierMap: Record<string, string> = {}
     if (cashierIds.length > 0) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: profiles } = await (supabase as any)
-        .from('profiles').select('id, name').in('id', cashierIds)
+      const { data: profiles } = await (supabase as any).from('profiles').select('id, name').in('id', cashierIds)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (profiles) for (const p of profiles) cashierMap[p.id] = p.name
     }
@@ -388,25 +409,24 @@ export default function VentasPage() {
       .select('sale_id, quantity, unit_price, subtotal, product_variants(flavor, products(name))')
       .in('sale_id', saleIds)
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const previewMap: Record<string, string[]> = {}
     if (allItems) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const item of allItems) {
+      for (const item of allItems as any[]) {
         const name = item.product_variants?.products?.name ?? 'Sin nombre'
         if (!previewMap[item.sale_id]) previewMap[item.sale_id] = []
         if (!previewMap[item.sale_id].includes(name)) previewMap[item.sale_id].push(name)
       }
     }
 
-    const summaryHeaders = ['Folio', 'Fecha', 'Hora', 'Cajero', 'Productos', 'Método', 'Total', 'Pagó', 'Cambio', 'Estado']
+    const summaryHeaders = ['Folio','Fecha','Hora','Cajero','Productos','Método','Total','Pagó','Cambio','Estado']
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const summaryRows = (salesData as any[]).map((s: any) => {
       const dt = new Date(s.created_at)
       return [
         s.id.slice(-6).toUpperCase(),
         dt.toLocaleDateString('es-MX'),
-        dt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        dt.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', hour12:true }),
         cashierMap[s.cashier_id] ?? 'Desconocido',
         (previewMap[s.id] ?? []).join(', ') || '—',
         METHOD_LABEL[s.payment_method] ?? s.payment_method,
@@ -415,9 +435,9 @@ export default function VentasPage() {
       ]
     })
     const wsSummary = XLSX.utils.aoa_to_sheet([summaryHeaders, ...summaryRows])
-    wsSummary['!cols'] = [{ wch: 10 }, { wch: 13 }, { wch: 10 }, { wch: 18 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }]
+    wsSummary['!cols'] = [{wch:10},{wch:13},{wch:10},{wch:18},{wch:40},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12}]
 
-    const detailHeaders = ['Folio', 'Fecha', 'Hora', 'Cajero', 'Producto', 'Sabor', 'Cantidad', 'Precio Unitario', 'Subtotal', 'Estado Venta']
+    const detailHeaders = ['Folio','Fecha','Hora','Cajero','Producto','Sabor','Cantidad','Precio Unitario','Subtotal','Estado Venta']
     const detailRows: unknown[][] = []
     if (allItems) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -431,7 +451,7 @@ export default function VentasPage() {
         detailRows.push([
           s.id.slice(-6).toUpperCase(),
           dt.toLocaleDateString('es-MX'),
-          dt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true }),
+          dt.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', hour12:true }),
           cashierMap[s.cashier_id] ?? 'Desconocido',
           item.product_variants?.products?.name ?? 'Sin nombre',
           item.product_variants?.flavor ?? '—',
@@ -441,7 +461,7 @@ export default function VentasPage() {
       }
     }
     const wsDetail = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows])
-    wsDetail['!cols'] = [{ wch: 10 }, { wch: 13 }, { wch: 10 }, { wch: 18 }, { wch: 28 }, { wch: 16 }, { wch: 10 }, { wch: 16 }, { wch: 12 }, { wch: 14 }]
+    wsDetail['!cols'] = [{wch:10},{wch:13},{wch:10},{wch:18},{wch:28},{wch:16},{wch:10},{wch:16},{wch:12},{wch:14}]
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Ventas')
@@ -450,25 +470,32 @@ export default function VentasPage() {
     setExporting(false); setShowExport(false)
   }
 
-  // ── Estadísticas (siempre del día completo, sin filtro de método) ─────────
+  // ── Filtrado cliente ───────────────────────────────────────────────────────
 
-  const completed    = sales.filter(s => s.status === 'completed')
-  const totalRevenue = completed.reduce((s, r) => s + r.total, 0)
-  const cashTotal    = completed.filter(s => s.payment_method === 'cash').reduce((s, r) => s + r.total, 0)
-  const cardTotal    = completed.filter(s => s.payment_method === 'card').reduce((s, r) => s + r.total, 0)
+  const displayedSales = useMemo(() => {
+    let result = rawSales
+    if (searchText.trim()) result = result.filter(s => flexibleMatch(s, searchText))
+    if (selectedCats.length > 0) result = result.filter(s => s.item_categories.some(c => selectedCats.includes(c)))
+    if (methodFilter !== 'all')  result = result.filter(s => s.payment_method === methodFilter)
+    return result
+  }, [rawSales, searchText, selectedCats, methodFilter])
 
-  function shiftDate(days: number) {
-    const [y, m, d] = selectedDate.split('-').map(Number)
-    setSelectedDate(toLocalDateStr(new Date(y, m - 1, d + days)))
+  const completed    = displayedSales.filter(s => s.status === 'completed')
+  const totalRevenue = completed.reduce((sum, s) => sum + s.total, 0)
+  const totalProfit  = completed.reduce((sum, s) => sum + s.sale_profit, 0)
+  const cashTotal    = completed.filter(s => s.payment_method === 'cash').reduce((sum, s) => sum + s.total, 0)
+  const cardTotal    = completed.filter(s => s.payment_method === 'card').reduce((sum, s) => sum + s.total, 0)
+
+  function toggleCat(name: string) {
+    setSelectedCats(prev => prev.includes(name) ? prev.filter(c => c !== name) : [...prev, name])
   }
-  const isToday = selectedDate === toLocalDateStr(new Date())
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex h-full" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
 
-      {/* ── Panel principal ─────────────────────────────────────────────── */}
+      {/* ── Panel principal ──────────────────────────────────────────────── */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
 
         {/* Header */}
@@ -476,112 +503,246 @@ export default function VentasPage() {
           style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
           <div>
             <h1 className="text-base font-bold" style={{ color: 'var(--text)' }}>Historial de Ventas</h1>
-            <p className="text-xs capitalize mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              {formatDateLabel(selectedDate)}
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {hasSearched && !loading
+                ? `${rawSales.length} venta${rawSales.length !== 1 ? 's' : ''} encontrada${rawSales.length !== 1 ? 's' : ''}`
+                : 'Busca ventas por texto, período o categoría'}
             </p>
           </div>
+          <button onClick={() => setShowExport(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
+            style={{ background: '#052e16', color: '#4ade80', border: '1px solid #166534' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Exportar Excel
+          </button>
+        </div>
 
+        {/* ── Panel de búsqueda ──────────────────────────────────────────── */}
+        <div className="shrink-0 px-4 py-3 flex flex-col gap-2.5"
+          style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+
+          {/* Fila 1: campo de texto */}
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowExport(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-              style={{ background: '#052e16', color: '#4ade80', border: '1px solid #166534' }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            <div className="relative flex-1">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
+                strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)' }}>
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
               </svg>
-              Exportar Excel
+              <input
+                type="text"
+                placeholder="Buscar por folio, producto, cajero…"
+                value={searchText}
+                onChange={e => setSearchText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSearch() }}
+                className="w-full pl-9 pr-3 py-2 rounded-lg text-sm outline-none"
+                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
+              />
+              {searchText && (
+                <button onClick={() => setSearchText('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-full text-xs"
+                  style={{ color: 'var(--text-muted)', background: 'var(--surface)' }}>×</button>
+              )}
+            </div>
+            <button onClick={handleSearch} disabled={loading}
+              className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-opacity"
+              style={{ background: 'var(--accent)', color: '#000', opacity: loading ? 0.7 : 1 }}>
+              {loading ? (
+                <div className="w-4 h-4 rounded-full border-2 animate-spin" style={{ borderColor: '#000', borderTopColor: 'transparent' }} />
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              )}
+              Buscar
             </button>
+          </div>
 
+          {/* Fila 2: período + categorías + cajero */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Período */}
+            <div className="flex items-center gap-1">
+              {PERIOD_OPTS.map(opt => (
+                <button key={opt.id} onClick={() => setPeriodFilter(opt.id)}
+                  className="px-2.5 py-1 rounded-full text-xs font-semibold transition-all shrink-0"
+                  style={{
+                    background: periodFilter === opt.id ? 'var(--accent)' : 'var(--bg)',
+                    color:      periodFilter === opt.id ? '#000' : 'var(--text-muted)',
+                    border:     `1px solid ${periodFilter === opt.id ? 'var(--accent)' : 'var(--border)'}`,
+                  }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Fechas personalizadas */}
+            {periodFilter === 'custom' && (
+              <div className="flex items-center gap-1.5">
+                <input type="date" value={customFrom} max={customTo}
+                  onChange={e => setCustomFrom(e.target.value)}
+                  className="px-2 py-1 rounded-lg text-xs outline-none"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', colorScheme: 'dark' }} />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
+                <input type="date" value={customTo} min={customFrom} max={toLocalDateStr(new Date())}
+                  onChange={e => setCustomTo(e.target.value)}
+                  className="px-2 py-1 rounded-lg text-xs outline-none"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', colorScheme: 'dark' }} />
+              </div>
+            )}
+
+            <div className="flex-1" />
+
+            {/* Filtro de categorías */}
+            {categories.length > 0 && (
+              <div className="relative" ref={catRef}>
+                <button onClick={() => setShowCatDropdown(v => !v)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={{
+                    background: selectedCats.length > 0 ? 'rgba(250,200,0,0.12)' : 'var(--bg)',
+                    border: `1px solid ${selectedCats.length > 0 ? 'var(--accent)' : 'var(--border)'}`,
+                    color: selectedCats.length > 0 ? 'var(--accent)' : 'var(--text-muted)',
+                  }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                    <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+                  </svg>
+                  Categorías
+                  {selectedCats.length > 0 && (
+                    <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold"
+                      style={{ background: 'var(--accent)', color: '#000', fontSize: '10px' }}>
+                      {selectedCats.length}
+                    </span>
+                  )}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                    style={{ transform: showCatDropdown ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </button>
+
+                {showCatDropdown && (
+                  <div className="absolute right-0 top-9 z-50 rounded-xl shadow-2xl overflow-hidden"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)', minWidth: '180px', maxHeight: '260px', overflowY: 'auto' }}>
+                    <div className="p-2 flex flex-col gap-0.5">
+                      {/* Opción "Todas" */}
+                      <button onClick={() => setSelectedCats([])}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-colors text-left w-full"
+                        style={{ background: selectedCats.length === 0 ? 'rgba(250,200,0,0.1)' : 'transparent', color: selectedCats.length === 0 ? 'var(--accent)' : 'var(--text)' }}>
+                        <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
+                          style={{ border: `2px solid ${selectedCats.length === 0 ? 'var(--accent)' : 'var(--border)'}`, background: selectedCats.length === 0 ? 'var(--accent)' : 'transparent' }}>
+                          {selectedCats.length === 0 && (
+                            <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="#000" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="2 6 5 9 10 3"/>
+                            </svg>
+                          )}
+                        </div>
+                        <span className="font-semibold">Todas las categorías</span>
+                      </button>
+
+                      <div className="my-1" style={{ borderBottom: '1px solid var(--border)' }} />
+
+                      {categories.map(cat => {
+                        const active = selectedCats.includes(cat.name)
+                        return (
+                          <button key={cat.id} onClick={() => toggleCat(cat.name)}
+                            className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-colors text-left w-full"
+                            style={{ background: active ? 'rgba(250,200,0,0.1)' : 'transparent', color: active ? 'var(--accent)' : 'var(--text)' }}>
+                            <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
+                              style={{ border: `2px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent)' : 'transparent' }}>
+                              {active && (
+                                <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="#000" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="2 6 5 9 10 3"/>
+                                </svg>
+                              )}
+                            </div>
+                            {cat.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Cajero */}
             <select value={cashierFilter} onChange={e => setCashierFilter(e.target.value)}
-              className="text-xs rounded-lg px-3 py-2 outline-none"
+              className="text-xs rounded-lg px-3 py-1.5 outline-none"
               style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer' }}>
               <option value="all">Todos los cajeros</option>
               {cashiers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-
-            <button onClick={() => shiftDate(-1)}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-opacity hover:opacity-70"
-              style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
-              title="Día anterior">‹</button>
-
-            <div className="relative">
-              <button onClick={() => setShowDatePicker(v => !v)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-opacity hover:opacity-80"
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}>
-                <span>📅</span>
-                <span>{new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}</span>
-              </button>
-              {showDatePicker && (
-                <div className="absolute right-0 top-10 z-50 rounded-xl p-1 shadow-2xl"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                  <input type="date" value={selectedDate} max={toLocalDateStr(new Date())}
-                    onChange={e => { setSelectedDate(e.target.value); setShowDatePicker(false) }}
-                    className="rounded-lg px-3 py-2 text-sm outline-none"
-                    style={{ background: 'var(--bg)', border: 'none', color: 'var(--text)', colorScheme: 'dark' }}
-                    autoFocus onBlur={() => setTimeout(() => setShowDatePicker(false), 150)} />
-                </div>
-              )}
-            </div>
-
-            <button onClick={() => shiftDate(1)} disabled={isToday}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-opacity hover:opacity-70 disabled:opacity-30"
-              style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
-              title="Día siguiente">›</button>
-
-            {!isToday && (
-              <button onClick={() => setSelectedDate(toLocalDateStr(new Date()))}
-                className="px-3 py-2 rounded-lg text-xs font-bold transition-opacity hover:opacity-80"
-                style={{ background: 'var(--accent)', color: '#000' }}>
-                Hoy
-              </button>
-            )}
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-0 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
-          {[
-            { label: 'Total del día', value: fmt(totalRevenue), sub: `${completed.length} venta${completed.length !== 1 ? 's' : ''}`, color: 'var(--accent)' },
-            { label: 'Efectivo',      value: fmt(cashTotal),    sub: `${completed.filter(s => s.payment_method === 'cash').length} transacciones`, color: '#4ade80' },
-            { label: 'Tarjeta',       value: fmt(cardTotal),    sub: `${completed.filter(s => s.payment_method === 'card').length} transacciones`, color: '#60a5fa' },
-            { label: 'Anuladas',      value: String(sales.filter(s => s.status === 'cancelled').length), sub: 'ventas canceladas', color: '#FF6B6B' },
-          ].map(stat => (
-            <div key={stat.label} className="px-5 py-3" style={{ borderRight: '1px solid var(--border)' }}>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{stat.label}</p>
-              <p className="text-xl font-black font-mono mt-0.5" style={{ color: stat.color }}>{stat.value}</p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>{stat.sub}</p>
-            </div>
-          ))}
-        </div>
+        {/* Stats (visibles solo después de buscar) */}
+        {hasSearched && (
+          <div className="grid grid-cols-5 gap-0 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+            {[
+              { label: 'Ingresos',   value: fmt(totalRevenue), sub: `${completed.length} venta${completed.length !== 1 ? 's' : ''}`, color: 'var(--accent)' },
+              { label: 'Ganancias',  value: fmt(totalProfit),  sub: 'ingresos − costo',  color: '#34d399' },
+              { label: 'Efectivo',   value: fmt(cashTotal),    sub: `${completed.filter(s => s.payment_method === 'cash').length} transacciones`, color: '#4ade80' },
+              { label: 'Tarjeta',    value: fmt(cardTotal),    sub: `${completed.filter(s => s.payment_method === 'card').length} transacciones`, color: '#60a5fa' },
+              { label: 'Anuladas',   value: String(displayedSales.filter(s => s.status === 'cancelled').length), sub: 'ventas canceladas', color: '#FF6B6B' },
+            ].map(stat => (
+              <div key={stat.label} className="px-5 py-3" style={{ borderRight: '1px solid var(--border)' }}>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{stat.label}</p>
+                <p className="text-xl font-black font-mono mt-0.5" style={{ color: stat.color }}>{stat.value}</p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>{stat.sub}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
-        {/* Filtro por método de pago */}
-        <div className="px-4 py-2 shrink-0 flex items-center gap-1.5 flex-wrap"
-          style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-          <span className="text-xs font-medium mr-1" style={{ color: 'var(--text-muted)' }}>Método:</span>
-          {(['all', 'cash', 'card', 'transfer', 'credit', 'mixed'] as const).map(m => {
-            const active = methodFilter === m
-            const color  = m === 'all' ? 'var(--accent)' : METHOD_COLOR[m]
-            return (
-              <button key={m} onClick={() => setMethodFilter(m)}
-                className="shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold transition-all"
-                style={{
-                  background: active ? (m === 'all' ? 'var(--accent)' : `${color}22`) : 'var(--bg)',
-                  color:      active ? (m === 'all' ? '#000' : color) : 'var(--text-muted)',
-                  border:     `1px solid ${active ? color : 'var(--border)'}`,
-                }}>
-                {m === 'all' ? 'Todos' : METHOD_LABEL[m]}
-                {active && m !== 'all' && (
-                  <span style={{ marginLeft: '4px', opacity: 0.7 }}>
-                    ({displayedSales.filter(s => s.status === 'completed').length})
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
+        {/* Filtro por método de pago (visible solo después de buscar) */}
+        {hasSearched && (
+          <div className="px-4 py-2 shrink-0 flex items-center gap-1.5 flex-wrap"
+            style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+            <span className="text-xs font-medium mr-1" style={{ color: 'var(--text-muted)' }}>Método:</span>
+            {(['all','cash','card','transfer','credit','mixed'] as const).map(m => {
+              const active = methodFilter === m
+              const color  = m === 'all' ? 'var(--accent)' : METHOD_COLOR[m]
+              return (
+                <button key={m} onClick={() => setMethodFilter(m)}
+                  className="shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold transition-all"
+                  style={{
+                    background: active ? (m === 'all' ? 'var(--accent)' : `${color}22`) : 'var(--bg)',
+                    color:      active ? (m === 'all' ? '#000' : color) : 'var(--text-muted)',
+                    border:     `1px solid ${active ? color : 'var(--border)'}`,
+                  }}>
+                  {m === 'all' ? 'Todos' : METHOD_LABEL[m]}
+                  {active && m !== 'all' && (
+                    <span style={{ marginLeft: '4px', opacity: 0.7 }}>
+                      ({displayedSales.filter(s => s.status === 'completed').length})
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
-        {/* Tabla */}
+        {/* Lista de ventas */}
         <div className="flex-1 overflow-y-auto">
-          {loading ? (
+          {!hasSearched ? (
+            /* Estado inicial: invitar a buscar */
+            <div className="flex flex-col items-center justify-center py-24 gap-4">
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+                  strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)' }}>
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Busca ventas para comenzar</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                  Selecciona un período y pulsa Buscar, o escribe un término para filtrar
+                </p>
+              </div>
+            </div>
+          ) : loading ? (
             <div className="flex items-center justify-center py-20">
               <div className="w-7 h-7 rounded-full border-2 animate-spin"
                 style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
@@ -589,16 +750,19 @@ export default function VentasPage() {
           ) : displayedSales.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3">
               <div className="w-14 h-14 rounded-full flex items-center justify-center text-2xl"
-                style={{ background: 'var(--surface)' }}>🧾</div>
+                style={{ background: 'var(--surface)' }}>🔍</div>
               <p className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>
-                {sales.length === 0 ? 'Sin ventas para este día' : 'Sin ventas con ese método de pago'}
+                Sin resultados para esta búsqueda
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>
+                Prueba con otros términos, período o categorías
               </p>
             </div>
           ) : (
             <>
               <div className="grid text-xs font-semibold px-4 py-2 sticky top-0"
-                style={{ gridTemplateColumns: '90px 70px 1fr 130px 90px 100px', color: 'var(--text-muted)', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
-                <span>Folio</span><span>Hora</span><span>Productos</span>
+                style={{ gridTemplateColumns: '90px 110px 1fr 130px 90px 100px', color: 'var(--text-muted)', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+                <span>Folio</span><span>Fecha / Hora</span><span>Productos</span>
                 <span>Cajero</span><span>Método</span><span className="text-right">Total</span>
               </div>
 
@@ -609,7 +773,7 @@ export default function VentasPage() {
                   <button key={sale.id} onClick={() => loadDetail(sale.id)}
                     className="w-full text-left grid px-4 py-3 transition-colors"
                     style={{
-                      gridTemplateColumns: '90px 70px 1fr 130px 90px 100px',
+                      gridTemplateColumns: '90px 110px 1fr 130px 90px 100px',
                       borderBottom: '1px solid var(--border)',
                       background: isSelected ? 'rgba(250,200,0,0.07)' : 'transparent',
                       opacity: isCancelled ? 0.5 : 1, cursor: 'pointer',
@@ -620,7 +784,10 @@ export default function VentasPage() {
                       #{sale.id.slice(-6).toUpperCase()}
                       {isCancelled && <span className="ml-1 text-xs" style={{ color: '#FF6B6B' }}>✕</span>}
                     </span>
-                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{formatHour(sale.created_at)}</span>
+                    <div className="flex flex-col">
+                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{formatDate(sale.created_at)}</span>
+                      <span className="text-xs" style={{ color: 'var(--text-muted)', opacity: 0.65 }}>{formatHour(sale.created_at)}</span>
+                    </div>
                     <span className="text-xs truncate pr-2" style={{ color: 'var(--text)' }}>{sale.item_names}</span>
                     <span className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{sale.cashier_name}</span>
                     <span>
@@ -641,7 +808,7 @@ export default function VentasPage() {
         </div>
       </div>
 
-      {/* ── Panel de detalle ─────────────────────────────────────────────── */}
+      {/* ── Panel de detalle ──────────────────────────────────────────────── */}
       <div className="flex flex-col shrink-0 transition-all duration-200"
         style={{
           width: detail || detailLoading ? '320px' : '0px',
@@ -656,7 +823,6 @@ export default function VentasPage() {
         ) : detail ? (
           <div className="flex flex-col h-full overflow-y-auto w-80">
 
-            {/* Header del detalle */}
             <div className="flex items-center justify-between px-4 py-3 shrink-0 sticky top-0"
               style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
               <div>
@@ -664,7 +830,7 @@ export default function VentasPage() {
                   Ticket #{detail.id.slice(-6).toUpperCase()}
                 </p>
                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  {formatHour(detail.created_at)} · {detail.cashier_name}
+                  {formatDate(detail.created_at)} {formatHour(detail.created_at)} · {detail.cashier_name}
                 </p>
               </div>
               <button onClick={() => setDetail(null)}
@@ -672,7 +838,6 @@ export default function VentasPage() {
                 style={{ color: 'var(--text-muted)', background: 'var(--bg)' }}>×</button>
             </div>
 
-            {/* Estado + Reimprimir */}
             <div className="px-4 pt-3 flex items-center gap-2">
               <span className="text-xs px-2.5 py-1 rounded-full font-semibold"
                 style={{
@@ -681,19 +846,18 @@ export default function VentasPage() {
                 }}>
                 {detail.status === 'completed' ? 'Completada' : 'Anulada'}
               </span>
-              <button
-                onClick={handleReprint}
+              <button onClick={handleReprint}
                 className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-opacity hover:opacity-80"
                 style={{ background: 'rgba(240,180,41,0.12)', color: 'var(--accent)', border: '1px solid rgba(240,180,41,0.3)' }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                  <polyline points="6 9 6 2 18 2 18 9"/>
+                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
                   <rect x="6" y="14" width="12" height="8"/>
                 </svg>
                 Reimprimir Ticket
               </button>
             </div>
 
-            {/* Productos */}
             <div className="px-4 pt-3 flex flex-col gap-1.5">
               <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Productos</p>
               {detail.items.map(item => (
@@ -714,18 +878,15 @@ export default function VentasPage() {
               ))}
             </div>
 
-            {/* Notas de la venta */}
             {detail.notes && (
               <div className="px-4 pt-3">
-                <div className="rounded-xl p-3"
-                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                <div className="rounded-xl p-3" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
                   <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Notas</p>
                   <p className="text-xs" style={{ color: 'var(--text)', fontStyle: 'italic' }}>{detail.notes}</p>
                 </div>
               </div>
             )}
 
-            {/* Resumen de pago */}
             <div className="px-4 pt-4 pb-4 mt-auto">
               <div className="rounded-xl p-3 flex flex-col gap-2"
                 style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
@@ -737,7 +898,6 @@ export default function VentasPage() {
                   </span>
                 </div>
 
-                {/* Efectivo puro: mostrar monto recibido y cambio */}
                 {detail.payment_method === 'cash' && (
                   <>
                     <div className="flex justify-between text-xs">
@@ -751,28 +911,20 @@ export default function VentasPage() {
                   </>
                 )}
 
-                {/* Desglose de pago mixto */}
                 {detail.payment_method === 'mixed' && detail.payments.length > 0 && (
-                  <>
-                    <div className="pt-0.5 pb-0.5" style={{ borderTop: '1px dashed var(--border)' }}>
-                      <p className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Desglose</p>
-                      <div className="flex flex-col gap-1">
-                        {detail.payments.map((p, i) => (
-                          <div key={i} className="flex justify-between text-xs">
-                            <span style={{ color: 'var(--text-muted)' }}>
-                              {METHOD_LABEL[p.method] ?? p.method}
-                            </span>
-                            <span className="font-semibold" style={{ color: METHOD_COLOR[p.method] ?? 'var(--text)' }}>
-                              {fmt(p.amount)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                  <div className="pt-0.5 pb-0.5" style={{ borderTop: '1px dashed var(--border)' }}>
+                    <p className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Desglose</p>
+                    <div className="flex flex-col gap-1">
+                      {detail.payments.map((p, i) => (
+                        <div key={i} className="flex justify-between text-xs">
+                          <span style={{ color: 'var(--text-muted)' }}>{METHOD_LABEL[p.method] ?? p.method}</span>
+                          <span className="font-semibold" style={{ color: METHOD_COLOR[p.method] ?? 'var(--text)' }}>{fmt(p.amount)}</span>
+                        </div>
+                      ))}
                     </div>
-                  </>
+                  </div>
                 )}
 
-                {/* Si es mixto pero no hay datos en sale_payments (ventas antiguas), mostrar lo que hay */}
                 {detail.payment_method === 'mixed' && detail.payments.length === 0 && (
                   <div className="flex justify-between text-xs">
                     <span style={{ color: 'var(--text-muted)' }}>Total pagado</span>
@@ -790,7 +942,7 @@ export default function VentasPage() {
         ) : null}
       </div>
 
-      {/* ── Modal de exportación ─────────────────────────────────────────── */}
+      {/* ── Modal de exportación ──────────────────────────────────────────── */}
       {showExport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.75)' }}
@@ -803,9 +955,8 @@ export default function VentasPage() {
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#052e16' }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                    <polyline points="14 2 14 8 20 8"/>
-                    <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-                    <polyline points="10 9 9 9 8 9"/>
+                    <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
                   </svg>
                 </div>
                 <div>
@@ -820,10 +971,10 @@ export default function VentasPage() {
 
             <div className="p-4 flex flex-col gap-2">
               {([
-                { id: 'day',    label: 'Día actual',             sub: `${formatDateLabel(selectedDate)} (${selectedDate})` },
-                { id: 'week',   label: 'Esta semana',             sub: 'Lunes de esta semana hasta hoy' },
-                { id: 'month',  label: 'Este mes',                sub: new Date().toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }) },
-                { id: 'custom', label: 'Período personalizado',   sub: 'Selecciona un rango de fechas' },
+                { id: 'day',    label: 'Hoy',                      sub: new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) },
+                { id: 'week',   label: 'Esta semana',               sub: 'Lunes de esta semana hasta hoy' },
+                { id: 'month',  label: 'Este mes',                  sub: new Date().toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }) },
+                { id: 'custom', label: 'Período personalizado',     sub: 'Selecciona un rango de fechas' },
               ] as { id: ExportRange; label: string; sub: string }[]).map(opt => (
                 <button key={opt.id} onClick={() => setExportRange(opt.id)}
                   className="flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all"
