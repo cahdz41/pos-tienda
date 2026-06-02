@@ -7,13 +7,22 @@
  * intentar abrir el deep link, significa que la app se abrió.
  * Si no hay blur en 1.5s, abre WhatsApp Web.
  */
-export function openWhatsApp(phone: string, text: string): void {
+/**
+ * preOpenedWindow: ventana reservada con window.open('','_blank') ANTES de cualquier
+ * await en el handler. Necesario para iOS Safari, que bloquea window.open post-await.
+ */
+export function openWhatsApp(phone: string, text: string, preOpenedWindow?: Window | null): void {
   const digits = phone.replace(/\D/g, '')
   const encoded = encodeURIComponent(text)
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
 
   if (isMobile) {
-    window.open(`https://wa.me/${digits}?text=${encoded}`, '_blank')
+    const url = `https://wa.me/${digits}?text=${encoded}`
+    if (preOpenedWindow) {
+      preOpenedWindow.location.href = url
+    } else {
+      window.open(url, '_blank')
+    }
     return
   }
 

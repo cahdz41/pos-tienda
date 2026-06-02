@@ -351,3 +351,81 @@ CLOUDINARY_API_SECRET=tu_api_secret           # Fase 4 — NUNCA NEXT_PUBLIC_
 | Cupones y descuentos | Edge cases que consumen días |
 | Búsqueda full-text Postgres | `ilike` es suficiente para 50-200 productos |
 | SSR con cookies de sesión | El proyecto usa cliente directo sin `@supabase/ssr` deliberadamente — no romper ese patrón |
+
+---
+
+## 11. Publicación automática en Facebook e Instagram (pendiente)
+
+### Contexto de la conversación
+El dueño quiere publicar ofertas e imágenes de paquetes directamente desde el POS a Facebook e Instagram, sin pagar herramientas de gestión de redes ($20+/mes) y sin usar Gemini/OpenAI como publicador (solo como generador de contenido).
+
+### Decisión de arquitectura
+- **Gemini API** → genera el caption + hashtags automáticamente basado en los datos de la oferta
+- **Meta Graph API** → publica orgánicamente en Facebook Page e Instagram Business (es gratis, solo requiere setup inicial)
+- Las imágenes se generan en canvas (ya existe esa funcionalidad), se suben a **Supabase Storage** para obtener URL pública, y esa URL se envía a Meta
+
+### Estado del setup
+- [ ] Confirmar que la cuenta de Instagram de Chocholand es **Business** (no Personal/Creator)
+- [ ] Confirmar que Instagram está enlazado a la Página de Facebook de Chocholand Suplementos
+- El dueño es administrador de la Página de Facebook ✅
+- La Página de Facebook de Chocholand Suplementos ya existe ✅
+- Ya hay MCP de Meta configurado en el proyecto (para ads) — puede compartir credenciales base ✅
+
+### Setup de credenciales (solo una vez, ~20 min)
+
+1. **Crear app en Meta Developers** → [developers.facebook.com](https://developers.facebook.com) → Mis apps → Crear app → Tipo: Empresa
+2. **Agregar productos**: Instagram Graph API + Facebook Login for Business
+3. **Graph API Explorer** → seleccionar app → seleccionar Página "Chocholand Suplementos" → permisos:
+   - `pages_manage_posts`
+   - `pages_read_engagement`
+   - `instagram_content_publish`
+4. **Convertir token a Page Access Token** (no expira) → guardar en `.env.local`
+5. **Obtener Instagram Business Account ID** → llamada a `/me/accounts` + `/PAGE_ID?fields=instagram_business_account`
+
+### Variables de entorno a agregar
+```bash
+META_PAGE_ACCESS_TOKEN=EAAxxxxxxx          # Token de larga duración de la Página
+META_PAGE_ID=xxxxxxxxxxxxxxxxx             # ID de la Página de Facebook
+META_IG_ACCOUNT_ID=xxxxxxxxxxxxxxxxx       # ID de la cuenta de Instagram Business
+GEMINI_API_KEY=AIzaxxxxxxxxx               # Para generar captions (si no está ya)
+```
+
+### Flujo completo a implementar
+
+```
+[Botón "Publicar en Redes"] en sección Generar Imágenes del POS
+  → Gemini genera caption + hashtags de suplementos basado en nombre/precio/descuento
+  → Imagen del canvas se sube a Supabase Storage (URL pública temporal)
+  → POST /api/social/publish
+      → Sube imagen a Meta como container: POST /{ig-user-id}/media
+      → Publica container: POST /{ig-user-id}/media_publish
+      → Publica en Facebook Page: POST /{page-id}/photos
+  → Confirmación en el POS con link al post
+```
+
+### Archivos a crear
+```
+src/app/api/social/
+└── publish/route.ts     # Recibe { imageDataUrl, offerData } → sube a Storage → publica en Meta
+
+src/lib/
+├── meta-publish.ts      # Funciones: uploadToInstagram(), publishInstagram(), publishFacebook()
+└── gemini-caption.ts    # Función: generateCaption(offer) → string
+```
+
+### Prompt base para Gemini (caption de oferta)
+```
+Eres el community manager de Chocholand Suplementos, una tienda de suplementos deportivos en México.
+Genera un caption para Instagram/Facebook para esta oferta del mes:
+- Producto: {nombre}
+- Precio normal: ${precio_lista}
+- Precio oferta: ${precio_oferta}
+- Descuento: {pct}%
+- Categoría: {categoria}
+
+El caption debe:
+- Ser en español, energético y motivador
+- Incluir el precio de oferta claramente
+- Terminar con 8-12 hashtags relevantes de suplementos en México
+- Máximo 200 palabras
+```

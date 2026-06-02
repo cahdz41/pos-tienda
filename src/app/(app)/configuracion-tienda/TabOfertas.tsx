@@ -4,6 +4,17 @@ import { useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 import type { Offer } from '@/types'
 
+const CATEGORY_TABS = ['Todos', 'Proteinas', 'Pre-entrenos', 'Creatinas', 'Otros'] as const
+type CategoryTab = typeof CATEGORY_TABS[number]
+
+function matchTab(categoria: string, tab: CategoryTab): boolean {
+  if (tab === 'Todos') return true
+  if (tab === 'Proteinas') return /prote/i.test(categoria)
+  if (tab === 'Pre-entrenos') return /pre[\s-]?entr/i.test(categoria)
+  if (tab === 'Creatinas') return /creat/i.test(categoria)
+  return !/prote|pre[\s-]?entr|creat/i.test(categoria) // Otros
+}
+
 interface VariantOption {
   id: string
   flavor: string | null
@@ -47,8 +58,14 @@ export default function TabOfertas({ offers, onOffersChange }: {
   const [precioOferta, setPrecioOferta] = useState('')
   const [saving, setSaving]             = useState(false)
   const [deletingId, setDeletingId]     = useState<number | null>(null)
+  const [activeTab, setActiveTab]       = useState<CategoryTab>('Todos')
 
   const active = textSel ?? catSel
+
+  const visibleOffers = useMemo(
+    () => activeTab === 'Todos' ? offers : offers.filter(o => matchTab(o.categoria, activeTab)),
+    [offers, activeTab]
+  )
 
   async function loadVariants() {
     if (variants.length) return
@@ -172,9 +189,28 @@ export default function TabOfertas({ offers, onOffersChange }: {
         </div>
       </div>
 
+      {/* Pestañas de categoría */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+        {CATEGORY_TABS.map(tab => {
+          const count = tab === 'Todos' ? offers.length : offers.filter(o => matchTab(o.categoria, tab)).length
+          const isActive = activeTab === tab
+          return (
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{
+              padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', border: isActive ? 'none' : '1px solid var(--border)',
+              background: isActive ? 'var(--accent)' : 'var(--surface)',
+              color: isActive ? '#000' : count === 0 ? 'var(--text-muted)' : 'var(--text)',
+              transition: 'all 0.15s',
+            }}>
+              {tab} {count > 0 && <span style={{ opacity: 0.75 }}>({count})</span>}
+            </button>
+          )
+        })}
+      </div>
+
       {/* Lista */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {offers.map(o => {
+        {visibleOffers.map(o => {
           const pct = o.precio_lista > 0 ? Math.round(((o.precio_lista - o.precio_oferta) / o.precio_lista) * 100) : 0
           return (
             <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
@@ -200,9 +236,9 @@ export default function TabOfertas({ offers, onOffersChange }: {
             </div>
           )
         })}
-        {offers.length === 0 && (
+        {visibleOffers.length === 0 && (
           <div style={{ padding: '48px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-            No hay ofertas activas.
+            {offers.length === 0 ? 'No hay ofertas activas.' : `No hay ofertas en ${activeTab}.`}
           </div>
         )}
       </div>

@@ -6,8 +6,10 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { VoiceCommandProvider } from '@/contexts/VoiceCommandContext'
+import { NewOrderNotificationProvider } from '@/contexts/NewOrderNotificationContext'
 import Sidebar from '@/components/Sidebar'
 import VoiceCommandButton from '@/components/VoiceCommandButton'
+import { NewOrderNotifications } from '@/components/pos/NewOrderNotifications'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -38,15 +40,18 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null
 
   return (
-    <VoiceCommandProvider>
-      <div className="flex h-full" style={{ background: 'var(--bg)' }}>
-        <Sidebar />
-        <main className="flex-1 min-w-0 overflow-auto">
-          {children}
-        </main>
-      </div>
-      <VoiceCommandButton />
-    </VoiceCommandProvider>
+    <NewOrderNotificationProvider>
+      <VoiceCommandProvider>
+        <div className="flex h-full" style={{ background: 'var(--bg)' }}>
+          <Sidebar />
+          <main className="flex-1 min-w-0 overflow-auto">
+            {children}
+          </main>
+        </div>
+        <VoiceCommandButton />
+        <NewOrderNotifications />
+      </VoiceCommandProvider>
+    </NewOrderNotificationProvider>
   )
 }
 

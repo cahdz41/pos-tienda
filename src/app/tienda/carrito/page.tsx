@@ -132,6 +132,11 @@ export default function CarritoPage() {
       setError('Por favor completa tu nombre y WhatsApp.')
       return
     }
+
+    // Reservar ventana antes de cualquier await: iOS Safari bloquea window.open post-await
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    const waWindow = isMobile ? window.open('', '_blank') : null
+
     setLoading(true)
     setError(null)
     try {
@@ -153,8 +158,9 @@ export default function CarritoPage() {
       clearCart()
       setShowModal(false)
       const message = buildWhatsAppMessage(name.trim(), phone.trim(), notes, items, total)
-      openWhatsApp(WA_NUMBER, message)
+      openWhatsApp(WA_NUMBER, message, waWindow)
     } catch (e: unknown) {
+      waWindow?.close()
       setError(e instanceof Error ? e.message : 'Error desconocido')
       setLoading(false)
     }
