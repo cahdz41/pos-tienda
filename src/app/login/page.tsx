@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, FormEvent } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -32,7 +33,9 @@ export default function LoginPage() {
       setError('Usuario o contraseña incorrectos')
       setLoading(false)
     } else {
-      router.replace('/pos')
+      const next = searchParams.get('next')
+      const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : '/pos'
+      router.replace(safeNext)
     }
   }
 

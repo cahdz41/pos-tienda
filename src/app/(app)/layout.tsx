@@ -3,7 +3,7 @@
 // Solo redirigir cuando loading = false y user = null.
 
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { VoiceCommandProvider } from '@/contexts/VoiceCommandContext'
 import { NewOrderNotificationProvider } from '@/contexts/NewOrderNotificationContext'
@@ -14,12 +14,13 @@ import { NewOrderNotifications } from '@/components/pos/NewOrderNotifications'
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace('/tienda')
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`)
     }
-  }, [loading, user, router])
+  }, [loading, user, router, pathname])
 
   // Mientras carga auth → spinner mínimo (NUNCA null)
   if (loading) {
