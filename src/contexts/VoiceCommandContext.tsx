@@ -48,7 +48,8 @@ export function VoiceCommandProvider({ children }: { children: React.ReactNode }
     setTranscript(null)
     setMessage(null)
 
-    start(async (text) => {
+    start(async (transcripts) => {
+      const text = transcripts[0] ?? ''
       setStatus('processing')
       setTranscript(text)
 
@@ -56,7 +57,7 @@ export function VoiceCommandProvider({ children }: { children: React.ReactNode }
         const res  = await fetch('/api/voice/command', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: text }),
+          body: JSON.stringify({ command: text, alternatives: transcripts.slice(1) }),
         })
         const data = await res.json() as {
           action: string

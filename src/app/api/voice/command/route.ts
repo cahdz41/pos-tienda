@@ -168,14 +168,19 @@ Si el usuario solo quiere ir a una sección sin acción específica:
 
 export async function POST(req: NextRequest) {
   try {
-    const { command } = await req.json() as { command?: string }
+    const { command, alternatives } = await req.json() as { command?: string; alternatives?: string[] }
     if (!command?.trim()) {
       return NextResponse.json({ action: 'unknown', message: 'Comando vacío' }, { status: 400 })
     }
 
+    const extras = (alternatives ?? []).filter(a => a && a !== command)
+    const userText = extras.length > 0
+      ? `Transcripción principal: "${command}"\nAlternativas posibles (en orden de confianza):\n${extras.map((a, i) => `${i + 2}. "${a}"`).join('\n')}\n\nElige la interpretación más probable como comando.`
+      : command
+
     const result = await ai.models.generateContent({
       model: MODEL,
-      contents: [{ role: 'user', parts: [{ text: command }] }],
+      contents: [{ role: 'user', parts: [{ text: userText }] }],
       config: { systemInstruction: SYSTEM_PROMPT },
     })
 

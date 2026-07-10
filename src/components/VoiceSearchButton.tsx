@@ -32,7 +32,12 @@ export default function VoiceSearchButton({ onResult }: Props) {
       `}</style>
       <button
         type="button"
-        onClick={() => listening ? stop() : start(text => onResult(normalizeVoiceQuery(text)))}
+        onClick={() => listening ? stop() : start(transcripts => {
+          // Pick the alternative whose normalized form has the most content
+          const normalized = transcripts.map(t => normalizeVoiceQuery(t))
+          const best = normalized.reduce((a, b) => b.length > a.length ? b : a, normalized[0] ?? '')
+          onResult(best)
+        })}
         title={
           errored   ? 'Micrófono no disponible' :
           listening ? 'Escuchando… (clic para cancelar)' :

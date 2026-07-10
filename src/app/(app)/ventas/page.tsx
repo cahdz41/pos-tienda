@@ -179,6 +179,7 @@ export default function VentasPage() {
   // Datos
   const [rawSales, setRawSales]           = useState<SaleRow[]>([])
   const [loading, setLoading]             = useState(false)
+  const [queryError, setQueryError]       = useState<string | null>(null)
   const [detail, setDetail]               = useState<SaleDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
@@ -217,6 +218,7 @@ export default function VentasPage() {
   async function handleSearch() {
     setLoading(true)
     setHasSearched(true)
+    setQueryError(null)
     setDetail(null)
     const supabase = createClient()
     const { start, end } = getSearchRange(periodFilter, customFrom, customTo)
@@ -232,7 +234,13 @@ export default function VentasPage() {
     if (cashierFilter !== 'all') query = query.eq('cashier_id', cashierFilter)
 
     const { data: salesData, error } = await query
-    if (error || !salesData) { setLoading(false); return }
+    if (error) {
+      console.error('[Ventas] Error al consultar ventas:', error)
+      setQueryError(error.message ?? 'Error al cargar ventas')
+      setLoading(false)
+      return
+    }
+    if (!salesData) { setLoading(false); return }
 
     // Nombres de cajeros
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -746,6 +754,21 @@ export default function VentasPage() {
             <div className="flex items-center justify-center py-20">
               <div className="w-7 h-7 rounded-full border-2 animate-spin"
                 style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+            </div>
+          ) : queryError ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center text-2xl"
+                style={{ background: 'rgba(255,107,107,0.1)' }}>⚠️</div>
+              <p className="text-sm font-medium" style={{ color: '#FF6B6B' }}>
+                Error al cargar ventas
+              </p>
+              <p className="text-xs font-mono px-4 py-2 rounded-lg text-center max-w-xs"
+                style={{ color: 'var(--text-muted)', background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                {queryError}
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>
+                Revisa la consola del navegador para más detalles
+              </p>
             </div>
           ) : displayedSales.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3">

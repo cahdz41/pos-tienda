@@ -3,12 +3,13 @@
 import { useState, useRef, useCallback } from 'react'
 
 // Web Speech API — no está en todas las versiones del DOM lib de TS
+interface SRAlternative { transcript: string; confidence: number }
 interface SR {
   lang: string
   interimResults: boolean
   maxAlternatives: number
   onstart:  (() => void) | null
-  onresult: ((e: { results: { [n: number]: { [n: number]: { transcript: string } } } }) => void) | null
+  onresult: ((e: { results: { [n: number]: SRAlternative[] & { length: number } } }) => void) | null
   onerror:  (() => void) | null
   onend:    (() => void) | null
   start(): void
@@ -20,7 +21,7 @@ export type SpeechStatus = 'idle' | 'listening' | 'error'
 interface UseSpeechRecognitionReturn {
   status: SpeechStatus
   supported: boolean
-  start: (onResult: (text: string) => void) => void
+  start: (onResult: (transcripts: string[]) => void) => void
   stop: () => void
 }
 
@@ -32,7 +33,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     typeof window !== 'undefined' &&
     ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
 
-  const start = useCallback((onResult: (text: string) => void) => {
+  const start = useCallback((onResult: (transcripts: string[]) => void) => {
     if (!supported) { setStatus('error'); return }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,12 +42,21 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const recognition: SR = new SpeechRecognitionCtor()
     recognition.lang = 'es-MX'
     recognition.interimResults = false
-    recognition.maxAlternatives = 1
+    recognition.maxAlternatives = 5
     recognitionRef.current = recognition
 
     recognition.onstart  = () => setStatus('listening')
-    recognition.onresult = (e) => { onResult(e.results[0][0].transcript); setStatus('idle') }
-    recognition.onerror  = () => setStatus('error')
+    recognition.onresult = (e) => {
+      const alts = e.results[0]
+      const transcripts: string[] = []
+      for (let i = 0; i < alts.length; i++) {
+        const t = alts[i].transcript?.trim()
+        if (t) transcripts.push(t)
+      }
+      onResult(transcripts.length > 0 ? transcripts : [''])
+      setStatus('idle')
+    }
+    recognition.onerror  = () => { recognitionRef.current = null; setStatus('error') }
     recognition.onend    = () => setStatus((s) => s === 'listening' ? 'idle' : s)
 
     recognition.start()

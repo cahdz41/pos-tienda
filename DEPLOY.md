@@ -37,7 +37,8 @@ https://github.com/cahdz41/pos-tienda
 
 **VPS:** Hostinger KVM2  
 **Acceso:** Terminal en hPanel de Hostinger  
-**Dominio:** `pos-storeonline.duckdns.org`
+**Dominio principal:** `chocholand.cloud`  
+**Dominio legacy (aún activo):** `pos-storeonline.duckdns.org`
 
 ### Flujo de tráfico real (cómo llega una petición a la app)
 
@@ -47,7 +48,7 @@ Navegador
     ▼ puerto 443 (HTTPS)
 Traefik  [Docker: n8n-traefik-1]
     │  lee: /docker/n8n/traefik-dynamic/pos.yml
-    │  regla: Host = pos-storeonline.duckdns.org
+    │  regla: Host = chocholand.cloud || pos-storeonline.duckdns.org
     ▼
 172.17.0.1:3000  (IP del host desde Docker)
     │
@@ -178,7 +179,7 @@ Pegar exactamente este contenido:
 ```nginx
 server {
     listen 8082;
-    server_name pos-storeonline.duckdns.org;
+    server_name pos-storeonline.duckdns.org chocholand.cloud www.chocholand.cloud;
 
     location / {
         proxy_pass http://localhost:3000;
@@ -244,7 +245,7 @@ pm2 list
 
 - [ ] `pm2 list` muestra `pos-v2` en `online` con pocos reinicios
 - [ ] `curl http://localhost:3000` responde HTML
-- [ ] El dominio `pos-storeonline.duckdns.org` carga correctamente en el navegador
+- [ ] El dominio `https://chocholand.cloud` carga correctamente en el navegador
 - [ ] Los otros servicios siguen funcionando (`docker ps` muestra todos `Up`)
 
 ---
@@ -281,7 +282,7 @@ Después de hacer el primer deploy con el asistente IA, ejecutar en el VPS:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
-  -d '{"url": "https://pos-storeonline.duckdns.org/api/telegram/webhook"}'
+  -d '{"url": "https://chocholand.cloud/api/telegram/webhook"}'
 ```
 
 Respuesta esperada: `{"ok":true,"result":true}`. Solo se necesita hacer esto una vez.
@@ -327,7 +328,7 @@ Traefik detecta cambios en estos archivos automáticamente (`--providers.file.wa
 http:
   routers:
     pos-router:
-      rule: "Host(`pos-storeonline.duckdns.org`)"
+      rule: "Host(`pos-storeonline.duckdns.org`) || Host(`chocholand.cloud`) || Host(`www.chocholand.cloud`)"
       entrypoints:
         - websecure
       tls:
