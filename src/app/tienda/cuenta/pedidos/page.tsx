@@ -88,7 +88,7 @@ export default function MisPedidosPage() {
             ← Catálogo
           </Link>
           <h1 style={{
-            fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+            fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800,
             fontSize: 'clamp(24px, 4vw, 36px)', color: '#FFFFFF',
             margin: '0 0 6px', letterSpacing: '-0.5px',
           }}>
@@ -162,7 +162,7 @@ export default function MisPedidosPage() {
             background: '#F0B429', borderRadius: '12px',
             color: '#000000', fontWeight: 700, fontSize: '14px',
             textDecoration: 'none',
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
           }}>
             Explorar catálogo →
           </Link>
@@ -228,7 +228,7 @@ export default function MisPedidosPage() {
                   <div style={{ textAlign: 'right' }}>
                     <p style={{ margin: '0 0 2px', fontSize: '10px', color: '#444444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</p>
                     <span style={{
-                      fontFamily: 'var(--font-syne, system-ui)',
+                      fontFamily: 'var(--font-barlow-condensed, system-ui)',
                       fontWeight: 800, fontSize: '20px', color: '#F0B429',
                     }}>
                       ${order.total.toFixed(2)} MXN

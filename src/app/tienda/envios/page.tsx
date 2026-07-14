@@ -29,13 +29,13 @@ export default function EnviosPage() {
       </div>
 
       <p style={{
-        fontFamily: 'var(--font-syne, system-ui)', fontSize: '11px', fontWeight: 700,
+        fontFamily: 'var(--font-barlow-condensed, system-ui)', fontSize: '11px', fontWeight: 700,
         letterSpacing: '0.2em', textTransform: 'uppercase', color: 'rgba(200,20,20,0.7)', margin: '0 0 10px',
       }}>
         Nuestra política
       </p>
       <h1 style={{
-        fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+        fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800,
         fontSize: 'clamp(30px, 5vw, 48px)', color: '#fff', margin: '0 0 40px',
         lineHeight: 1.05, letterSpacing: '-1.5px',
       }}>

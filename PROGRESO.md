@@ -986,17 +986,43 @@ ALTER TABLE sales ADD COLUMN IF NOT EXISTS notes text;
 
 ---
 
+## Sesión 16 — 2026-07-14 (pos-v2) — Auditoría parte 2: estética + UX móvil
+
+> Continuación de la Sesión 15. Lote elegido por Carlos: **quitar Syne + aligerar hero + UX móvil**.
+> (NO se hizo Conversión #8 ni el resto de #7 — quedan pendientes.)
+
+### ✅ Quitar fuente Syne (elimina el "look de IA")
+
+- Reemplazados los 67 usos de `var(--font-syne, system-ui)` por `var(--font-barlow-condensed, system-ui)` en 20 archivos de la tienda (sed global).
+- `src/app/tienda/layout.tsx` — removido el loader de Syne y su `variable`; a Barlow Condensed se le agregó el peso `600` (para los labels que usaban Syne 600). Quedan 2 familias: Barlow Condensed (display) + DM Sans (neutra), tal como pedía la auditoría. Menos archivos woff2.
+
+### ✅ Aligerar el hero (rendimiento / batería)
+
+- `src/app/tienda/page.tsx` — el hero pasó de ~10 animaciones infinitas simultáneas a **una sola sutil** (pulso del borde del logo). Eliminadas: 22 partículas, 3 anillos shockwave, 3 líneas de energía, scanline móvil, glitch loop del logo y del texto, flicker infinito del texto, y el remount cada 8s (`setInterval`/`tick`). Conserva la identidad neon: logo con glow, texto con glow rojo estático, animaciones de entrada que corren una vez. Keyframes muertos eliminados (`glitch1`, `neonFlicker`, `particleDrift`, `scanline`, `energyLine`, `shockwave`, `catPillGlow`).
+
+### ✅ UX móvil
+
+- **Medio hero en móvil:** `.hero-section { min-height: 62vh }` en `@media (max-width: 640px)` (antes 92vh ocupaba pantalla completa antes del primer producto). Logo y texto también se reducen.
+- **Buscador ≥44px:** ya cumplía — el `StoreSearch` nuevo tiene input de **56px** de alto y ancho 100% en móvil. Verificado, sin cambios.
+- **Tiles de categoría:** el sidebar en móvil pasó de chips con scroll horizontal (solo 3 de 11 visibles) a **cuadrícula de 2 columnas** con TODAS las categorías visibles como tiles. Ofertas y Paquetes ahora son tiles a ancho completo (`cat-special`). Clases nuevas: `cat-sep`, `cat-special` + reglas en `CATALOG_CSS`.
+
+### 📋 Verificación
+
+- Dev server: `/tienda`, `/tienda/envios`, detalle de producto y `/tienda/carrito` responden HTTP 200, sin errores de compilación ni runtime.
+- `grep` confirma cero referencias a Syne y cero keyframes colgantes.
+- Sin errores nuevos de TypeScript.
+- Nota: el flicker del texto "CHOCHOLAND" en `StoreNav` se conservó (fuera del alcance del hero; es una sola animación sutil).
+
+---
+
 ## ⏳ Pendiente — Continuar aquí
 
 ### Items de la auditoría NO abordados todavía
 - **#5 Limpiar categorías** — NO es código: se arregla desde el POS/inventario (unificar duplicados como "bcaa"/"AMINOACIDOS Y BCCAS", asignar huérfanos, recategorizar "Fish Oil Omega3"). Luego generar el menú de la tienda desde las categorías reales.
 - **Typos en nombres de producto** — datos, se corrigen en el POS: "Gold Standar"→Standard, "Muscle Sanwich"→Sandwich, "Roonie Coleman"→Ronnie, "Mnohydrate"→Monohydrate, "Glyecerol"→Glycerol, "Dragon Lyche"→Lychee, duplicado On/Optimum Nutrition Gold Standar Isolate.
-- **#7 Estética** ("look de IA") — reducir las 30-41 animaciones infinitas a una sola sutil en el hero, quitar la fuente Syne (dejar Barlow Condensed + una neutra), quitar emojis del menú (🔥🎁→badges de texto), unificar tarjetas de catálogo vs ofertas, elegir un solo acento (rojo o dorado). **Mayor esfuerzo/riesgo — dejado para el final.**
+- **#7 Estética (resto)** — emojis del menú (🔥🎁 → badges de texto), unificar tarjetas de catálogo vs ofertas, elegir un solo acento (rojo o dorado). (Ya hecho: quitar Syne + aligerar animaciones del hero.)
 - **#8 Conversión** — descripciones de producto (`store_description` vacío), galería en detalle, orden por precio en el catálogo, info de pago/envío en el checkout, pedido como invitado.
-- **Otros móvil** — tiles visuales de categoría, medio hero en móvil, área de toque del buscador ≥44px.
 
 ### Al retomar
 1. `git pull origin main` (por si se trabajó en la otra PC).
-2. Los cambios de la Sesión 15 están sin commitear — revisar `git status` / `git diff`.
-3. Pedir datos del footer a Carlos e implementar Item #6.
-4. Levantar dev server (`npm run dev`) y verificar en DevTools móvil (375px) el header y las 2 columnas.
+2. Verificar en DevTools móvil (375px): header, 2 columnas del catálogo, tiles de categoría y medio hero.

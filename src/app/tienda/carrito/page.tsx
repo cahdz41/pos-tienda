@@ -84,7 +84,7 @@ export default function CarritoPage() {
           <path d="M1 1h4l2.68 13.39a2 2 0 001.98 1.61H19a2 2 0 001.98-1.61L23 6H6"/>
         </svg>
         <h1 style={{
-          fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+          fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800,
           fontSize: '28px', color: '#FFFFFF', margin: '0 0 16px', letterSpacing: '-0.5px',
         }}>
           Tu carrito está vacío
@@ -191,7 +191,7 @@ export default function CarritoPage() {
       </div>
 
       <h1 style={{
-        fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+        fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800,
         fontSize: 'clamp(28px, 4vw, 48px)', color: '#FFFFFF',
         margin: '0 0 40px', letterSpacing: '-1px', lineHeight: 1.05,
       }}>
@@ -240,7 +240,7 @@ export default function CarritoPage() {
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
                       <span style={{
-                        fontFamily: 'var(--font-syne, system-ui)',
+                        fontFamily: 'var(--font-barlow-condensed, system-ui)',
                         fontWeight: 800, fontSize: '22px', color: '#2A2A2A',
                       }}>
                         {item.productName.charAt(0).toUpperCase()}
@@ -277,7 +277,7 @@ export default function CarritoPage() {
                     </p>
                   </div>
                   <span style={{
-                    fontFamily: 'var(--font-syne, system-ui)',
+                    fontFamily: 'var(--font-barlow-condensed, system-ui)',
                     fontWeight: 700, fontSize: '16px', color: '#F0B429', flexShrink: 0,
                   }}>
                     ${(item.price * item.quantity).toFixed(2)}
@@ -344,7 +344,7 @@ export default function CarritoPage() {
                         )}
                       </div>
                       <span style={{
-                        fontFamily: 'var(--font-syne, system-ui)',
+                        fontFamily: 'var(--font-barlow-condensed, system-ui)',
                         fontWeight: 700, fontSize: '14px', color: '#F0B429', flexShrink: 0,
                       }}>
                         ${(item.price * item.quantity).toFixed(2)}
@@ -378,7 +378,7 @@ export default function CarritoPage() {
           <div>
             <p style={{ margin: 0, fontSize: '11px', color: '#555555', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</p>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '4px' }}>
-              <span style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800, fontSize: '30px', color: '#F0B429' }}>
+              <span style={{ fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800, fontSize: '30px', color: '#F0B429' }}>
                 ${total.toFixed(2)}
               </span>
               <span style={{ fontSize: '13px', color: '#444444' }}>MXN</span>
@@ -388,7 +388,7 @@ export default function CarritoPage() {
             padding: '14px 28px',
             background: '#F0B429', border: 'none', borderRadius: '12px',
             color: '#000000', fontSize: '15px', fontWeight: 800,
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             cursor: 'pointer', letterSpacing: '0.02em',
             transition: 'opacity 0.2s',
           }}>
@@ -446,7 +446,7 @@ export default function CarritoPage() {
 
           {/* Títulos */}
           <h2 style={{
-            fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+            fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800,
             fontSize: '24px', color: '#FFFFFF', margin: '0 0 14px',
             letterSpacing: '-0.5px', lineHeight: 1.1,
           }}>
@@ -483,7 +483,7 @@ export default function CarritoPage() {
               {items.reduce((s, i) => s + i.quantity, 0)} artículo{items.reduce((s, i) => s + i.quantity, 0) !== 1 ? 's' : ''}
             </span>
             <span style={{
-              fontFamily: 'var(--font-syne, system-ui)',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               fontWeight: 800, fontSize: '18px', color: '#F0B429',
             }}>
               ${total.toFixed(2)} MXN
@@ -608,7 +608,7 @@ export default function CarritoPage() {
               border: 'none', borderRadius: '14px',
               color: loading ? '#444444' : '#FFFFFF',
               fontSize: '16px', fontWeight: 700,
-              fontFamily: 'var(--font-syne, system-ui)',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               cursor: loading ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
               transition: 'opacity 0.2s',

@@ -61,7 +61,7 @@ export default function StoreNav() {
             <img src={LOGO_SM} alt="Chocholand" width={44} height={44} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <span className="store-nav-brand" style={{
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             fontWeight: 800, fontSize: '18px',
             color: '#FFFFFF', letterSpacing: '0.08em',
             animation: 'neonFlicker 7s ease-in-out infinite',

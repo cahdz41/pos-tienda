@@ -173,7 +173,7 @@ export default async function PaquetePage({ params }: Props) {
         </div>
 
         <h1 style={{
-          fontFamily: 'var(--font-syne, system-ui)',
+          fontFamily: 'var(--font-barlow-condensed, system-ui)',
           fontWeight: 800,
           fontSize: 'clamp(28px, 4vw, 52px)',
           color: '#FFFFFF',
@@ -186,7 +186,7 @@ export default async function PaquetePage({ params }: Props) {
 
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
           <span style={{
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             fontWeight: 700, fontSize: '36px', color: '#4ade80',
           }}>
             ${typedPkg.precio_oferta.toFixed(2)}
@@ -230,7 +230,7 @@ export default async function PaquetePage({ params }: Props) {
 
       {/* Productos del paquete */}
       <h2 style={{
-        fontFamily: 'var(--font-syne, system-ui)',
+        fontFamily: 'var(--font-barlow-condensed, system-ui)',
         fontWeight: 700,
         fontSize: '18px',
         color: '#FFFFFF',

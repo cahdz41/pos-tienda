@@ -86,7 +86,7 @@ export default function ProductCard({ product, offersByVariant }: Props) {
               }} />
               <span style={{
                 position: 'relative',
-                fontFamily: 'var(--font-syne, system-ui)',
+                fontFamily: 'var(--font-barlow-condensed, system-ui)',
                 fontWeight: 800,
                 fontSize: '80px',
                 color: '#1E1800',
@@ -183,7 +183,7 @@ export default function ProductCard({ product, offersByVariant }: Props) {
               fontSize: '20px',
               fontWeight: 800,
               color: pct > 0 ? '#ff4040' : '#F0B429',
-              fontFamily: 'var(--font-syne, system-ui)',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               letterSpacing: '-0.5px',
             }}>
               {fmtMXN(bestEff)}

@@ -361,7 +361,7 @@ export default function ChatWidget() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <BotAvatar />
               <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', fontFamily: 'var(--font-syne, sans-serif)' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', fontFamily: 'var(--font-barlow-condensed, sans-serif)' }}>
                   Asistente Chocholand
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>

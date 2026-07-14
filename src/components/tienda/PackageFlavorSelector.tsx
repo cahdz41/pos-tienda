@@ -124,7 +124,7 @@ export default function PackageFlavorSelector({
                   />
                 ) : (
                   <span style={{
-                    fontFamily: 'var(--font-syne, system-ui)',
+                    fontFamily: 'var(--font-barlow-condensed, system-ui)',
                     fontWeight: 800, fontSize: '28px', color: '#2A2A2A',
                   }}>
                     {p.productName.charAt(0).toUpperCase()}
@@ -220,7 +220,7 @@ export default function PackageFlavorSelector({
             Precio del paquete
           </p>
           <span style={{
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             fontWeight: 800, fontSize: '28px', color: '#4ade80',
           }}>
             ${packagePrice.toFixed(2)}
@@ -238,7 +238,7 @@ export default function PackageFlavorSelector({
             borderRadius: '12px',
             color: !allAvailable ? '#444444' : added ? '#4CAF50' : '#000000',
             fontSize: '15px', fontWeight: 700,
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             cursor: !allAvailable ? 'not-allowed' : 'pointer',
             transition: 'all 0.2s',
             letterSpacing: '0.03em',

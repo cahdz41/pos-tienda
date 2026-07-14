@@ -11,45 +11,9 @@ import { cldUrl } from '@/lib/cloudinary'
 const LOGO_URL = 'https://res.cloudinary.com/dflnist9g/image/upload/v1776893327/303479618_567324658514485_3402746677447074430_n_dujqec.jpg'
 const LOGO_HERO = cldUrl(LOGO_URL, { width: 440, crop: 'fill' }) // 220px @2x
 
-// 22 partículas con posiciones y timings determinísticos (SSR-safe)
-const PARTICLES = Array.from({ length: 22 }, (_, i) => ({
-  left:     `${5  + ((i * 17 + 11) % 85)}%`,
-  top:      `${10 + ((i * 23 +  7) % 75)}%`,
-  size:     1.5 + (i % 3) * 0.7,
-  delay:    `${((i * 280) % 3500) / 1000}s`,
-  duration: `${3.5 + (i % 4) * 0.8}s`,
-  color:    i % 5 === 0 ? '#ff6020' : '#cc2020',
-  driftX:   `${-30 + (i % 7) * 10}px`,
-}))
-
+// Hero aligerado: una sola animación infinita sutil (el pulso del borde del logo).
+// El resto son animaciones de entrada que corren una vez y se detienen.
 const HERO_CSS = `
-  @keyframes glitch1 {
-    0%, 88%, 100% { clip-path: inset(0 0 100% 0); transform: translate(0); }
-    89% { clip-path: inset(15% 0 65% 0); transform: translate(-5px, 2px); }
-    90% { clip-path: inset(55% 0 25% 0); transform: translate(5px, -2px); }
-    91% { clip-path: inset(35% 0 45% 0); transform: translate(-3px, 1px); }
-    92% { clip-path: inset(0 0 100% 0); }
-  }
-  @keyframes neonFlicker {
-    0%, 93%, 100% {
-      text-shadow: 0 0 10px rgba(200,20,20,0.9), 0 0 30px rgba(200,20,20,0.5), 0 0 60px rgba(200,20,20,0.2);
-      opacity: 1;
-    }
-    94% { opacity: 0.6; text-shadow: 0 0 4px rgba(200,20,20,0.3); }
-    95% { opacity: 1; text-shadow: 0 0 20px rgba(200,20,20,1), 0 0 50px rgba(200,20,20,0.7), 0 0 90px rgba(200,20,20,0.3); }
-    96% { opacity: 0.8; }
-    97% { opacity: 1; }
-  }
-  @keyframes particleDrift {
-    0%   { transform: translateY(0)      translateX(0);             opacity: 0; }
-    10%  { opacity: 1; }
-    90%  { opacity: 0.5; }
-    100% { transform: translateY(-400px) translateX(var(--dx, 20px)); opacity: 0; }
-  }
-  @keyframes scanline {
-    from { top: -2px; }
-    to   { top: 100%; }
-  }
   @keyframes neonBorderPulse {
     0%,100% {
       box-shadow: 0 0 8px  rgba(200,20,20,0.4), 0 0 20px rgba(200,20,20,0.2), inset 0 0 12px rgba(200,20,20,0.08);
@@ -60,26 +24,22 @@ const HERO_CSS = `
       border-color: rgba(200,20,20,0.95);
     }
   }
-  @keyframes energyLine {
-    0%   { transform: scaleX(0); opacity: 0.9; }
-    60%  { transform: scaleX(1); opacity: 0.6; }
-    100% { transform: scaleX(1); opacity: 0;   }
-  }
   @keyframes heroTextSlide {
-    from { transform: translateX(-60px); opacity: 0; }
+    from { transform: translateX(-40px); opacity: 0; }
     to   { transform: translateX(0);    opacity: 1; }
   }
   @keyframes logoScale {
-    from { transform: translate(-50%, -50%) scale(0.65); opacity: 0; }
-    to   { transform: translate(-50%, -50%) scale(1);    opacity: 1; }
-  }
-  @keyframes shockwave {
-    0%   { transform: translate(-50%, -50%) scale(0.3); opacity: 0.8; }
-    100% { transform: translate(-50%, -50%) scale(5.5); opacity: 0;   }
+    from { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+    to   { transform: translate(-50%, -50%) scale(1);   opacity: 1; }
   }
   @keyframes fadeIn {
     from { opacity: 0; }
     to   { opacity: 0.45; }
+  }
+  @media (max-width: 640px) {
+    .hero-section { min-height: 62vh !important; }
+    .hero-logo-ring { width: 150px !important; height: 150px !important; }
+    .hero-text-block { bottom: 40px !important; }
   }
 `
 
@@ -102,15 +62,8 @@ function matchCategory(productCat: string | null, keywords: string[]): boolean {
 }
 
 function Hero({ onShopClick }: { onShopClick: () => void }) {
-  const [tick, setTick] = useState(0)
-
-  useEffect(() => {
-    const t = setInterval(() => setTick(k => k + 1), 8000)
-    return () => clearInterval(t)
-  }, [])
-
   return (
-    <section style={{
+    <section className="hero-section" style={{
       position: 'relative',
       minHeight: '92vh',
       overflow: 'hidden',
@@ -118,107 +71,44 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
     }}>
       <style>{HERO_CSS}</style>
 
-      {/* Todo lo animado está bajo este div — al cambiar key React lo remonta y reinicia las animaciones */}
-      <div key={tick} style={{ position: 'relative', width: '100%', minHeight: '92vh' }}>
+      <div style={{ position: 'relative', width: '100%', minHeight: 'inherit' }}>
 
-        {/* Scanlines estáticas */}
+        {/* Scanlines estáticas (textura, sin animación) */}
         <div style={{
           position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none',
           backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px)',
         }} />
-
-        {/* Scanline móvil */}
-        <div style={{
-          position: 'absolute', left: 0, right: 0, height: '2px',
-          background: 'linear-gradient(90deg, transparent, rgba(200,20,20,0.55), transparent)',
-          zIndex: 3, pointerEvents: 'none',
-          animation: 'scanline 5s linear infinite',
-        }} />
-
-        {/* Partículas */}
-        {PARTICLES.map((p, i) => (
-          <div key={i} style={{
-            position: 'absolute',
-            left: p.left, top: p.top,
-            width: `${p.size}px`, height: `${p.size}px`,
-            borderRadius: '50%',
-            background: p.color,
-            boxShadow: `0 0 ${p.size * 2}px ${p.color}`,
-            zIndex: 1, pointerEvents: 'none',
-            '--dx': p.driftX,
-            animation: `particleDrift ${p.duration} ${p.delay} ease-in-out infinite`,
-          } as React.CSSProperties} />
-        ))}
-
-        {/* Anillos shockwave ×3 */}
-        {([0, 0.3, 0.6] as const).map((delay, i) => (
-          <div key={i} style={{
-            position: 'absolute',
-            left: '50%', top: '42%',
-            width: '200px', height: '200px',
-            borderRadius: '50%',
-            border: `${1.5 - i * 0.3}px solid rgba(200,20,20,${0.6 - i * 0.15})`,
-            zIndex: 4, pointerEvents: 'none',
-            animation: `shockwave 1.5s ${delay}s ease-out both`,
-          }} />
-        ))}
-
-        {/* Líneas de energía ×3 */}
-        {([40, 44, 48] as const).map((top, i) => (
-          <div key={i} style={{
-            position: 'absolute', left: 0, right: 0,
-            top: `${top}%`, height: '1px',
-            background: `linear-gradient(90deg, transparent, rgba(200,20,20,${0.45 - i * 0.1}) 50%, transparent)`,
-            zIndex: 4, pointerEvents: 'none',
-            transformOrigin: 'center',
-            animation: `energyLine 1.6s ${0.15 + i * 0.2}s ease-out both`,
-          }} />
-        ))}
 
         {/* Logo central */}
         <div style={{
           position: 'absolute',
           left: '50%', top: '42%',
           zIndex: 6,
-          animation: 'logoScale 0.9s 0.15s ease-out both',
+          animation: 'logoScale 0.8s 0.1s ease-out both',
         }}>
-          {/* Anillo exterior pulsante */}
-          <div style={{
+          <div className="hero-logo-ring" style={{
             width: '220px', height: '220px',
             borderRadius: '50%', overflow: 'hidden',
             border: '3px solid rgba(200,20,20,0.6)',
-            animation: 'neonBorderPulse 2.8s ease-in-out infinite',
+            animation: 'neonBorderPulse 3s ease-in-out infinite',
           }}>
             <img src={LOGO_HERO} alt="Chocholand" width={220} height={220} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-          </div>
-          {/* Capa glitch encima */}
-          <div style={{
-            position: 'absolute', inset: 0,
-            borderRadius: '50%', overflow: 'hidden',
-            zIndex: 1, pointerEvents: 'none',
-          }}>
-            <img src={LOGO_HERO} alt="" aria-hidden style={{
-              width: '100%', height: '100%', objectFit: 'cover',
-              mixBlendMode: 'screen', opacity: 0.25,
-              filter: 'hue-rotate(180deg) saturate(4)',
-              animation: 'glitch1 5s 1s ease-in-out infinite',
-            }} />
           </div>
         </div>
 
         {/* Texto hero — bottom left */}
-        <div style={{
+        <div className="hero-text-block" style={{
           position: 'absolute',
           bottom: '80px',
           left: 'max(24px, calc(50vw - 680px))',
           zIndex: 8,
-          animation: 'heroTextSlide 0.9s 0.3s ease-out both',
+          animation: 'heroTextSlide 0.7s 0.25s ease-out both',
         }}>
           <p style={{
             margin: '0 0 20px',
             fontSize: '15px', letterSpacing: '5px',
             color: '#cc2020',
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             fontWeight: 600, textTransform: 'uppercase',
           }}>
             ▪ NUTRICIÓN DEPORTIVA · SUPLEMENTOS
@@ -227,20 +117,18 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
           <h1 style={{ margin: 0, lineHeight: 0.9 }}>
             <span style={{
               display: 'block',
-              fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               fontSize: 'clamp(56px, 8vw, 86px)', fontWeight: 900,
               color: '#FFFFFF', letterSpacing: '-2px',
-              animation: 'glitch1 7s 2.5s ease-in-out infinite',
             }}>
               ELEVA TU
             </span>
             <span style={{
               display: 'block',
-              fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               fontSize: 'clamp(56px, 8vw, 86px)', fontWeight: 900,
               color: '#ff2020', letterSpacing: '-2px',
-              animation: 'neonFlicker 4.5s 1.2s ease-in-out infinite',
-              textShadow: '0 0 10px rgba(200,20,20,0.9), 0 0 30px rgba(200,20,20,0.5)',
+              textShadow: '0 0 10px rgba(200,20,20,0.9), 0 0 30px rgba(200,20,20,0.5), 0 0 60px rgba(200,20,20,0.2)',
             }}>
               RENDIMIENTO
             </span>
@@ -255,7 +143,7 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
               background: 'rgba(200,20,20,0.12)',
               border: '1px solid rgba(200,20,20,0.7)',
               borderRadius: '8px', color: '#FFFFFF', fontSize: '13px',
-              fontWeight: 700, fontFamily: 'var(--font-syne, system-ui)',
+              fontWeight: 700, fontFamily: 'var(--font-barlow-condensed, system-ui)',
               letterSpacing: '0.1em', cursor: 'pointer',
               textTransform: 'uppercase',
               transition: 'background 0.15s, box-shadow 0.15s',
@@ -278,13 +166,13 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
           </button>
         </div>
 
-        {/* Texto vertical derecha */}
+        {/* Texto vertical derecha (aparece una vez) */}
         <div style={{
           position: 'absolute',
           right: 'max(24px, calc(50vw - 680px))',
           top: '50%',
           zIndex: 5, pointerEvents: 'none',
-          animation: 'fadeIn 1.2s 0.8s ease-out both',
+          animation: 'fadeIn 1s 0.6s ease-out both',
           opacity: 0,
         }}>
           <span style={{
@@ -293,12 +181,12 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
             textOrientation: 'mixed',
             fontSize: '10px', letterSpacing: '0.2em',
             color: 'rgba(200,20,20,0.55)',
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             fontWeight: 600, textTransform: 'uppercase',
             whiteSpace: 'nowrap',
             transform: 'rotate(180deg)',
           }}>
-            CHOCHOLAND · SUPLEMENTOS DEPORTIVOS · 2025
+            CHOCHOLAND · SUPLEMENTOS DEPORTIVOS
           </span>
         </div>
 
@@ -320,36 +208,38 @@ const CATALOG_CSS = `
     0%, 100% { box-shadow: inset 3px 0 0 rgba(200,20,20,0.9), 0 0 10px rgba(200,20,20,0.25); }
     50%       { box-shadow: inset 3px 0 0 rgba(200,20,20,1),   0 0 22px rgba(200,20,20,0.55); }
   }
-  @keyframes catPillGlow {
-    0%, 100% { box-shadow: 0 0 8px rgba(200,20,20,0.4),  0 0 18px rgba(200,20,20,0.15); }
-    50%       { box-shadow: 0 0 16px rgba(200,20,20,0.8), 0 0 30px rgba(200,20,20,0.35); }
-  }
-  /* Mobile: sidebar → pills horizontales */
+  /* Mobile: sidebar → cuadrícula de tiles (todas las categorías visibles) */
   @media (max-width: 768px) {
     .cat-layout  { flex-direction: column !important; gap: 20px !important; }
     .cat-aside   { width: 100% !important; flex-shrink: 1 !important; }
     .cat-label   { display: none !important; }
     .cat-inner   {
-      flex-direction: row !important;
-      flex-wrap: nowrap !important;
-      overflow-x: auto !important;
-      padding-bottom: 6px;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 8px !important;
     }
-    .cat-inner::-webkit-scrollbar { display: none; }
     .cat-btn {
-      width: auto !important;
-      white-space: nowrap !important;
-      padding: 8px 18px !important;
-      border-radius: 999px !important;
+      width: 100% !important;
       text-align: center !important;
-      font-size: 12px !important;
+      padding: 15px 12px !important;
+      border-radius: 12px !important;
+      font-size: 13px !important;
       box-shadow: none !important;
+      white-space: normal !important;
     }
-    .cat-btn-active {
-      animation: catPillGlow 2.5s ease-in-out infinite !important;
+    .cat-btn:not(.cat-special) {
+      border: 1px solid rgba(255,255,255,0.09) !important;
+      background: rgba(255,255,255,0.03) !important;
+      color: rgba(255,255,255,0.78) !important;
     }
+    .cat-btn-active:not(.cat-special) {
+      border-color: rgba(200,20,20,0.6) !important;
+      background: rgba(200,20,20,0.12) !important;
+      color: #ff4040 !important;
+      animation: none !important;
+    }
+    .cat-sep     { display: none !important; }
+    .cat-special { grid-column: 1 / -1 !important; }
   }
 `
 
@@ -367,7 +257,7 @@ function Sidebar({ selected, onSelect, view, onViewChange }: {
     display: 'block', width: '100%', textAlign: 'left', padding: '11px 18px',
     border: 'none', borderRadius: '6px', cursor: 'pointer',
     transition: 'color 0.15s, background 0.15s',
-    fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))',
+    fontFamily: 'var(--font-barlow-condensed, system-ui)',
     fontSize: '15px', fontWeight: 700, letterSpacing: '0.14em',
   }
 
@@ -377,7 +267,7 @@ function Sidebar({ selected, onSelect, view, onViewChange }: {
       <p className="cat-label" style={{
         fontSize: '10px', fontWeight: 700, color: 'rgba(200,20,20,0.65)',
         letterSpacing: '0.22em', textTransform: 'uppercase',
-        margin: '0 0 18px 4px', fontFamily: 'var(--font-syne, system-ui)',
+        margin: '0 0 18px 4px', fontFamily: 'var(--font-barlow-condensed, system-ui)',
       }}>
         — Categorías
       </p>
@@ -405,11 +295,11 @@ function Sidebar({ selected, onSelect, view, onViewChange }: {
         })}
 
         {/* Separador */}
-        <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '10px 0' }} />
+        <div className="cat-sep" style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '10px 0' }} />
 
         {/* Botón OFERTAS DEL MES */}
         <button
-          className="cat-btn"
+          className="cat-btn cat-special"
           onClick={() => onViewChange('ofertas')}
           style={{
             ...catBtnBase,
@@ -426,7 +316,7 @@ function Sidebar({ selected, onSelect, view, onViewChange }: {
 
         {/* Botón PAQUETES EN OFERTA */}
         <button
-          className="cat-btn"
+          className="cat-btn cat-special"
           onClick={() => onViewChange('paquetes')}
           style={{
             ...catBtnBase,
@@ -573,11 +463,11 @@ function OfertaCard({ offer }: { offer: Offer }) {
       <div style={{ padding: '14px 16px 18px' }}>
         <p style={{ fontSize: 10, color: '#cc2020', textTransform: 'uppercase', fontWeight: 700,
           letterSpacing: '0.12em', margin: '0 0 5px',
-          fontFamily: 'var(--font-syne, system-ui)' }}>
+          fontFamily: 'var(--font-barlow-condensed, system-ui)' }}>
           {offer.categoria}
         </p>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fff', margin: '0 0 12px',
-          lineHeight: 1.3, fontFamily: 'var(--font-syne, system-ui)' }}>
+          lineHeight: 1.3, fontFamily: 'var(--font-barlow-condensed, system-ui)' }}>
           {offer.nombre}
         </h3>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
@@ -585,7 +475,7 @@ function OfertaCard({ offer }: { offer: Offer }) {
             {fmtMXN(offer.precio_lista)}
           </span>
           <span style={{ fontSize: 22, fontWeight: 800, color: '#ff4040',
-            fontFamily: 'var(--font-syne, system-ui)' }}>
+            fontFamily: 'var(--font-barlow-condensed, system-ui)' }}>
             {fmtMXN(offer.precio_oferta)}
           </span>
         </div>
@@ -627,11 +517,11 @@ function OfertasSection({ offers, loading }: { offers: Offer[]; loading: boolean
   return (
     <>
       <div style={{ marginBottom: 36 }}>
-        <p style={{ fontFamily: 'var(--font-syne, system-ui)', fontSize: 11, fontWeight: 600,
+        <p style={{ fontFamily: 'var(--font-barlow-condensed, system-ui)', fontSize: 11, fontWeight: 600,
           color: '#ff6030', letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px' }}>
           Promociones
         </p>
-        <h2 style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+        <h2 style={{ fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800,
           fontSize: 'clamp(28px, 4vw, 48px)', color: '#FFFFFF', margin: 0,
           lineHeight: 1, letterSpacing: '-2px' }}>
           OFERTAS DEL MES
@@ -694,7 +584,7 @@ function PaqueteCard({ pkg }: { pkg: Package }) {
       {/* Nombre */}
       <h3 style={{ fontSize: 20, fontWeight: 800, color: '#fff', textTransform: 'uppercase',
         margin: '0 0 16px', letterSpacing: '-0.5px',
-        fontFamily: 'var(--font-barlow-condensed, var(--font-syne, system-ui))' }}>
+        fontFamily: 'var(--font-barlow-condensed, system-ui)' }}>
         {pkg.nombre}
       </h3>
 
@@ -722,7 +612,7 @@ function PaqueteCard({ pkg }: { pkg: Package }) {
             {fmtMXN(pkg.precio_lista)}
           </span>
           <span style={{ fontSize: 28, fontWeight: 800, color: '#4ade80',
-            fontFamily: 'var(--font-syne, system-ui)' }}>
+            fontFamily: 'var(--font-barlow-condensed, system-ui)' }}>
             {fmtMXN(pkg.precio_oferta)}
           </span>
         </div>
@@ -742,11 +632,11 @@ function PaquetesSection({ packages, loading }: { packages: Package[]; loading: 
   return (
     <>
       <div style={{ marginBottom: 36 }}>
-        <p style={{ fontFamily: 'var(--font-syne, system-ui)', fontSize: 11, fontWeight: 600,
+        <p style={{ fontFamily: 'var(--font-barlow-condensed, system-ui)', fontSize: 11, fontWeight: 600,
           color: '#fbbf24', letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px' }}>
           Combos Exclusivos
         </p>
-        <h2 style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+        <h2 style={{ fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800,
           fontSize: 'clamp(28px, 4vw, 48px)', color: '#FFFFFF', margin: 0,
           lineHeight: 1, letterSpacing: '-2px' }}>
           PAQUETES EN OFERTA
@@ -839,12 +729,12 @@ export default function TiendaPage() {
         {/* Header del catálogo (solo en vista catálogo) */}
         {view === 'catalogo' && (
           <div style={{ marginBottom: '48px' }}>
-            <p style={{ fontFamily: 'var(--font-syne, system-ui)', fontSize: '11px', fontWeight: 600,
+            <p style={{ fontFamily: 'var(--font-barlow-condensed, system-ui)', fontSize: '11px', fontWeight: 600,
               color: '#F0B429', letterSpacing: '0.2em', textTransform: 'uppercase', margin: '0 0 8px' }}>
               Productos
             </p>
             <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '24px', flexWrap: 'wrap', marginBottom: '32px' }}>
-              <h2 style={{ fontFamily: 'var(--font-syne, system-ui)', fontWeight: 800,
+              <h2 style={{ fontFamily: 'var(--font-barlow-condensed, system-ui)', fontWeight: 800,
                 fontSize: 'clamp(32px, 5vw, 56px)', color: '#FFFFFF', margin: 0,
                 lineHeight: 1, letterSpacing: '-2px' }}>
                 CATÁLOGO

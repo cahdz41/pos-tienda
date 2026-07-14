@@ -56,7 +56,7 @@ export default function CartDrawer() {
         }}>
           <div>
             <h2 style={{
-              fontFamily: 'var(--font-syne, system-ui)',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               fontWeight: 800, fontSize: '18px',
               color: '#FFFFFF', margin: 0, letterSpacing: '-0.5px',
             }}>
@@ -114,7 +114,7 @@ export default function CartDrawer() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '16px' }}>
               <span style={{ fontSize: '14px', color: '#555555' }}>Total</span>
               <span style={{
-                fontFamily: 'var(--font-syne, system-ui)',
+                fontFamily: 'var(--font-barlow-condensed, system-ui)',
                 fontWeight: 800, fontSize: '24px', color: '#F0B429',
               }}>
                 ${total.toFixed(2)}
@@ -127,7 +127,7 @@ export default function CartDrawer() {
                 display: 'block', width: '100%', padding: '15px',
                 background: '#F0B429', borderRadius: '10px',
                 color: '#000000', fontSize: '14px', fontWeight: 700,
-                fontFamily: 'var(--font-syne, system-ui)',
+                fontFamily: 'var(--font-barlow-condensed, system-ui)',
                 textAlign: 'center', textDecoration: 'none', letterSpacing: '0.05em',
                 boxSizing: 'border-box',
               }}

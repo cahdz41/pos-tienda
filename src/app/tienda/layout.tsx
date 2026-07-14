@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Syne, DM_Sans, Barlow_Condensed, Barlow } from 'next/font/google'
+import { DM_Sans, Barlow_Condensed, Barlow } from 'next/font/google'
 import { StoreCartProvider } from '@/contexts/StoreCartContext'
 import { StoreAuthProvider } from '@/contexts/StoreAuthContext'
 import StoreNav from '@/components/tienda/StoreNav'
@@ -10,12 +10,6 @@ import Footer from '@/components/tienda/Footer'
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://pos-storeonline.duckdns.org'
 const OG_IMAGE = `${SITE_URL}/og-tienda.png`
 
-const syne = Syne({
-  subsets: ['latin'],
-  variable: '--font-syne',
-  weight: ['400', '600', '700', '800'],
-})
-
 const dmSans = DM_Sans({
   subsets: ['latin'],
   variable: '--font-dm-sans',
@@ -24,7 +18,7 @@ const dmSans = DM_Sans({
 const barlowCondensed = Barlow_Condensed({
   subsets: ['latin'],
   variable: '--font-barlow-condensed',
-  weight: ['700', '900'],
+  weight: ['600', '700', '900'],
 })
 
 const barlow = Barlow({
@@ -59,7 +53,7 @@ export const metadata: Metadata = {
 export default function TiendaLayout({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className={`store-root ${syne.variable} ${dmSans.variable} ${barlowCondensed.variable} ${barlow.variable}`}
+      className={`store-root ${dmSans.variable} ${barlowCondensed.variable} ${barlow.variable}`}
       style={{
         minHeight: '100vh',
         background: '#0A0A0A',

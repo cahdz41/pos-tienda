@@ -77,7 +77,7 @@ export default function OfferFlavorSelector({
 
       <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
         <span style={{
-          fontFamily: 'var(--font-syne, system-ui)',
+          fontFamily: 'var(--font-barlow-condensed, system-ui)',
           fontWeight: 700, fontSize: '36px', color: '#ff4040',
         }}>
           ${offerPrice.toFixed(2)}
@@ -107,7 +107,7 @@ export default function OfferFlavorSelector({
           borderRadius: '10px',
           color: added ? '#4CAF50' : '#FFFFFF',
           fontSize: '15px', fontWeight: 700,
-          fontFamily: 'var(--font-syne, system-ui)',
+          fontFamily: 'var(--font-barlow-condensed, system-ui)',
           cursor: 'pointer', transition: 'all 0.2s',
           letterSpacing: '0.03em',
         }}

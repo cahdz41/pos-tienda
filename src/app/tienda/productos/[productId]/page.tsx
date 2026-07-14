@@ -128,7 +128,7 @@ export default async function ProductoPage({ params }: Props) {
             />
           ) : (
             <span style={{
-              fontFamily: 'var(--font-syne, system-ui)',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               fontWeight: 800,
               fontSize: '120px',
               color: '#1A1A1A',
@@ -154,7 +154,7 @@ export default async function ProductoPage({ params }: Props) {
           )}
 
           <h1 style={{
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             fontWeight: 800,
             fontSize: 'clamp(28px, 4vw, 52px)',
             color: '#FFFFFF',

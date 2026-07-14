@@ -464,7 +464,7 @@ export default function StoreSearch({ products }: Props) {
                     ) : (
                       <span
                         style={{
-                          fontFamily: 'var(--font-syne, system-ui)',
+                          fontFamily: 'var(--font-barlow-condensed, system-ui)',
                           fontWeight: 800,
                           fontSize: '20px',
                           color: '#2A2A2A',
@@ -511,7 +511,7 @@ export default function StoreSearch({ products }: Props) {
                           fontSize: '14px',
                           fontWeight: 800,
                           color: '#F0B429',
-                          fontFamily: 'var(--font-syne, system-ui)',
+                          fontFamily: 'var(--font-barlow-condensed, system-ui)',
                         }}
                       >
                         ${minPrice(product).toFixed(2)}

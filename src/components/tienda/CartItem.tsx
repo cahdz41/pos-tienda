@@ -41,7 +41,7 @@ export default function CartItem({ item, isFirstInPackage }: Props) {
         {item.imageUrl ? (
           <img src={item.imageUrl} alt={item.productName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         ) : (
-          <span style={{ fontWeight: 800, fontSize: '22px', color: '#2A2A2A', fontFamily: 'var(--font-syne, system-ui)' }}>
+          <span style={{ fontWeight: 800, fontSize: '22px', color: '#2A2A2A', fontFamily: 'var(--font-barlow-condensed, system-ui)' }}>
             {item.productName.charAt(0).toUpperCase()}
           </span>
         )}
@@ -110,7 +110,7 @@ export default function CartItem({ item, isFirstInPackage }: Props) {
               </span>
             )}
             <span style={{
-              fontFamily: 'var(--font-syne, system-ui)',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               fontWeight: 700, fontSize: '15px', color: '#F0B429',
             }}>
               ${(item.price * item.quantity).toFixed(2)}

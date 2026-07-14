@@ -62,7 +62,7 @@ export default function FlavorSelector({ variants, productId, productName, fallb
 
       <div style={{ marginBottom: '16px' }}>
         <span style={{
-          fontFamily: 'var(--font-syne, system-ui)',
+          fontFamily: 'var(--font-barlow-condensed, system-ui)',
           fontWeight: 700, fontSize: '36px', color: '#F0B429',
         }}>
           ${selected.sale_price.toFixed(2)}
@@ -87,7 +87,7 @@ export default function FlavorSelector({ variants, productId, productName, fallb
           borderRadius: '10px',
           color: added ? '#4CAF50' : '#000000',
           fontSize: '15px', fontWeight: 700,
-          fontFamily: 'var(--font-syne, system-ui)',
+          fontFamily: 'var(--font-barlow-condensed, system-ui)',
           cursor: 'pointer', transition: 'all 0.2s',
           letterSpacing: '0.03em',
         }}

@@ -99,14 +99,14 @@ export default function RegistroPage() {
         {/* Logo / título */}
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
           <span style={{
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             fontWeight: 800, fontSize: '20px',
             color: '#F0B429', letterSpacing: '0.05em',
           }}>
             CHOCHOLAND
           </span>
           <h1 style={{
-            fontFamily: 'var(--font-syne, system-ui)',
+            fontFamily: 'var(--font-barlow-condensed, system-ui)',
             fontWeight: 700, fontSize: '22px',
             color: '#FFFFFF', margin: '12px 0 6px', letterSpacing: '-0.5px',
           }}>
@@ -216,7 +216,7 @@ export default function RegistroPage() {
               border: 'none', borderRadius: '12px',
               color: submitting ? '#444444' : '#000000',
               fontSize: '15px', fontWeight: 700,
-              fontFamily: 'var(--font-syne, system-ui)',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               cursor: submitting ? 'not-allowed' : 'pointer',
               opacity: submitting ? 0.6 : 1,
               transition: 'opacity 0.2s',

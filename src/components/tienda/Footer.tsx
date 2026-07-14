@@ -11,7 +11,7 @@ const FACEBOOK = 'https://www.facebook.com/share/1NnCFaa9Nb/'
 const MAPS = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('15 de Mayo 5B, Centro, Querétaro, Qro.')
 
 const heading: React.CSSProperties = {
-  fontFamily: 'var(--font-syne, system-ui)',
+  fontFamily: 'var(--font-barlow-condensed, system-ui)',
   fontSize: '11px',
   fontWeight: 700,
   letterSpacing: '0.2em',
@@ -62,7 +62,7 @@ export default function Footer() {
               <img src={LOGO_SM} alt="Chocholand" width={48} height={48} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
             <span style={{
-              fontFamily: 'var(--font-syne, system-ui)',
+              fontFamily: 'var(--font-barlow-condensed, system-ui)',
               fontWeight: 800, fontSize: '20px', letterSpacing: '0.06em',
             }}>
               CHOCHOLAND
