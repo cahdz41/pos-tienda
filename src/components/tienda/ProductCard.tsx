@@ -1,16 +1,38 @@
 'use client'
 
 import Link from 'next/link'
-import type { StoreProduct } from '@/types'
+import type { StoreProduct, Offer } from '@/types'
+import { cldUrl } from '@/lib/cloudinary'
 
 interface Props {
   product: StoreProduct
+  offersByVariant?: Map<string, Offer>
 }
 
-export default function ProductCard({ product }: Props) {
-  const minPrice = Math.min(...product.product_variants.map(v => v.sale_price))
+function fmtMXN(n: number) {
+  return '$' + n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+export default function ProductCard({ product, offersByVariant }: Props) {
   const hasFlavors = product.product_variants.some(v => v.flavor !== null)
   const imageUrl = product.image_url ?? product.product_variants[0]?.image_url
+
+  // Precio efectivo por variante considerando ofertas activas (item #3 auditoría).
+  let bestEff = Infinity
+  let bestList = Infinity
+  let onOffer = false
+  for (const v of product.product_variants) {
+    const offer = offersByVariant?.get(v.id)
+    const eff = offer ? offer.precio_oferta : v.sale_price
+    if (eff < bestEff) {
+      bestEff = eff
+      bestList = offer ? offer.precio_lista : v.sale_price
+      onOffer = !!offer && offer.precio_oferta < offer.precio_lista
+    }
+  }
+  const pct = onOffer && bestList > bestEff
+    ? Math.round(((bestList - bestEff) / bestList) * 100)
+    : 0
 
   return (
     <Link href={`/tienda/productos/${product.id}`} style={{ textDecoration: 'none', display: 'block' }}>
@@ -46,9 +68,11 @@ export default function ProductCard({ product }: Props) {
         }}>
           {imageUrl ? (
             <img
-              src={imageUrl}
+              src={cldUrl(imageUrl, { width: 400 })}
               alt={product.name}
-              style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.4s' }}
+              loading="lazy"
+              decoding="async"
+              style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '8px', transition: 'transform 0.4s' }}
               onMouseEnter={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1.04)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLImageElement).style.transform = 'scale(1)' }}
             />
@@ -72,6 +96,25 @@ export default function ProductCard({ product }: Props) {
                 {product.name.charAt(0).toUpperCase()}
               </span>
             </>
+          )}
+
+          {/* Badge descuento (item #3) */}
+          {pct > 0 && (
+            <span style={{
+              position: 'absolute',
+              top: '12px',
+              right: '12px',
+              background: '#dc2626',
+              color: '#fff',
+              borderRadius: '6px',
+              padding: '4px 9px',
+              fontSize: '11px',
+              fontWeight: 800,
+              letterSpacing: '0.02em',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+            }}>
+              -{pct}%
+            </span>
           )}
 
           {/* Badge categoría */}
@@ -109,7 +152,7 @@ export default function ProductCard({ product }: Props) {
               color: '#F0B429',
               fontWeight: 600,
             }}>
-              {product.product_variants.length} sabores
+              {product.product_variants.length} {product.product_variants.length === 1 ? 'sabor' : 'sabores'}
             </span>
           )}
         </div>
@@ -127,18 +170,23 @@ export default function ProductCard({ product }: Props) {
             {product.name}
           </p>
 
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
             {hasFlavors && (
               <span style={{ fontSize: '11px', color: '#3A3A3A', fontWeight: 500 }}>desde</span>
+            )}
+            {pct > 0 && (
+              <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.3)', textDecoration: 'line-through' }}>
+                {fmtMXN(bestList)}
+              </span>
             )}
             <span style={{
               fontSize: '20px',
               fontWeight: 800,
-              color: '#F0B429',
+              color: pct > 0 ? '#ff4040' : '#F0B429',
               fontFamily: 'var(--font-syne, system-ui)',
               letterSpacing: '-0.5px',
             }}>
-              ${minPrice.toFixed(2)}
+              {fmtMXN(bestEff)}
             </span>
           </div>
         </div>

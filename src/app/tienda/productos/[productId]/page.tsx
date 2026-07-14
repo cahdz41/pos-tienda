@@ -4,6 +4,7 @@ import Link from 'next/link'
 import FlavorSelector from '@/components/tienda/FlavorSelector'
 import type { StoreVariant } from '@/types'
 import type { Metadata } from 'next'
+import { cldUrl } from '@/lib/cloudinary'
 
 interface Props {
   params: Promise<{ productId: string }>
@@ -121,9 +122,9 @@ export default async function ProductoPage({ params }: Props) {
         }}>
           {imageUrl ? (
             <img
-              src={imageUrl}
+              src={cldUrl(imageUrl, { width: 700 })}
               alt={product.name}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '16px' }}
             />
           ) : (
             <span style={{

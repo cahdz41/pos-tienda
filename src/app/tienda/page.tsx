@@ -6,8 +6,10 @@ import type { StoreProduct, Offer, Package } from '@/types'
 import ProductGrid from '@/components/tienda/ProductGrid'
 import { ProductGridSkeleton } from '@/components/tienda/ProductSkeleton'
 import StoreSearch from '@/components/tienda/StoreSearch'
+import { cldUrl } from '@/lib/cloudinary'
 
 const LOGO_URL = 'https://res.cloudinary.com/dflnist9g/image/upload/v1776893327/303479618_567324658514485_3402746677447074430_n_dujqec.jpg'
+const LOGO_HERO = cldUrl(LOGO_URL, { width: 440, crop: 'fill' }) // 220px @2x
 
 // 22 partículas con posiciones y timings determinísticos (SSR-safe)
 const PARTICLES = Array.from({ length: 22 }, (_, i) => ({
@@ -187,7 +189,7 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
             border: '3px solid rgba(200,20,20,0.6)',
             animation: 'neonBorderPulse 2.8s ease-in-out infinite',
           }}>
-            <img src={LOGO_URL} alt="Chocholand" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            <img src={LOGO_HERO} alt="Chocholand" width={220} height={220} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
           </div>
           {/* Capa glitch encima */}
           <div style={{
@@ -195,7 +197,7 @@ function Hero({ onShopClick }: { onShopClick: () => void }) {
             borderRadius: '50%', overflow: 'hidden',
             zIndex: 1, pointerEvents: 'none',
           }}>
-            <img src={LOGO_URL} alt="" aria-hidden style={{
+            <img src={LOGO_HERO} alt="" aria-hidden style={{
               width: '100%', height: '100%', objectFit: 'cover',
               mixBlendMode: 'screen', opacity: 0.25,
               filter: 'hue-rotate(180deg) saturate(4)',
@@ -561,7 +563,7 @@ function OfertaCard({ offer }: { offer: Offer }) {
       <div style={{ height: 190, background: '#0a0a0a', display: 'flex',
         alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {offer.imagen
-          ? <img src={offer.imagen} alt={offer.nombre}
+          ? <img src={cldUrl(offer.imagen, { width: 440 })} alt={offer.nombre} loading="lazy" decoding="async"
               style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} />
           : <span style={{ fontSize: 48 }}>📦</span>
         }
@@ -701,7 +703,7 @@ function PaqueteCard({ pkg }: { pkg: Package }) {
         {pkg.productos.map((p, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {p.imagen
-              ? <img src={p.imagen} alt="" style={{ width: 38, height: 38, objectFit: 'contain',
+              ? <img src={cldUrl(p.imagen, { width: 80 })} alt="" loading="lazy" decoding="async" style={{ width: 38, height: 38, objectFit: 'contain',
                   borderRadius: 6, background: '#0a0a0a', flexShrink: 0 }} />
               : <div style={{ width: 38, height: 38, borderRadius: 6, background: '#1a1a1a',
                   flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📦</div>
@@ -787,16 +789,25 @@ export default function TiendaPage() {
       .then(data => { if (data.error) throw new Error(data.error); setProducts(data) })
       .catch(e => setProductsError(e.message))
       .finally(() => setProductsLoading(false))
+
+    // Cargar ofertas al inicio para mostrar badges de descuento en el catálogo
+    setOffersLoading(true)
+    fetch('/api/ofertas').then(r => r.json())
+      .then(d => setOffers(Array.isArray(d) ? d : []))
+      .finally(() => setOffersLoading(false))
   }, [])
 
-  // Lazy load ofertas/paquetes la primera vez que se accede a esa vista
-  useEffect(() => {
-    if (view === 'ofertas' && offers.length === 0 && !offersLoading) {
-      setOffersLoading(true)
-      fetch('/api/ofertas').then(r => r.json())
-        .then(d => setOffers(Array.isArray(d) ? d : []))
-        .finally(() => setOffersLoading(false))
+  // Mapa variant_id → oferta, para cruzar precios en las tarjetas del catálogo
+  const offersByVariant = useMemo(() => {
+    const m = new Map<string, Offer>()
+    for (const o of offers) {
+      if (o.variant_id) m.set(o.variant_id, o)
     }
+    return m
+  }, [offers])
+
+  // Lazy load paquetes la primera vez que se accede a esa vista
+  useEffect(() => {
     if (view === 'paquetes' && packages.length === 0 && !packagesLoading) {
       setPackagesLoading(true)
       fetch('/api/paquetes').then(r => r.json())
@@ -862,7 +873,7 @@ export default function TiendaPage() {
                   <p style={{ margin: 0 }}>Error: {productsError}</p>
                 </div>
               ) : (
-                <ProductGrid products={filteredProducts} />
+                <ProductGrid products={filteredProducts} offersByVariant={offersByVariant} />
               )
             )}
 

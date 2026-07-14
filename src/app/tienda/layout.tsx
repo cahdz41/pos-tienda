@@ -5,6 +5,7 @@ import { StoreAuthProvider } from '@/contexts/StoreAuthContext'
 import StoreNav from '@/components/tienda/StoreNav'
 import CartDrawer from '@/components/tienda/CartDrawer'
 import ChatWidget from '@/components/tienda/ChatWidget'
+import Footer from '@/components/tienda/Footer'
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://pos-storeonline.duckdns.org'
 const OG_IMAGE = `${SITE_URL}/og-tienda.png`
@@ -71,6 +72,7 @@ export default function TiendaLayout({ children }: { children: React.ReactNode }
           <StoreNav />
           <CartDrawer />
           {children}
+          <Footer />
           <ChatWidget />
         </StoreCartProvider>
       </StoreAuthProvider>

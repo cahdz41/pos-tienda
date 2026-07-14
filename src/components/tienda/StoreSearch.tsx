@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import type { StoreProduct } from '@/types'
+import { cldUrl } from '@/lib/cloudinary'
 
 interface Props {
   products: StoreProduct[]
@@ -454,9 +455,11 @@ export default function StoreSearch({ products }: Props) {
                   >
                     {imageUrl ? (
                       <img
-                        src={imageUrl}
+                        src={cldUrl(imageUrl, { width: 120 })}
                         alt={product.name}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        loading="lazy"
+                        decoding="async"
+                        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                       />
                     ) : (
                       <span

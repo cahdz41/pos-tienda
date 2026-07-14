@@ -920,3 +920,83 @@ ALTER TABLE sales ADD COLUMN IF NOT EXISTS notes text;
 
 - Commit: `a550864` — todos los cambios anteriores
 - Push a `main` → `git pull` + `npm install` + `npm run build` + `pm2 reload pos-v2` en el VPS
+
+---
+
+## Sesión 15 — 2026-07-13 (pos-v2) — Auditoría de la tienda
+
+> Basado en `auditoria-chocholand.md` (auditoría experta de `chocholand.cloud/tienda`, 12-jul-2026).
+> Se atacó el **lote de quick-wins** (bajo esfuerzo, alto impacto, solo frontend, sin tocar BD/POS).
+> **⏳ EN PROGRESO — continúa mañana.** Cambios NO commiteados aún.
+
+### ✅ Nuevo helper — `src/lib/cloudinary.ts`
+
+- `cldUrl(url, { width, crop })` — inyecta `f_auto,q_auto,dpr_auto,w_N` después de `/upload/` en las URLs de Cloudinary.
+- Baja ~10x el peso de cada imagen (WebP/AVIF + ancho justo). Si la URL no es de Cloudinary la regresa intacta (seguro de envolver cualquier `image_url`).
+
+### ✅ Item #1 — Header móvil (bug crítico: carrito fuera de pantalla)
+
+- `src/components/tienda/StoreNav.tsx` — media query `@media (max-width: 480px)`: reduce padding, encoge logo (44→36px) y marca, `flexShrink`/`minWidth:0` + ellipsis en "CHOCHOLAND" y `max-width` en "Mi cuenta".
+- Elimina el overflow horizontal de 452px→375px. **Falta verificar en viewport real de 375px (DevTools).**
+
+### ✅ Item #2 — Optimización de imágenes (bug crítico: ~35-40 MB por carga)
+
+- `cldUrl()` aplicado en: catálogo (`ProductCard`), hero + tarjetas de ofertas + thumbs de paquetes (`tienda/page.tsx`), nav (`StoreNav`), buscador (`StoreSearch`), detalle de producto, detalle de oferta, `PackageFlavorSelector`.
+- `loading="lazy"` + `decoding="async"` en imágenes fuera de pantalla.
+- Logo servido a tamaño real (`w_88` nav, `w_440` hero) en vez del JPG 1638×1638.
+- **Verificado en dev server:** transforms `w_88`, `w_440`, `w_700` presentes en el HTML renderizado, sin errores runtime.
+
+### ✅ Item #3 — Descuentos visibles en el catálogo (ventas directas)
+
+- `src/components/tienda/ProductCard.tsx` — cruza ofertas por `variant_id`, muestra precio de lista tachado + badge rojo `-N%` + precio de oferta en rojo.
+- `src/app/tienda/page.tsx` — las ofertas ahora se cargan **al montar** (antes solo al abrir la vista Ofertas); se construye `offersByVariant: Map<variant_id, Offer>` y se pasa al `ProductGrid`.
+- `src/components/tienda/ProductGrid.tsx` — recibe y propaga `offersByVariant`.
+
+### ✅ Item #4 — Experiencia móvil (2 columnas + imagen sin recorte)
+
+- `ProductGrid.tsx` — 2 columnas en `@media (max-width: 640px)` (antes 1 sola con `minmax(260px)`).
+- Imágenes de producto con `object-fit: contain` + padding (antes `cover` recortaba ~15% tapas/etiquetas). Aplicado en `ProductCard`, detalle de producto, detalle de oferta, buscador, `PackageFlavorSelector`.
+
+### ✅ Extras gratis (de la sección "Textos y datos" de la auditoría)
+
+- Precios con separador de miles vía `toLocaleString('es-MX')`: "$1350.00" → "$1,350.00".
+- "1 sabores" → "1 sabor" (singular/plural correcto en `ProductCard`).
+
+### ✅ Item #6 — Footer + página de política de envíos (confianza / conversión)
+
+- `src/components/tienda/Footer.tsx` (nuevo) — footer oscuro estático (sin animaciones, evita el "look de IA") con 4 columnas responsive: Marca, Contacto (dirección con link a Google Maps + WhatsApp), Síguenos (Instagram + Facebook), Horario. Franja de envíos con link a la política + barra inferior con copyright dinámico.
+- `src/app/tienda/envios/page.tsx` (nuevo) — página dedicada con el texto completo de la política de envíos + metadata SEO + CTA de WhatsApp.
+- `src/app/tienda/layout.tsx` — `<Footer />` agregado antes del `<ChatWidget />`.
+- **Verificado en dev server:** `/tienda` y `/tienda/envios` responden HTTP 200 con el contenido correcto, sin errores runtime.
+
+**Datos reales usados (proporcionados por Carlos):**
+- Dirección: 15 de Mayo 5B, Centro, Querétaro, Qro.
+- WhatsApp: +52 442 708 6715 (`524427086715`, coincide con `NEXT_PUBLIC_STORE_WHATSAPP`)
+- Instagram: `@chocholand_suplementos_qro1`
+- Facebook: `https://www.facebook.com/share/1NnCFaa9Nb/`
+- Horario: L–V 10am–8pm, Sáb y Dom 11am–5pm
+- ⚠️ NO proporcionó correo ni política de devoluciones — se omitieron (agregar después si aplica).
+
+### 📋 Notas técnicas
+
+- **Sin errores nuevos de TypeScript.** Los que aparecen en `tsc --noEmit` son preexistentes (route handlers con `params` sync, `AdjustModal`, `pos/page`, `turnos`, `FlavorSelector`) y el build los ignora con `ignoreBuildErrors: true`.
+- Decisión: NO se usó `next/image` — Cloudinary ya es el CDN y hace la optimización; transformar la URL es más simple y de menor riesgo (evita config de `remotePatterns` y doble procesamiento).
+
+**✅ Lote de quick-wins COMPLETO (items #1, #2, #3, #4, #6).** Cambios aún SIN commitear.
+
+---
+
+## ⏳ Pendiente — Continuar aquí
+
+### Items de la auditoría NO abordados todavía
+- **#5 Limpiar categorías** — NO es código: se arregla desde el POS/inventario (unificar duplicados como "bcaa"/"AMINOACIDOS Y BCCAS", asignar huérfanos, recategorizar "Fish Oil Omega3"). Luego generar el menú de la tienda desde las categorías reales.
+- **Typos en nombres de producto** — datos, se corrigen en el POS: "Gold Standar"→Standard, "Muscle Sanwich"→Sandwich, "Roonie Coleman"→Ronnie, "Mnohydrate"→Monohydrate, "Glyecerol"→Glycerol, "Dragon Lyche"→Lychee, duplicado On/Optimum Nutrition Gold Standar Isolate.
+- **#7 Estética** ("look de IA") — reducir las 30-41 animaciones infinitas a una sola sutil en el hero, quitar la fuente Syne (dejar Barlow Condensed + una neutra), quitar emojis del menú (🔥🎁→badges de texto), unificar tarjetas de catálogo vs ofertas, elegir un solo acento (rojo o dorado). **Mayor esfuerzo/riesgo — dejado para el final.**
+- **#8 Conversión** — descripciones de producto (`store_description` vacío), galería en detalle, orden por precio en el catálogo, info de pago/envío en el checkout, pedido como invitado.
+- **Otros móvil** — tiles visuales de categoría, medio hero en móvil, área de toque del buscador ≥44px.
+
+### Al retomar
+1. `git pull origin main` (por si se trabajó en la otra PC).
+2. Los cambios de la Sesión 15 están sin commitear — revisar `git status` / `git diff`.
+3. Pedir datos del footer a Carlos e implementar Item #6.
+4. Levantar dev server (`npm run dev`) y verificar en DevTools móvil (375px) el header y las 2 columnas.

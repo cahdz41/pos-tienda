@@ -4,6 +4,7 @@ import Link from 'next/link'
 import OfferFlavorSelector from '@/components/tienda/OfferFlavorSelector'
 import type { StoreVariant } from '@/types'
 import type { Metadata } from 'next'
+import { cldUrl } from '@/lib/cloudinary'
 
 interface Props {
   params: Promise<{ offerId: string }>
@@ -161,9 +162,9 @@ export default async function OfertaPage({ params }: Props) {
           )}
           {imageUrl ? (
             <img
-              src={imageUrl}
+              src={cldUrl(imageUrl, { width: 700 })}
               alt={productName}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '16px' }}
             />
           ) : (
             <span style={{

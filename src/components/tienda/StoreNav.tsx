@@ -3,8 +3,10 @@
 import Link from 'next/link'
 import { useStoreCart } from '@/contexts/StoreCartContext'
 import { useStoreAuth } from '@/contexts/StoreAuthContext'
+import { cldUrl } from '@/lib/cloudinary'
 
 const LOGO_URL = 'https://res.cloudinary.com/dflnist9g/image/upload/v1776893327/303479618_567324658514485_3402746677447074430_n_dujqec.jpg'
+const LOGO_SM = cldUrl(LOGO_URL, { width: 88, crop: 'fill' }) // 44px @2x
 
 export default function StoreNav() {
   const { itemCount, openCart } = useStoreCart()
@@ -27,9 +29,15 @@ export default function StoreNav() {
           from { transform: translateY(-100%); opacity: 0; }
           to   { transform: translateY(0);    opacity: 1; }
         }
+        @media (max-width: 480px) {
+          .store-nav       { padding: 0 14px !important; gap: 10px !important; }
+          .store-nav-logo  { width: 36px !important; height: 36px !important; }
+          .store-nav-brand { font-size: 15px !important; letter-spacing: 0.04em !important; }
+          .store-nav-account { max-width: 108px !important; }
+        }
       `}</style>
 
-      <nav style={{
+      <nav className="store-nav" style={{
         position: 'sticky', top: 0, zIndex: 50,
         background: 'rgba(5, 0, 5, 0.92)',
         backdropFilter: 'blur(16px)',
@@ -38,36 +46,38 @@ export default function StoreNav() {
         padding: '0 max(24px, calc(50vw - 680px))',
         height: '64px',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '12px',
         animation: 'navSlide 0.45s ease-out',
       }}>
 
         {/* Logo + nombre */}
-        <Link href="/tienda" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
+        <Link href="/tienda" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flexShrink: 1 }}>
+          <div className="store-nav-logo" style={{
             width: '44px', height: '44px', borderRadius: '50%',
             overflow: 'hidden', flexShrink: 0,
             border: '2px solid rgba(200, 20, 20, 0.8)',
             boxShadow: '0 0 14px rgba(200,20,20,0.5), inset 0 0 10px rgba(200,20,20,0.1)',
           }}>
-            <img src={LOGO_URL} alt="Chocholand" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={LOGO_SM} alt="Chocholand" width={44} height={44} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
-          <span style={{
+          <span className="store-nav-brand" style={{
             fontFamily: 'var(--font-syne, system-ui)',
             fontWeight: 800, fontSize: '18px',
             color: '#FFFFFF', letterSpacing: '0.08em',
             animation: 'neonFlicker 7s ease-in-out infinite',
             textShadow: '0 0 10px rgba(200,20,20,0.8), 0 0 30px rgba(200,20,20,0.4)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
           }}>
             CHOCHOLAND
           </span>
         </Link>
 
         {/* Zona derecha */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
 
           {/* Link de cuenta */}
           {user ? (
-            <Link href="/tienda/cuenta/pedidos" style={{
+            <Link href="/tienda/cuenta/pedidos" className="store-nav-account" style={{
               display: 'flex', alignItems: 'center', gap: '6px',
               padding: '6px 12px',
               background: 'transparent',

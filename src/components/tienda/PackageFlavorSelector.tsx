@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useStoreCart } from '@/contexts/StoreCartContext'
 import type { StoreVariant } from '@/types'
+import { cldUrl } from '@/lib/cloudinary'
 
 interface ProductDetail {
   packageProduct: {
@@ -115,9 +116,11 @@ export default function PackageFlavorSelector({
               }}>
                 {p.productImage ? (
                   <img
-                    src={p.productImage}
+                    src={cldUrl(p.productImage, { width: 160 })}
                     alt={p.productName}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    loading="lazy"
+                    decoding="async"
+                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                   />
                 ) : (
                   <span style={{
