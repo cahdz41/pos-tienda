@@ -58,7 +58,9 @@ const chatInitState: { forUserId: string | null; mountId: string | null } = {
 
 export default function ChatWidget() {
   const { user, loading: authLoading } = useStoreAuth()
-  const [minimized, setMinimized]         = useState(false)
+  // Arranca contraído (pastilla flotante) para no estorbar al entrar a la tienda;
+  // el usuario lo abre cuando quiera. Antes abría el panel con el candado de login.
+  const [minimized, setMinimized]         = useState(true)
   const [sessionId, setSessionId]         = useState<string | null>(null)
   const [messages, setMessages]           = useState<Message[]>([])
   const [input, setInput]                 = useState('')
