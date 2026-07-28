@@ -7,10 +7,20 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { ProductVariant } from '@/types'
 import VoiceSearchButton from '@/components/VoiceSearchButton'
 import { matchesSearch } from '@/lib/voiceNormalize'
+import { rankVoiceProductMatches, type VoiceProductMatch } from '@/lib/voiceProductMatch'
 import AdjustModal from './AdjustModal'
 import ImportModal from './ImportModal'
 import ExportModal from './ExportModal'
 import ReporteModal from './ReporteModal'
+
+interface InventoryVoiceSearchItem {
+  id: string
+  name: string
+  flavor: string | null
+  barcode: string
+  stock: number
+  variant: ProductVariant
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +92,10 @@ export default function InventarioPage() {
   const [showExport, setShowExport]   = useState(false)
   const [showReporte, setShowReporte] = useState(false)
   const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null)
+  const [voiceAdjustQuery, setVoiceAdjustQuery] = useState<string | null>(null)
+  const [voiceAdjustMatches, setVoiceAdjustMatches] = useState<VoiceProductMatch<InventoryVoiceSearchItem>[] | null>(null)
+  const [selectedVoiceAdjustId, setSelectedVoiceAdjustId] = useState<string | null>(null)
+  const lastVoiceAdjustRequest = useRef<string | null>(null)
 
   // Edición inline de fecha de caducidad
   const [editingExpiry, setEditingExpiry] = useState<string | null>(null) // variant id
@@ -106,14 +120,36 @@ export default function InventarioPage() {
 
   // Auto-abrir AdjustModal si se llegó desde el POS con ?ajustar=BARCODE
   useEffect(() => {
-    const barcode = searchParams?.get('ajustar')
-    if (!barcode || allVariants.length === 0) return
-    const variant = allVariants.find(v => v.barcode === barcode)
-    if (variant) {
-      setSearch(barcode)
-      setAdjustVariant(variant)
+    const request = searchParams?.get('ajustar')?.trim() ?? ''
+    if (!request) {
+      lastVoiceAdjustRequest.current = null
+      return
     }
-  }, [searchParams, allVariants])
+    if (request.length > 140 || allVariants.length === 0) return
+    if (lastVoiceAdjustRequest.current === request) return
+    lastVoiceAdjustRequest.current = request
+
+    const exactBarcode = allVariants.find(variant => variant.barcode === request)
+    if (exactBarcode) {
+      setSearch(request)
+      setAdjustVariant(exactBarcode)
+    } else {
+      const candidates: InventoryVoiceSearchItem[] = allVariants.map(variant => ({
+        id: variant.id,
+        name: variant.product?.name ?? '',
+        flavor: variant.flavor,
+        barcode: variant.barcode,
+        stock: variant.stock,
+        variant,
+      }))
+      const matches = rankVoiceProductMatches(request, candidates, 5)
+      setVoiceAdjustQuery(request)
+      setVoiceAdjustMatches(matches)
+      setSelectedVoiceAdjustId(matches[0]?.item.id ?? null)
+    }
+
+    router.replace('/inventario', { scroll: false })
+  }, [searchParams, allVariants, router])
 
   // Abrir modales desde comando de voz
   useEffect(() => {
@@ -163,10 +199,9 @@ export default function InventarioPage() {
         if (dbError) throw new Error(dbError.message)
         if (!data || data.length === 0) break
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const enriched: ProductVariant[] = (data as any[])
-          .filter((v: any) => v.id != null)
-          .map((v: any) => ({
+        const enriched: ProductVariant[] = (data as Array<Record<string, unknown>>)
+          .filter(v => v.id != null)
+          .map(v => ({
             id:              String(v.id),
             product_id:      String(v.product_id),
             barcode:         String(v.barcode ?? ''),
@@ -323,6 +358,16 @@ export default function InventarioPage() {
         : v
       )
     )
+  }
+
+  function confirmVoiceAdjust() {
+    const selected = voiceAdjustMatches?.find(match => match.item.id === selectedVoiceAdjustId)
+    if (!selected) return
+
+    setVoiceAdjustMatches(null)
+    setSelectedVoiceAdjustId(null)
+    setVoiceAdjustQuery(null)
+    setAdjustVariant(selected.item.variant)
   }
 
   // ── Estados de carga / error ────────────────────────────────────────────
@@ -603,6 +648,104 @@ export default function InventarioPage() {
       </div>
 
       {/* Modal ajuste de stock */}
+      {voiceAdjustMatches !== null && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.82)' }}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl p-5 flex flex-col gap-4"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+          >
+            <div>
+              <p className="text-base font-bold" style={{ color: 'var(--text)' }}>
+                Selecciona el producto para ajustar
+              </p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                Escuché: “{voiceAdjustQuery}”. El inventario no cambiará hasta que guardes el ajuste de stock.
+              </p>
+            </div>
+
+            {voiceAdjustMatches.length === 0 ? (
+              <div
+                className="rounded-xl p-4 text-sm"
+                style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+              >
+                No encontré una coincidencia suficientemente cercana. Intenta decir marca, nombre, presentación o sabor.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
+                {voiceAdjustMatches.map((match, index) => {
+                  const selected = selectedVoiceAdjustId === match.item.id
+                  return (
+                    <button
+                      key={match.item.id}
+                      type="button"
+                      onClick={() => setSelectedVoiceAdjustId(match.item.id)}
+                      className="w-full rounded-xl p-3 text-left transition-colors"
+                      style={{
+                        background: selected ? 'rgba(240,180,41,0.12)' : 'var(--bg)',
+                        border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+                        color: 'var(--text)',
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold">{match.item.name}</p>
+                          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                            {match.item.flavor || 'Sin sabor'} · Stock actual: {match.item.stock}
+                            {match.item.barcode ? ` · ${match.item.barcode}` : ''}
+                          </p>
+                        </div>
+                        {index === 0 && (
+                          <span
+                            className="shrink-0 rounded-full px-2 py-1 text-[10px] font-bold"
+                            style={{ background: 'var(--accent)', color: '#000' }}
+                          >
+                            Más probable
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setVoiceAdjustMatches(null)
+                  setSelectedVoiceAdjustId(null)
+                  setVoiceAdjustQuery(null)
+                  focusSearch()
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+              >
+                Cancelar
+              </button>
+              {voiceAdjustMatches.length > 0 && (
+                <button
+                  type="button"
+                  onClick={confirmVoiceAdjust}
+                  disabled={!selectedVoiceAdjustId}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+                  style={{
+                    background: 'var(--accent)',
+                    color: '#000',
+                    opacity: selectedVoiceAdjustId ? 1 : 0.5,
+                  }}
+                >
+                  Abrir ajuste de stock
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {adjustVariant && (
         <AdjustModal
           variant={adjustVariant}

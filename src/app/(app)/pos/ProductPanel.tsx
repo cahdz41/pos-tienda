@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import type { ProductVariant, CartItem } from '@/types'
 import { matchesSearch } from '@/lib/voiceNormalize'
+import { rankVoiceProductMatches, type VoiceProductMatch } from '@/lib/voiceProductMatch'
 
 const CATEGORY_PRIORITY = [
   'PROTEINAS', 'GANADORES', 'CREATINAS', 'PRE-ENTRENOS', 'PRE ENTRENOS',
@@ -30,14 +31,37 @@ function ExpiryBadge({ date }: { date: string | null }) {
 
 interface Props {
   cart: CartItem[]
-  onAdd: (variant: ProductVariant) => void | Promise<void>
+  onAdd: (variant: ProductVariant) => void | boolean | Promise<void | boolean>
   searchRef: React.RefObject<HTMLInputElement | null>
   refreshKey?: number
   voiceCategory?: string | null
   voiceSoloStock?: boolean
+  voiceProductRequest?: VoiceProductRequest | null
 }
 
-export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0, voiceCategory, voiceSoloStock }: Props) {
+export interface VoiceProductRequest {
+  id: number
+  query: string
+}
+
+interface ProductVariantSearchItem {
+  id: string
+  name: string
+  flavor: string | null
+  barcode: string
+  stock: number
+  variant: ProductVariant
+}
+
+export default function ProductPanel({
+  cart,
+  onAdd,
+  searchRef,
+  refreshKey = 0,
+  voiceCategory,
+  voiceSoloStock,
+  voiceProductRequest,
+}: Props) {
   const router = useRouter()
   const [allVariants, setAllVariants] = useState<ProductVariant[]>([])
   const [loading, setLoading] = useState(true)
@@ -47,6 +71,9 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0, v
   const [soloConStock, setSoloConStock] = useState(false)
   const [lastScanned, setLastScanned] = useState<ProductVariant | null>(null)
   const [noStockVariant, setNoStockVariant] = useState<ProductVariant | null>(null)
+  const [voiceMatches, setVoiceMatches] = useState<VoiceProductMatch<ProductVariantSearchItem>[] | null>(null)
+  const [selectedVoiceMatchId, setSelectedVoiceMatchId] = useState<string | null>(null)
+  const lastVoiceRequestId = useRef<number | null>(null)
 
   useEffect(() => {
     if (voiceCategory !== undefined) setActiveCategory(voiceCategory)
@@ -55,6 +82,25 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0, v
   useEffect(() => {
     if (voiceSoloStock !== undefined) setSoloConStock(voiceSoloStock)
   }, [voiceSoloStock])
+
+  useEffect(() => {
+    if (!voiceProductRequest || loading || allVariants.length === 0) return
+    if (lastVoiceRequestId.current === voiceProductRequest.id) return
+    lastVoiceRequestId.current = voiceProductRequest.id
+
+    const candidates: ProductVariantSearchItem[] = allVariants.map(variant => ({
+      id: variant.id,
+      name: variant.product?.name ?? '',
+      flavor: variant.flavor,
+      barcode: variant.barcode,
+      stock: variant.stock,
+      variant,
+    }))
+    const matches = rankVoiceProductMatches(voiceProductRequest.query, candidates, 4)
+
+    setVoiceMatches(matches)
+    setSelectedVoiceMatchId(matches[0]?.item.stock > 0 ? matches[0].item.id : null)
+  }, [allVariants, loading, voiceProductRequest])
 
   // Foco automático al montar
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -169,6 +215,15 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0, v
     if (soloConStock) list = list.filter(v => v.stock > 0)
     return list
   }, [allVariants, search, activeCategory, soloConStock])
+
+  async function confirmVoiceAdd() {
+    const selected = voiceMatches?.find(match => match.item.id === selectedVoiceMatchId)
+    if (!selected) return
+
+    setVoiceMatches(null)
+    setSelectedVoiceMatchId(null)
+    await onAdd(selected.item.variant)
+  }
 
   // Intento de agregar un producto — la validación de stock real la hace PosPage
   function handleCardClick(variant: ProductVariant) {
@@ -380,6 +435,108 @@ export default function ProductPanel({ cart, onAdd, searchRef, refreshKey = 0, v
           </div>
         )}
       </div>
+
+      {/* Confirmación de coincidencia para agregar por voz */}
+      {voiceMatches !== null && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.82)' }}
+          onClick={event => event.stopPropagation()}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl p-5 flex flex-col gap-4"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+          >
+            <div>
+              <p className="text-base font-bold" style={{ color: 'var(--text)' }}>
+                Confirma el producto
+              </p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                Escuché: “{voiceProductRequest?.query}”. Solo se agregará una unidad al carrito; no se procesará ningún cobro.
+              </p>
+            </div>
+
+            {voiceMatches.length === 0 ? (
+              <div
+                className="rounded-xl p-4 text-sm"
+                style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+              >
+                No encontré una coincidencia disponible suficientemente cercana. Intenta decir marca, presentación o sabor.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
+                {voiceMatches.map((match, index) => {
+                  const selected = selectedVoiceMatchId === match.item.id
+                  return (
+                    <button
+                      key={match.item.id}
+                      type="button"
+                      onClick={() => {
+                        if (match.item.stock > 0) setSelectedVoiceMatchId(match.item.id)
+                      }}
+                      disabled={match.item.stock <= 0}
+                      className="w-full rounded-xl p-3 text-left transition-colors"
+                      style={{
+                        background: selected ? 'rgba(240,180,41,0.12)' : 'var(--bg)',
+                        border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+                        color: 'var(--text)',
+                        opacity: match.item.stock > 0 ? 1 : 0.58,
+                        cursor: match.item.stock > 0 ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold">{match.item.name}</p>
+                          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                            {match.item.flavor || 'Sin sabor'} · {match.item.stock > 0 ? `${match.item.stock} disponibles` : 'Sin stock'}
+                          </p>
+                        </div>
+                        {index === 0 && (
+                          <span
+                            className="shrink-0 rounded-full px-2 py-1 text-[10px] font-bold"
+                            style={{ background: 'var(--accent)', color: '#000' }}
+                          >
+                            Más probable
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setVoiceMatches(null)
+                  setSelectedVoiceMatchId(null)
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+              >
+                Cancelar
+              </button>
+              {voiceMatches.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void confirmVoiceAdd()}
+                  disabled={!selectedVoiceMatchId}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+                  style={{
+                    background: 'var(--accent)',
+                    color: '#000',
+                    opacity: selectedVoiceMatchId ? 1 : 0.5,
+                  }}
+                >
+                  Agregar 1 al carrito
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Diálogo: sin stock — ¿ir a inventario? */}
       {noStockVariant && (

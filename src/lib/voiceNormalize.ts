@@ -73,6 +73,8 @@ const PHONETIC_MAP: [RegExp, string][] = [
   [/\bcaseina\b/gi, 'casein'],
 
   // ── Creatine (Spanish creatina is fine, but keep both) ────────────────────
+  [/\b(?:n\s*)?keratina\b/gi, 'creatine'],
+  [/\bncreatina\b/gi, 'creatine'],
   [/\bcreatina\b/gi, 'creatine'],
 
   // ── Mass Gainer ───────────────────────────────────────────────────────────
@@ -111,6 +113,7 @@ const UNIT_MAP: [RegExp, string][] = [
   [/\blibras?\b/gi,     'lbs'],
   [/\bkilogramos?\b/gi, 'kg'],
   [/\bkilos?\b/gi,      'kg'],
+  [/\bgramos?\b/gi,     'g'],
 ]
 
 // Filler words that don't help match product names

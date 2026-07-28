@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' }
+
 function db() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,7 +39,7 @@ export async function GET() {
   }
 
   if (variantIds.size === 0 && productNames.size === 0) {
-    return NextResponse.json(list)
+    return NextResponse.json(list, { headers: NO_STORE_HEADERS })
   }
 
   const imgByVariant = new Map<string, string | null>()
@@ -67,7 +69,6 @@ export async function GET() {
   }
 
   return NextResponse.json(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     list.map(pkg => ({
       ...pkg,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,7 +81,8 @@ export async function GET() {
         if (imgByName.has(name)) return { ...p, imagen: imgByName.get(name) }
         return p
       }),
-    }))
+    })),
+    { headers: NO_STORE_HEADERS }
   )
 }
 
@@ -99,5 +101,5 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data, { status: 201 })
+  return NextResponse.json(data, { status: 201, headers: NO_STORE_HEADERS })
 }

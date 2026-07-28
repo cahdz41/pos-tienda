@@ -35,7 +35,7 @@ export default function ConfigTiendaPage() {
       try {
         const [r1, r2] = await Promise.all([
           fetch('/api/ofertas').then(r => r.json()),
-          fetch('/api/paquetes').then(r => r.json()),
+          fetch('/api/paquetes', { cache: 'no-store' }).then(r => r.json()),
         ])
         setOffers(Array.isArray(r1) ? r1 : [])
         setPackages(Array.isArray(r2) ? r2 : [])

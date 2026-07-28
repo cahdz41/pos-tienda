@@ -3,7 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
-import ProductPanel from './ProductPanel'
+import ProductPanel, { type VoiceProductRequest } from './ProductPanel'
 import CartPanel from './CartPanel'
 import PaymentModal from './PaymentModal'
 import VoidSaleModal from './VoidSaleModal'
@@ -28,7 +28,7 @@ export default function PosPage() {
 
   const [voiceCategory,  setVoiceCategory]  = useState<string | null | undefined>(undefined)
   const [voiceSoloStock, setVoiceSoloStock] = useState<boolean | undefined>(undefined)
-  const [payAutoMode,    setPayAutoMode]    = useState<'efectivo_exacto' | undefined>(undefined)
+  const [voiceProductRequest, setVoiceProductRequest] = useState<VoiceProductRequest | null>(null)
 
   // Cart persistente — lazy initializer para no perder el ticket activo al recargar
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -40,6 +40,7 @@ export default function PosPage() {
   })
 
   const searchRef = useRef<HTMLInputElement>(null)
+  const voiceProductCounter = useRef(0)
 
   // Turno activo
   const [activeShift, setActiveShift] = useState<Shift | null | undefined>(undefined)
@@ -94,12 +95,12 @@ export default function PosPage() {
       .then(({ data }) => setActiveShift(data as Shift | null))
   }, [authLoading, user])
 
-  // Comandos de voz: filtros y cobro
+  // Comandos de voz: filtros y búsqueda segura para agregar al carrito.
   useEffect(() => {
     if (!searchParams) return
     const filtro = searchParams.get('filtro')
     const existencias = searchParams.get('existencias')
-    const cobrar = searchParams.get('cobrar')
+    const agregar = searchParams.get('agregar')
     if (filtro !== null) {
       setVoiceCategory(filtro.toUpperCase())
       router.replace('/pos', { scroll: false })
@@ -108,12 +109,12 @@ export default function PosPage() {
       setVoiceSoloStock(true)
       router.replace('/pos', { scroll: false })
     }
-    if (cobrar === 'efectivo_exacto' && activeShift) {
-      setShowPayment(true)
-      setPayAutoMode('efectivo_exacto')
+    if (agregar !== null && agregar.trim().length >= 2 && agregar.length <= 140) {
+      voiceProductCounter.current += 1
+      setVoiceProductRequest({ id: voiceProductCounter.current, query: agregar.trim() })
       router.replace('/pos', { scroll: false })
     }
-  }, [searchParams, router, activeShift])
+  }, [searchParams, router])
 
   // ── Carrito ──────────────────────────────────────────────────────────────
 
@@ -262,6 +263,7 @@ export default function PosPage() {
         refreshKey={refreshKey}
         voiceCategory={voiceCategory}
         voiceSoloStock={voiceSoloStock}
+        voiceProductRequest={voiceProductRequest}
       />
 
       <CartPanel
@@ -286,9 +288,8 @@ export default function PosPage() {
           cart={cart}
           total={cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0)}
           activeShift={activeShift}
-          autoMode={payAutoMode}
           onSuccess={() => { clearCart(); setRefreshKey(k => k + 1) }}
-          onClose={() => { setShowPayment(false); setPayAutoMode(undefined) }}
+          onClose={() => setShowPayment(false)}
         />
       )}
 

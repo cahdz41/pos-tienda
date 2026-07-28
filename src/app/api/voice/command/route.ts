@@ -1,7 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GoogleGenAI } from '@google/genai'
+import {
+  buildSalesVoicePath,
+  isSalesVoiceQueryCandidate,
+  parseSalesVoiceQuery,
+} from '@/lib/salesVoiceQuery'
+import {
+  buildVoiceCartPath,
+  isVoiceCartCommandCandidate,
+  isVoiceCheckoutCommand,
+  parseVoiceCartCommand,
+} from '@/lib/voiceCartCommand'
+import {
+  buildVoiceInventoryPath,
+  isVoiceInventoryCommandCandidate,
+  parseVoiceInventoryCommand,
+} from '@/lib/voiceInventoryCommand'
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
+const geminiApiKey = process.env.GEMINI_API_KEY
+const ai = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null
 const MODEL = 'gemini-2.5-flash'
 
 const SYSTEM_PROMPT = `Eres el intérprete de comandos de voz del POS de Chocholand, tienda de suplementos deportivos.
@@ -30,11 +47,13 @@ Solo existencias (solo con stock > 0):
   Path: /pos?existencias=true
   Label: "Solo con existencias"
 
-Cobrar (pago en efectivo exacto automático):
-  Trigger: "cobrar", "procesar pago", "cobrar en efectivo", "pagar", "hacer el cobro", "cobrar efectivo exacto", etc.
-  Path: /pos?cobrar=efectivo_exacto
-  Label: "Cobrando en efectivo"
-  NOTA: Solo usar cuando el usuario claramente quiere completar el cobro.
+Agregar un producto al carrito (siempre requiere confirmación visual):
+  Trigger: "agrégame [descripción]", "pon [descripción] en el carrito", "quiero agregar [descripción]", etc.
+  Path: /pos?agregar=DESCRIPCION_DEL_PRODUCTO
+  Label: "Buscar producto para agregar"
+  NOTA: Conserva marca, nombre parcial, presentación y sabor que haya dicho el usuario.
+
+Cobrar o procesar una venta por voz está DESHABILITADO. Nunca devuelvas una ruta de cobro.
 
 ## SECCIÓN INVENTARIO (/inventario)
 
@@ -47,6 +66,12 @@ Exportar a Excel:
   Trigger: "exportar inventario", "exportar a excel", "descargar excel", "exportar excel", etc.
   Path: /inventario?modal=exportar
   Label: "Exportar inventario a Excel"
+
+Ajustar stock de un producto (siempre requiere selección y confirmación visual):
+  Trigger: "agregar inventario [producto]", "agregar [producto] al inventario", "ajustar stock de [producto]", etc.
+  Path: /inventario?ajustar=DESCRIPCION_DEL_PRODUCTO
+  Label: "Buscar producto para ajustar stock"
+  NOTA: Nunca incluyas cantidades de ajuste ni guardes cambios directamente desde la voz.
 
 ## SECCIÓN PRODUCTOS (/productos)
 
@@ -174,9 +199,104 @@ export async function POST(req: NextRequest) {
     }
 
     const extras = (alternatives ?? []).filter(a => a && a !== command)
+    const candidates = [command, ...extras]
+
+    if (candidates.some(candidate => isVoiceCheckoutCommand(candidate))) {
+      return NextResponse.json(
+        {
+          action: 'unknown',
+          message: 'Por seguridad, la voz puede agregar productos pero no procesar el cobro.',
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
+
+    // El contexto explícito de inventario tiene prioridad sobre "agregar" al carrito.
+    const inventoryCommand = candidates
+      .map(candidate => parseVoiceInventoryCommand(candidate))
+      .find(candidate => candidate !== null)
+
+    if (inventoryCommand) {
+      return NextResponse.json(
+        {
+          action: 'navigate',
+          path: buildVoiceInventoryPath(inventoryCommand),
+          label: inventoryCommand.label,
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
+
+    if (candidates.some(candidate => isVoiceInventoryCommandCandidate(candidate))) {
+      return NextResponse.json(
+        {
+          action: 'unknown',
+          message: 'Dime qué producto, presentación o sabor quieres ajustar en inventario.',
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
+
+    const cartCommand = candidates
+      .map(candidate => parseVoiceCartCommand(candidate))
+      .find(candidate => candidate !== null)
+
+    if (cartCommand) {
+      return NextResponse.json(
+        {
+          action: 'navigate',
+          path: buildVoiceCartPath(cartCommand),
+          label: cartCommand.label,
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
+
+    if (isVoiceCartCommandCandidate(command)) {
+      return NextResponse.json(
+        {
+          action: 'unknown',
+          message: 'Dime qué producto, presentación o sabor quieres agregar.',
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
+
+    const salesQuery = candidates
+      .map(candidate => parseSalesVoiceQuery(candidate))
+      .find(candidate => candidate !== null)
+
+    if (salesQuery) {
+      return NextResponse.json(
+        {
+          action: 'navigate',
+          path: buildSalesVoicePath(salesQuery),
+          label: salesQuery.label,
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
+
+    if (isSalesVoiceQueryCandidate(command)) {
+      return NextResponse.json(
+        {
+          action: 'unknown',
+          message: 'Puedo consultar ventas de hoy, de ayer o de una fecha específica.',
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
+
     const userText = extras.length > 0
       ? `Transcripción principal: "${command}"\nAlternativas posibles (en orden de confianza):\n${extras.map((a, i) => `${i + 2}. "${a}"`).join('\n')}\n\nElige la interpretación más probable como comando.`
       : command
+
+    if (!ai) {
+      return NextResponse.json(
+        { action: 'unknown', message: 'No reconocí el comando. Intenta decirlo de otra forma.' },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
 
     const result = await ai.models.generateContent({
       model: MODEL,
@@ -193,6 +313,43 @@ export async function POST(req: NextRequest) {
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as { action: string; path?: string; label?: string; message?: string }
+
+    if (parsed.action === 'navigate' && parsed.path) {
+      const proposed = new URL(parsed.path, 'http://pos.local')
+
+      if (proposed.pathname === '/pos' && proposed.searchParams.has('cobrar')) {
+        return NextResponse.json(
+          {
+            action: 'unknown',
+            message: 'Por seguridad, la voz puede agregar productos pero no procesar el cobro.',
+          },
+          { headers: { 'Cache-Control': 'no-store' } }
+        )
+      }
+
+      const proposedAdd = proposed.pathname === '/pos'
+        ? proposed.searchParams.get('agregar')
+        : null
+      if (proposedAdd !== null) {
+        const safeAdd = parseVoiceCartCommand(`agrega ${proposedAdd}`)
+        if (!safeAdd || [...proposed.searchParams.keys()].some(key => key !== 'agregar')) {
+          return NextResponse.json({ action: 'unknown', message: 'Búsqueda de producto inválida.' })
+        }
+        parsed.path = buildVoiceCartPath(safeAdd)
+      }
+
+      const proposedInventoryAdjust = proposed.pathname === '/inventario'
+        ? proposed.searchParams.get('ajustar')
+        : null
+      if (proposedInventoryAdjust !== null) {
+        const safeAdjust = parseVoiceInventoryCommand(`ajustar stock de ${proposedInventoryAdjust}`)
+        if (!safeAdjust || [...proposed.searchParams.keys()].some(key => key !== 'ajustar')) {
+          return NextResponse.json({ action: 'unknown', message: 'Búsqueda de inventario inválida.' })
+        }
+        parsed.path = buildVoiceInventoryPath(safeAdjust)
+      }
+    }
+
     return NextResponse.json(parsed, { headers: { 'Cache-Control': 'no-store' } })
   } catch (e) {
     console.error('[voice/command]', e)

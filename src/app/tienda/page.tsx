@@ -669,7 +669,7 @@ export default function TiendaPage() {
 
   const [view,             setView]             = useState<TiendaView>('catalogo')
   const [offers,           setOffers]           = useState<Offer[]>([])
-  const [offersLoading,    setOffersLoading]    = useState(false)
+  const [offersLoading,    setOffersLoading]    = useState(true)
   const [packages,         setPackages]         = useState<Package[]>([])
   const [packagesLoading,  setPackagesLoading]  = useState(false)
 
@@ -681,7 +681,6 @@ export default function TiendaPage() {
       .finally(() => setProductsLoading(false))
 
     // Cargar ofertas al inicio para mostrar badges de descuento en el catálogo
-    setOffersLoading(true)
     fetch('/api/ofertas').then(r => r.json())
       .then(d => setOffers(Array.isArray(d) ? d : []))
       .finally(() => setOffersLoading(false))
@@ -696,15 +695,24 @@ export default function TiendaPage() {
     return m
   }, [offers])
 
-  // Lazy load paquetes la primera vez que se accede a esa vista
+  // Recarga los paquetes cada vez que se abre la vista para reflejar cambios del POS.
   useEffect(() => {
-    if (view === 'paquetes' && packages.length === 0 && !packagesLoading) {
-      setPackagesLoading(true)
-      fetch('/api/paquetes').then(r => r.json())
-        .then(d => setPackages(Array.isArray(d) ? d.filter((p: Package) => p.activo) : []))
-        .finally(() => setPackagesLoading(false))
-    }
-  }, [view]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (view !== 'paquetes') return
+
+    let cancelled = false
+    void Promise.resolve().then(() => {
+      if (!cancelled) setPackagesLoading(true)
+    })
+    fetch('/api/paquetes', { cache: 'no-store' }).then(r => r.json())
+      .then(d => {
+        if (!cancelled) setPackages(Array.isArray(d) ? d.filter((p: Package) => p.activo) : [])
+      })
+      .finally(() => {
+        if (!cancelled) setPackagesLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [view])
 
   function goToView(v: TiendaView) {
     setView(v)

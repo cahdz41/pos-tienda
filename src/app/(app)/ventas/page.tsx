@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { Suspense, useState, useEffect, useMemo, useRef } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import * as XLSX from 'xlsx'
 import { createClient } from '@/lib/supabase'
+import { getSalesRangeUtc, isValidSalesDate, salesCategoryKey } from '@/lib/salesVoiceQuery'
 import { printReceipt } from '../pos/Receipt'
 import type { CartItem } from '@/types'
 
@@ -159,7 +161,12 @@ function getRangeISO(range: ExportRange, customFrom: string, customTo: string) {
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
-export default function VentasPage() {
+function VentasContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const initialSearchHandled = useRef(false)
+  const lastVoiceRequest = useRef<string | null>(null)
+
   // Búsqueda
   const [hasSearched, setHasSearched]         = useState(false)
   const [searchText, setSearchText]           = useState('')
@@ -167,6 +174,7 @@ export default function VentasPage() {
   const [customFrom, setCustomFrom]           = useState(toLocalDateStr(new Date()))
   const [customTo, setCustomTo]               = useState(toLocalDateStr(new Date()))
   const [categories, setCategories]           = useState<Category[]>([])
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false)
   const [selectedCats, setSelectedCats]       = useState<string[]>([])
   const [showCatDropdown, setShowCatDropdown] = useState(false)
   const catRef = useRef<HTMLDivElement>(null)
@@ -198,12 +206,60 @@ export default function VentasPage() {
       .then(({ data }: { data: Cashier[] | null }) => { if (data) setCashiers(data) })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(supabase as any).from('categories').select('id, name').order('name')
-      .then(({ data }: { data: Category[] | null }) => { if (data) setCategories(data) })
+      .then(({ data }: { data: Category[] | null }) => {
+        if (data) setCategories(data)
+        setCategoriesLoaded(true)
+      })
   }, [])
 
-  // Cargar ventas de hoy al entrar a la página
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { handleSearch() }, [])
+  // Consume únicamente fechas/categoría allowlisted y limpia la URL al terminar.
+  useEffect(() => {
+    const from = searchParams.get('from')
+    const to = searchParams.get('to')
+    const requestedCategory = searchParams.get('category')
+    const voiceRange = isValidSalesDate(from) && isValidSalesDate(to) && getSalesRangeUtc(from, to)
+      ? { from, to }
+      : null
+
+    if (voiceRange) {
+      if (requestedCategory !== null && !categoriesLoaded) return
+
+      const matchedCategory = requestedCategory === null
+        ? null
+        : categories.find(category => salesCategoryKey(category.name) === salesCategoryKey(requestedCategory))
+
+      if (requestedCategory !== null && !matchedCategory) {
+        initialSearchHandled.current = true
+        setHasSearched(true)
+        setRawSales([])
+        setQueryError(`No existe la categoría "${requestedCategory}".`)
+        router.replace('/ventas', { scroll: false })
+        return
+      }
+
+      const requestKey = `${voiceRange.from}|${voiceRange.to}|${matchedCategory?.name ?? ''}`
+      if (lastVoiceRequest.current === requestKey) return
+      lastVoiceRequest.current = requestKey
+      initialSearchHandled.current = true
+      setPeriodFilter('custom')
+      setCustomFrom(voiceRange.from)
+      setCustomTo(voiceRange.to)
+      setSelectedCats(matchedCategory ? [matchedCategory.name] : [])
+      void handleSearch(voiceRange)
+      router.replace('/ventas', { scroll: false })
+      return
+    }
+
+    lastVoiceRequest.current = null
+    if (from !== null || to !== null || requestedCategory !== null) {
+      router.replace('/ventas', { scroll: false })
+    }
+    if (initialSearchHandled.current) return
+    initialSearchHandled.current = true
+    void handleSearch()
+    // Los valores iniciales son intencionales; una URL de voz se consume una sola vez.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories, categoriesLoaded, router, searchParams])
 
   // Cerrar dropdown de categorías al hacer click fuera
   useEffect(() => {
@@ -215,13 +271,16 @@ export default function VentasPage() {
     return () => document.removeEventListener('mousedown', onOutsideClick)
   }, [])
 
-  async function handleSearch() {
+  async function handleSearch(dateOverride?: { from: string; to: string }) {
     setLoading(true)
     setHasSearched(true)
     setQueryError(null)
     setDetail(null)
     const supabase = createClient()
-    const { start, end } = getSearchRange(periodFilter, customFrom, customTo)
+    const overrideRange = dateOverride
+      ? getSalesRangeUtc(dateOverride.from, dateOverride.to)
+      : null
+    const { start, end } = overrideRange ?? getSearchRange(periodFilter, customFrom, customTo)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query = (supabase as any)
@@ -554,7 +613,7 @@ export default function VentasPage() {
                   style={{ color: 'var(--text-muted)', background: 'var(--surface)' }}>×</button>
               )}
             </div>
-            <button onClick={handleSearch} disabled={loading}
+            <button onClick={() => void handleSearch()} disabled={loading}
               className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-opacity"
               style={{ background: 'var(--accent)', color: '#000', opacity: loading ? 0.7 : 1 }}>
               {loading ? (
@@ -1065,5 +1124,13 @@ export default function VentasPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function VentasPage() {
+  return (
+    <Suspense fallback={<div className="p-5 text-sm" style={{ color: 'var(--text-muted)' }}>Cargando ventas…</div>}>
+      <VentasContent />
+    </Suspense>
   )
 }

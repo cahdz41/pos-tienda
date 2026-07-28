@@ -9,21 +9,51 @@ function db() {
   )
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
-  const { error } = await db().from('packages').delete().eq('id', params.id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true })
+type PackageRouteContext = { params: Promise<{ id: string }> }
+
+async function packageIdFrom(context: PackageRouteContext): Promise<number | null> {
+  const { id } = await context.params
+  const value = Number(id)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, context: PackageRouteContext) {
+  const id = await packageIdFrom(context)
+  if (id === null) {
+    return NextResponse.json({ error: 'Identificador de paquete inválido' }, { status: 400 })
+  }
+
+  const { data, error } = await db()
+    .from('packages')
+    .delete()
+    .eq('id', id)
+    .select('id')
+    .maybeSingle()
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!data) return NextResponse.json({ error: 'Paquete no encontrado' }, { status: 404 })
+  return NextResponse.json({ ok: true, id: data.id }, { headers: { 'Cache-Control': 'no-store' } })
+}
+
+export async function PATCH(req: NextRequest, context: PackageRouteContext) {
+  const id = await packageIdFrom(context)
+  if (id === null) {
+    return NextResponse.json({ error: 'Identificador de paquete inválido' }, { status: 400 })
+  }
+
   const { activo } = await req.json()
+  if (typeof activo !== 'boolean') {
+    return NextResponse.json({ error: 'Estado de paquete inválido' }, { status: 400 })
+  }
+
   const { data, error } = await db()
     .from('packages')
     .update({ activo })
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
-    .single()
+    .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  if (!data) return NextResponse.json({ error: 'Paquete no encontrado' }, { status: 404 })
+  return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } })
 }

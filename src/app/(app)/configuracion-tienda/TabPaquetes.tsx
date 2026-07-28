@@ -184,9 +184,19 @@ export default function TabPaquetes({ packages, onPackagesChange }: {
   async function del(id: number) {
     if (!confirm('¿Eliminar este paquete permanentemente?')) return
     setDeletingId(id)
-    await fetch(`/api/paquetes/${id}`, { method: 'DELETE' })
-    onPackagesChange(packages.filter(p => p.id !== id))
-    setDeletingId(null)
+    try {
+      const res = await fetch(`/api/paquetes/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null
+        throw new Error(body?.error ?? `No se pudo eliminar el paquete (${res.status})`)
+      }
+
+      onPackagesChange(packages.filter(p => p.id !== id))
+    } catch (error) {
+      alert(`Error al eliminar: ${error instanceof Error ? error.message : 'Error desconocido'}`)
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   return (
