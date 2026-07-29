@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' }
+
+interface VariantImageRow {
+  id: string
+  image_url: string | null
+  product: { image_url: string | null } | { image_url: string | null }[] | null
+}
+
 function db() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,11 +37,10 @@ export async function GET() {
       .select('id, image_url, product:products(image_url)')
       .in('id', ids)
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const imgMap = new Map<string, string | null>(
-      (variants ?? []).map((v: any) => {
+      ((variants ?? []) as VariantImageRow[]).map(v => {
         const productImg = Array.isArray(v.product) ? v.product[0]?.image_url : v.product?.image_url
-        return [v.id as string, (v.image_url ?? productImg ?? null) as string | null]
+        return [v.id, v.image_url ?? productImg ?? null]
       })
     )
 
@@ -42,11 +49,12 @@ export async function GET() {
         (!o.imagen && o.variant_id && imgMap.has(o.variant_id))
           ? { ...o, imagen: imgMap.get(o.variant_id) }
           : o
-      )
+      ),
+      { headers: NO_STORE_HEADERS }
     )
   }
 
-  return NextResponse.json(list)
+  return NextResponse.json(list, { headers: NO_STORE_HEADERS })
 }
 
 export async function POST(req: NextRequest) {
@@ -64,11 +72,14 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data, { status: 201 })
+  return NextResponse.json(data, { status: 201, headers: NO_STORE_HEADERS })
 }
 
 export async function DELETE() {
-  const { error } = await db().from('offers').delete().neq('id', 0)
+  const { data, error } = await db().from('offers').delete().neq('id', 0).select('id')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true })
+  return NextResponse.json(
+    { ok: true, deleted: data?.length ?? 0 },
+    { headers: NO_STORE_HEADERS }
+  )
 }

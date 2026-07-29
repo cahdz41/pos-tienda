@@ -157,15 +157,34 @@ export default function TabOfertas({ offers, onOffersChange }: {
 
   async function del(id: number) {
     setDeletingId(id)
-    await fetch(`/api/ofertas/${id}`, { method: 'DELETE' })
-    onOffersChange(offers.filter(o => o.id !== id))
-    setDeletingId(null)
+    try {
+      const res = await fetch(`/api/ofertas/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null
+        throw new Error(body?.error ?? `No se pudo eliminar la oferta (${res.status})`)
+      }
+
+      onOffersChange(offers.filter(o => o.id !== id))
+    } catch (error) {
+      alert(`Error al eliminar: ${error instanceof Error ? error.message : 'Error desconocido'}`)
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   async function delAll() {
     if (!confirm('¿Eliminar TODAS las ofertas del mes?')) return
-    await fetch('/api/ofertas', { method: 'DELETE' })
-    onOffersChange([])
+    try {
+      const res = await fetch('/api/ofertas', { method: 'DELETE' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null
+        throw new Error(body?.error ?? `No se pudieron eliminar las ofertas (${res.status})`)
+      }
+
+      onOffersChange([])
+    } catch (error) {
+      alert(`Error al eliminar: ${error instanceof Error ? error.message : 'Error desconocido'}`)
+    }
   }
 
   return (

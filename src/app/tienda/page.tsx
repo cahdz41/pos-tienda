@@ -681,7 +681,7 @@ export default function TiendaPage() {
       .finally(() => setProductsLoading(false))
 
     // Cargar ofertas al inicio para mostrar badges de descuento en el catálogo
-    fetch('/api/ofertas').then(r => r.json())
+    fetch('/api/ofertas', { cache: 'no-store' }).then(r => r.json())
       .then(d => setOffers(Array.isArray(d) ? d : []))
       .finally(() => setOffersLoading(false))
   }, [])
@@ -694,6 +694,25 @@ export default function TiendaPage() {
     }
     return m
   }, [offers])
+
+  // Recarga las ofertas cada vez que se abre la vista para reflejar cambios del POS.
+  useEffect(() => {
+    if (view !== 'ofertas') return
+
+    let cancelled = false
+    void Promise.resolve().then(() => {
+      if (!cancelled) setOffersLoading(true)
+    })
+    fetch('/api/ofertas', { cache: 'no-store' }).then(r => r.json())
+      .then(d => {
+        if (!cancelled) setOffers(Array.isArray(d) ? d : [])
+      })
+      .finally(() => {
+        if (!cancelled) setOffersLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [view])
 
   // Recarga los paquetes cada vez que se abre la vista para reflejar cambios del POS.
   useEffect(() => {

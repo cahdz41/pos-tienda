@@ -16,6 +16,7 @@ import {
   isVoiceInventoryCommandCandidate,
   parseVoiceInventoryCommand,
 } from '@/lib/voiceInventoryCommand'
+import { buildVoicePhotoPath, parseVoicePhotoCommand } from '@/lib/voicePhotoCommand'
 
 const geminiApiKey = process.env.GEMINI_API_KEY
 const ai = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null
@@ -160,6 +161,12 @@ Ir a asignación de fotos (IA):
   Path: /configuracion?seccion=fotos-ia
   Label: "Asignación de fotos IA"
 
+Buscar un producto para asignarle una foto:
+  Trigger: "agregar imagen de producto [nombre]", "asignar foto a [nombre]", "subir foto de [nombre]", etc.
+  Path: /configuracion?seccion=fotos-ia&producto=NOMBRE_PRODUCTO
+  Ejemplo: "agregar imagen de producto iso100 5lbs" → /configuracion?seccion=fotos-ia&producto=iso100%205lbs
+  Label: "Asignar foto: [nombre]"
+
 Habilitar asistente (bot):
   Trigger: "habilita el bot", "activa el asistente", "enciende el bot", "habilitar asistente", etc.
   Path: /configuracion?bot_enabled=true
@@ -200,6 +207,22 @@ export async function POST(req: NextRequest) {
 
     const extras = (alternatives ?? []).filter(a => a && a !== command)
     const candidates = [command, ...extras]
+
+    // Resolver fotos primero evita confundir "agregar imagen" con agregar al carrito.
+    const photoCommand = candidates
+      .map(candidate => parseVoicePhotoCommand(candidate))
+      .find(candidate => candidate !== null)
+
+    if (photoCommand) {
+      return NextResponse.json(
+        {
+          action: 'navigate',
+          path: buildVoicePhotoPath(photoCommand),
+          label: photoCommand.label,
+        },
+        { headers: { 'Cache-Control': 'no-store' } }
+      )
+    }
 
     if (candidates.some(candidate => isVoiceCheckoutCommand(candidate))) {
       return NextResponse.json(

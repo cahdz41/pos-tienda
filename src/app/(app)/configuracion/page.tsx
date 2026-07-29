@@ -74,6 +74,7 @@ export default function ConfiguracionPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const fotosIaRef = useRef<HTMLDivElement>(null)
+  const photoProductQuery = searchParams?.get('producto')?.trim().slice(0, 140) || undefined
 
   // ── Negocio ───────────────────────────────────────────────────────────
   const [businessName, setBusinessName] = useState(() => load(K.businessName, 'Mi Negocio'))
@@ -156,7 +157,10 @@ export default function ConfiguracionPage() {
 
     if (seccion === 'fotos-ia' && fotosIaRef.current) {
       fotosIaRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      router.replace('/configuracion', { scroll: false })
+      const nextParams = new URLSearchParams(searchParams.toString())
+      nextParams.delete('seccion')
+      const nextQuery = nextParams.toString()
+      router.replace(nextQuery ? `/configuracion?${nextQuery}` : '/configuracion', { scroll: false })
     }
     if (botEnabled !== null) {
       void handleBotEnabled(botEnabled === 'true')
@@ -258,7 +262,9 @@ export default function ConfiguracionPage() {
       .from('product_variants')
       .select('product_id')
       .gt('stock', 0)
-    const unique = new Set((data as any[] ?? []).map((v: any) => v.product_id))
+    const unique = new Set(
+      ((data ?? []) as { product_id: string }[]).map(v => v.product_id)
+    )
     setStoreCount(unique.size)
   }
 
@@ -662,7 +668,7 @@ export default function ConfiguracionPage() {
         {/* ── Fotos de productos ── */}
         <div ref={fotosIaRef}>
           <Section title="Asignación de Fotos (IA)">
-            <PhotoManager />
+            <PhotoManager key={photoProductQuery ?? 'sin-busqueda'} initialSearch={photoProductQuery} />
           </Section>
         </div>
 

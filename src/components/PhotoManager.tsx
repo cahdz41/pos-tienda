@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
+import { matchesSearch, normalizeVoiceQuery } from '@/lib/voiceNormalize'
 
 interface VariantRow {
   id: string
@@ -27,16 +28,19 @@ const STAGE_LABEL: Record<Stage, string> = {
   error:         'Error al procesar',
 }
 
-export default function PhotoManager() {
+export default function PhotoManager({ initialSearch }: { initialSearch?: string }) {
   const [variants,  setVariants]  = useState<VariantRow[]>([])
   const [loading,   setLoading]   = useState(true)
-  const [search,    setSearch]    = useState('')
+  const [search,    setSearch]    = useState(initialSearch ?? '')
   const [selected,  setSelected]  = useState<VariantRow | null>(null)
   const [preview,   setPreview]   = useState<string | null>(null)
   const [stage,     setStage]     = useState<Stage>('idle')
   const [errorMsg,  setErrorMsg]  = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
+  // La búsqueda inicial queda fija durante esta instancia; Configuración la remonta al cambiarla.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadVariants() }, [])
 
   async function loadVariants() {
@@ -46,17 +50,35 @@ export default function PhotoManager() {
       .from('product_variants')
       .select('id, product_id, barcode, flavor, product:products(id, name, category, image_url)')
       .order('product_id')
-    setVariants((data as any) ?? [])
+    const rows = (data as unknown as VariantRow[]) ?? []
+    setVariants(rows)
+
+    const voiceQuery = initialSearch ? normalizeVoiceQuery(initialSearch) : ''
+    if (voiceQuery) {
+      const matches = rows.filter(v => v.product && matchesSearch(
+        voiceQuery,
+        v.product.name,
+        v.flavor ?? '',
+        v.barcode
+      ))
+      const bestMatch = matches.find(v => normalizeVoiceQuery(v.product.name) === voiceQuery)
+        ?? matches.find(v => normalizeVoiceQuery(`${v.product.name} ${v.flavor ?? ''}`) === voiceQuery)
+        ?? matches[0]
+
+      if (bestMatch) selectVariant(bestMatch)
+    }
+
     setLoading(false)
+    window.requestAnimationFrame(() => searchInputRef.current?.focus())
   }
 
   const filtered = variants.filter(v => {
     if (!v.product) return false
-    const q = search.toLowerCase()
-    return (
-      v.product.name.toLowerCase().includes(q) ||
-      v.barcode.toLowerCase().includes(q) ||
-      (v.flavor ?? '').toLowerCase().includes(q)
+    return matchesSearch(
+      normalizeVoiceQuery(search),
+      v.product.name,
+      v.barcode,
+      v.flavor ?? ''
     )
   })
 
@@ -82,7 +104,7 @@ export default function PhotoManager() {
 
       // 1. Import dinámico — nunca en el top del archivo
       const { removeBackground } = await import('@imgly/background-removal')
-      // @ts-ignore — onnxruntime-web no resuelve sus tipos via exports map
+      // @ts-expect-error — onnxruntime-web no resuelve sus tipos via exports map
       const ort = await import('onnxruntime-web')
       ort.env.wasm.wasmPaths = '/ort-wasm/'
 
@@ -107,6 +129,7 @@ export default function PhotoManager() {
 
       // 3. Guardar en products (nivel producto, aplica a todos los sabores)
       const supabase = createClient()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error } = await (supabase as any)
         .from('products')
         .update({ image_url: url })
@@ -129,10 +152,10 @@ export default function PhotoManager() {
       setStage('done')
       setTimeout(() => setStage('idle'), 2500)
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('PhotoManager error:', err)
       setStage('error')
-      setErrorMsg(err?.message ?? 'Error desconocido')
+      setErrorMsg(err instanceof Error ? err.message : 'Error desconocido')
     }
   }
 
@@ -157,6 +180,7 @@ export default function PhotoManager() {
         {/* ── Panel izquierdo: lista ── */}
         <div className="flex flex-col gap-2">
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="Buscar producto por nombre…"
             value={search}
