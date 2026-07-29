@@ -44,6 +44,7 @@ export default function PosPage() {
 
   // Turno activo
   const [activeShift, setActiveShift] = useState<Shift | null | undefined>(undefined)
+  const [shiftLoadError, setShiftLoadError] = useState<string | null>(null)
   // Modales
   const [showPayment, setShowPayment] = useState(false)
   const [showVoid, setShowVoid]       = useState(false)
@@ -83,17 +84,32 @@ export default function PosPage() {
   const [holdNameMode, setHoldNameMode] = useState(false)
   const [holdNameInput, setHoldNameInput] = useState('')
 
-  // Cargar turno activo
-  useEffect(() => {
+  // Cargar el turno abierto original del cajero. El orden ascendente recupera
+  // el turno real si una versión anterior llegó a crear duplicados vacíos.
+  const loadActiveShift = useCallback(async () => {
     if (authLoading || !user) return
     const supabase = createClient()
-    supabase
+    const { data, error } = await supabase
       .from('shifts')
       .select('*')
+      .eq('cashier_id', user.id)
       .eq('status', 'open')
+      .order('opened_at', { ascending: true })
+      .limit(1)
       .maybeSingle()
-      .then(({ data }) => setActiveShift(data as Shift | null))
+
+    if (error) {
+      console.error('[POS] Error consultando turno:', error.message)
+      setShiftLoadError('No se pudo comprobar el turno activo. Intenta nuevamente.')
+      setActiveShift(null)
+      return
+    }
+
+    setShiftLoadError(null)
+    setActiveShift(data as Shift | null)
   }, [authLoading, user])
+
+  useEffect(() => { void loadActiveShift() }, [loadActiveShift])
 
   // Comandos de voz: filtros y búsqueda segura para agregar al carrito.
   useEffect(() => {
@@ -477,16 +493,26 @@ export default function PosPage() {
               ⏰
             </div>
             <div>
-              <p className="text-base font-bold" style={{ color: 'var(--text)' }}>Sin turno activo</p>
+              <p className="text-base font-bold" style={{ color: 'var(--text)' }}>
+                {shiftLoadError ? 'No se pudo verificar el turno' : 'Sin turno activo'}
+              </p>
               <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                Abre un turno antes de realizar ventas
+                {shiftLoadError ?? 'Abre un turno antes de realizar ventas'}
               </p>
             </div>
-            <Link href="/turnos"
-              className="w-full py-2.5 rounded-xl text-sm font-bold text-center"
-              style={{ background: 'var(--accent)', color: '#000' }}>
-              Ir a Turnos
-            </Link>
+            {shiftLoadError ? (
+              <button onClick={() => void loadActiveShift()}
+                className="w-full py-2.5 rounded-xl text-sm font-bold text-center"
+                style={{ background: 'var(--accent)', color: '#000' }}>
+                Reintentar
+              </button>
+            ) : (
+              <Link href="/turnos"
+                className="w-full py-2.5 rounded-xl text-sm font-bold text-center"
+                style={{ background: 'var(--accent)', color: '#000' }}>
+                Ir a Turnos
+              </Link>
+            )}
           </div>
         </div>
       )}

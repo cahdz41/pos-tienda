@@ -393,11 +393,16 @@ export default function TurnosPage() {
     if (!user) { setLoadingShift(false); return }
     const supabase = createClient()
     try {
-      const { data: shiftData } = await supabase
+      const { data: shiftData, error: shiftError } = await supabase
         .from('shifts')
         .select('*')
+        .eq('cashier_id', user.id)
         .eq('status', 'open')
+        .order('opened_at', { ascending: true })
+        .limit(1)
         .maybeSingle()
+
+      if (shiftError) throw shiftError
 
       setShift(shiftData as Shift | null)
 
@@ -416,6 +421,9 @@ export default function TurnosPage() {
         setSales(stats)
         setMovements((movRes.data ?? []) as CashMovement[])
       }
+    } catch (loadError) {
+      console.error('[Turnos] Error consultando turno:', loadError)
+      setError('No se pudo consultar el turno. Revisa la conexión e intenta nuevamente.')
     } finally {
       setLoadingShift(false)
     }
@@ -438,6 +446,24 @@ export default function TurnosPage() {
     setSaving(true); setError(null)
     try {
       const supabase = createClient()
+
+      // Volver a comprobar antes de insertar evita turnos duplicados por
+      // recargas, navegación rápida o un doble envío del formulario.
+      const { data: existingShift, error: lookupError } = await supabase
+        .from('shifts')
+        .select('id')
+        .eq('cashier_id', user.id)
+        .eq('status', 'open')
+        .order('opened_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+      if (lookupError) throw lookupError
+      if (existingShift) {
+        await loadShift()
+        return
+      }
+
       const { data, error: err } = await supabase
         .from('shifts')
         .insert({ cashier_id: user.id, opening_amount: amount, status: 'open' })
