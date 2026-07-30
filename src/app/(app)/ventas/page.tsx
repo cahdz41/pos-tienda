@@ -52,6 +52,54 @@ type ExportRange  = 'day' | 'week' | 'month' | 'custom'
 type MethodFilter = 'all' | 'cash' | 'card' | 'transfer' | 'credit' | 'mixed'
 type PeriodFilter = 'today' | 'lastMonth' | 'lastWeek' | 'thisMonth' | 'custom'
 
+interface ExportSaleRecord {
+  id: string
+  total: number
+  payment_method: string
+  amount_paid: number
+  change_given: number
+  status: 'completed' | 'cancelled'
+  created_at: string
+  cashier_id: string
+  notes: string | null
+}
+
+interface ExportItemRecord {
+  sale_id: string
+  variant_id: string
+  quantity: number
+  unit_price: number
+  subtotal: number
+  product_variants: {
+    barcode: string | null
+    flavor: string | null
+    sale_price: number
+    wholesale_price: number
+    cost_price: number
+    products: { name: string; category: string | null } | null
+  } | null
+}
+
+interface ExportRowContext {
+  sale: ExportSaleRecord
+  item: ExportItemRecord | null
+  cashierName: string
+}
+
+type ExportColumnId =
+  | 'folio' | 'fecha' | 'hora' | 'cajero' | 'producto' | 'sabor' | 'categoria'
+  | 'barcode' | 'cantidad' | 'precio_unitario' | 'tipo_precio' | 'costo_unitario'
+  | 'subtotal' | 'ganancia' | 'forma_pago' | 'monto_venta' | 'pago_recibido'
+  | 'cambio' | 'estado' | 'notas'
+
+interface ExportColumn {
+  id: ExportColumnId
+  label: string
+  width: number
+  monetary?: boolean
+  getValue: (context: ExportRowContext) => string | number
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const METHOD_LABEL: Record<string, string> = {
@@ -159,6 +207,67 @@ function getRangeISO(range: ExportRange, customFrom: string, customTo: string) {
   return { start: new Date(fy,fm-1,fd,0,0,0,0).toISOString(), end: new Date(ty,tm-1,td,23,59,59,999).toISOString(), label: `${customFrom}_${customTo}` }
 }
 
+function numberValue(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function getUsedPriceType(item: ExportItemRecord | null): string {
+  const variant = item?.product_variants
+  if (!item || !variant) return 'No disponible'
+  const unitPrice = numberValue(item.unit_price)
+  const publicPrice = numberValue(variant.sale_price)
+  const wholesalePrice = numberValue(variant.wholesale_price)
+  const samePrice = (a: number, b: number) => Math.abs(a - b) < 0.005
+
+  if (samePrice(unitPrice, publicPrice)) return 'Público'
+  if (!samePrice(publicPrice, wholesalePrice) && samePrice(unitPrice, wholesalePrice)) return 'Mayoreo'
+  return 'Personalizado'
+}
+
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { id: 'folio', label: 'Folio', width: 10, getValue: ({ sale }) => sale.id.slice(-6).toUpperCase() },
+  { id: 'fecha', label: 'Fecha', width: 13, getValue: ({ sale }) => new Date(sale.created_at).toLocaleDateString('es-MX') },
+  { id: 'hora', label: 'Hora', width: 12, getValue: ({ sale }) => new Date(sale.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true }) },
+  { id: 'cajero', label: 'Cajero', width: 20, getValue: ({ cashierName }) => cashierName },
+  { id: 'producto', label: 'Producto', width: 34, getValue: ({ item }) => item?.product_variants?.products?.name ?? 'Sin nombre' },
+  { id: 'sabor', label: 'Sabor / variante', width: 20, getValue: ({ item }) => item?.product_variants?.flavor || '—' },
+  { id: 'categoria', label: 'Categoría', width: 20, getValue: ({ item }) => item?.product_variants?.products?.category || 'Sin categoría' },
+  { id: 'barcode', label: 'Código de barras', width: 20, getValue: ({ item }) => item?.product_variants?.barcode || '—' },
+  { id: 'cantidad', label: 'Cantidad', width: 10, getValue: ({ item }) => numberValue(item?.quantity) },
+  { id: 'precio_unitario', label: 'Precio utilizado', width: 16, monetary: true, getValue: ({ item }) => numberValue(item?.unit_price) },
+  { id: 'tipo_precio', label: 'Tipo de precio', width: 16, getValue: ({ item }) => getUsedPriceType(item) },
+  { id: 'costo_unitario', label: 'Costo unitario actual', width: 20, monetary: true, getValue: ({ item }) => numberValue(item?.product_variants?.cost_price) },
+  { id: 'subtotal', label: 'Subtotal del artículo', width: 20, monetary: true, getValue: ({ item }) => numberValue(item?.subtotal) },
+  { id: 'ganancia', label: 'Ganancia estimada', width: 18, monetary: true, getValue: ({ item }) => item ? numberValue(item.subtotal) - numberValue(item.product_variants?.cost_price) * numberValue(item.quantity) : 0 },
+  { id: 'forma_pago', label: 'Forma de pago', width: 17, getValue: ({ sale }) => METHOD_LABEL[sale.payment_method] ?? sale.payment_method },
+  { id: 'monto_venta', label: 'Monto total del ticket', width: 20, monetary: true, getValue: ({ sale }) => numberValue(sale.total) },
+  { id: 'pago_recibido', label: 'Pago recibido', width: 16, monetary: true, getValue: ({ sale }) => numberValue(sale.amount_paid) },
+  { id: 'cambio', label: 'Cambio', width: 14, monetary: true, getValue: ({ sale }) => numberValue(sale.change_given) },
+  { id: 'estado', label: 'Estado', width: 13, getValue: ({ sale }) => sale.status === 'completed' ? 'Completada' : 'Anulada' },
+  { id: 'notas', label: 'Notas', width: 30, getValue: ({ sale }) => sale.notes || '—' },
+]
+
+const DEFAULT_EXPORT_COLUMNS = EXPORT_COLUMNS.map(column => column.id)
+const EXPORT_QUERY_BATCH_SIZE = 75
+const EXPORT_PAGE_SIZE = 1000
+
+function chunkValues<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size))
+  return chunks
+}
+
+function applyMoneyFormats(sheet: XLSX.WorkSheet, columns: ExportColumn[], rowCount: number) {
+  columns.forEach((column, columnIndex) => {
+    if (!column.monetary) return
+    for (let rowIndex = 1; rowIndex <= rowCount; rowIndex++) {
+      const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex })]
+      if (cell?.t === 'n') cell.z = '$#,##0.00'
+    }
+  })
+}
+
 // ── Componente principal ──────────────────────────────────────────────────────
 
 function VentasContent() {
@@ -197,6 +306,8 @@ function VentasContent() {
   const [exportFrom, setExportFrom]   = useState(toLocalDateStr(new Date()))
   const [exportTo, setExportTo]       = useState(toLocalDateStr(new Date()))
   const [exporting, setExporting]     = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [exportColumns, setExportColumns] = useState<ExportColumnId[]>(DEFAULT_EXPORT_COLUMNS)
 
   // Carga inicial: cajeros, categorías y ventas de hoy
   useEffect(() => {
@@ -309,7 +420,6 @@ function VentasContent() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: profiles } = await (supabase as any)
         .from('profiles').select('id, name').in('id', cashierIds)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (profiles) for (const p of profiles) cashierMap[p.id] = p.name
     }
 
@@ -447,94 +557,129 @@ function VentasContent() {
 
   async function handleExport() {
     setExporting(true)
+    setExportError(null)
     const supabase = createClient()
     const { start, end, label } = getRangeISO(exportRange, exportFrom, exportTo)
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: salesData } = await (supabase as any)
-      .from('sales')
-      .select('id, total, payment_method, amount_paid, change_given, status, created_at, cashier_id')
-      .gte('created_at', start).lte('created_at', end).order('created_at', { ascending: true })
+    try {
+      const salesData: ExportSaleRecord[] = []
+      for (let offset = 0; ; offset += EXPORT_PAGE_SIZE) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data, error } = await (supabase as any)
+          .from('sales')
+          .select('id, total, payment_method, amount_paid, change_given, status, created_at, cashier_id, notes')
+          .gte('created_at', start)
+          .lte('created_at', end)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(offset, offset + EXPORT_PAGE_SIZE - 1)
 
-    if (!salesData || salesData.length === 0) { setExporting(false); setShowExport(false); return }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cashierIds = [...new Set((salesData as any[]).map((s: any) => s.cashier_id))]
-    const cashierMap: Record<string, string> = {}
-    if (cashierIds.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: profiles } = await (supabase as any).from('profiles').select('id, name').in('id', cashierIds)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (profiles) for (const p of profiles) cashierMap[p.id] = p.name
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const saleIds = (salesData as any[]).map((s: any) => s.id)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: allItems } = await (supabase as any)
-      .from('sale_items')
-      .select('sale_id, quantity, unit_price, subtotal, product_variants(flavor, products(name))')
-      .in('sale_id', saleIds)
-
-    const previewMap: Record<string, string[]> = {}
-    if (allItems) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const item of allItems as any[]) {
-        const name = item.product_variants?.products?.name ?? 'Sin nombre'
-        if (!previewMap[item.sale_id]) previewMap[item.sale_id] = []
-        if (!previewMap[item.sale_id].includes(name)) previewMap[item.sale_id].push(name)
+        if (error) throw new Error(`No se pudieron consultar las ventas: ${error.message}`)
+        const page = (data ?? []) as ExportSaleRecord[]
+        salesData.push(...page)
+        if (page.length < EXPORT_PAGE_SIZE) break
       }
-    }
 
-    const summaryHeaders = ['Folio','Fecha','Hora','Cajero','Productos','Método','Total','Pagó','Cambio','Estado']
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const summaryRows = (salesData as any[]).map((s: any) => {
-      const dt = new Date(s.created_at)
-      return [
-        s.id.slice(-6).toUpperCase(),
-        dt.toLocaleDateString('es-MX'),
-        dt.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', hour12:true }),
-        cashierMap[s.cashier_id] ?? 'Desconocido',
-        (previewMap[s.id] ?? []).join(', ') || '—',
-        METHOD_LABEL[s.payment_method] ?? s.payment_method,
-        s.total, s.amount_paid, s.change_given,
-        s.status === 'completed' ? 'Completada' : 'Anulada',
-      ]
-    })
-    const wsSummary = XLSX.utils.aoa_to_sheet([summaryHeaders, ...summaryRows])
-    wsSummary['!cols'] = [{wch:10},{wch:13},{wch:10},{wch:18},{wch:40},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12}]
+      if (salesData.length === 0) {
+        setExportError('No hay ventas registradas en el período seleccionado.')
+        return
+      }
 
-    const detailHeaders = ['Folio','Fecha','Hora','Cajero','Producto','Sabor','Cantidad','Precio Unitario','Subtotal','Estado Venta']
-    const detailRows: unknown[][] = []
-    if (allItems) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const saleMetaMap: Record<string, any> = {}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const s of salesData as any[]) saleMetaMap[s.id] = s
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const item of allItems as any[]) {
-        const s = saleMetaMap[item.sale_id]; if (!s) continue
-        const dt = new Date(s.created_at)
-        detailRows.push([
-          s.id.slice(-6).toUpperCase(),
+      const cashierIds = [...new Set(salesData.map(sale => sale.cashier_id).filter(Boolean))]
+      const cashierMap: Record<string, string> = {}
+      for (const cashierBatch of chunkValues(cashierIds, EXPORT_QUERY_BATCH_SIZE)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profiles, error } = await (supabase as any)
+          .from('profiles').select('id, name').in('id', cashierBatch)
+        if (error) throw new Error(`No se pudieron consultar los cajeros: ${error.message}`)
+        if (profiles) for (const profile of profiles) cashierMap[profile.id] = profile.name
+      }
+
+      const allItems: ExportItemRecord[] = []
+      for (const saleIdBatch of chunkValues(salesData.map(sale => sale.id), EXPORT_QUERY_BATCH_SIZE)) {
+        // Consultar por lotes evita exceder el largo máximo de URL y perder los productos.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: items, error } = await (supabase as any)
+          .from('sale_items')
+          .select('sale_id, variant_id, quantity, unit_price, subtotal, product_variants(barcode, flavor, sale_price, wholesale_price, cost_price, products(name, category))')
+          .in('sale_id', saleIdBatch)
+          .range(0, EXPORT_PAGE_SIZE - 1)
+        if (error) throw new Error(`No se pudieron consultar los artículos vendidos: ${error.message}`)
+        allItems.push(...((items ?? []) as ExportItemRecord[]))
+      }
+
+      const itemsBySale: Record<string, ExportItemRecord[]> = {}
+      for (const item of allItems) {
+        if (!itemsBySale[item.sale_id]) itemsBySale[item.sale_id] = []
+        itemsBySale[item.sale_id].push(item)
+      }
+
+      const selectedColumns = EXPORT_COLUMNS.filter(column => exportColumns.includes(column.id))
+      const detailRows: (string | number)[][] = []
+      for (const sale of salesData) {
+        const saleItems = itemsBySale[sale.id] ?? []
+        const rows = saleItems.length > 0 ? saleItems : [null]
+        for (const item of rows) {
+          const context: ExportRowContext = {
+            sale,
+            item,
+            cashierName: cashierMap[sale.cashier_id] ?? 'Desconocido',
+          }
+          detailRows.push(selectedColumns.map(column => column.getValue(context)))
+        }
+      }
+
+      const detailHeaders = selectedColumns.map(column => column.label)
+      const wsDetail = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows])
+      wsDetail['!cols'] = selectedColumns.map(column => ({ wch: column.width }))
+      wsDetail['!autofilter'] = { ref: XLSX.utils.encode_range({ r: 0, c: 0 }, { r: detailRows.length, c: detailHeaders.length - 1 }) }
+      applyMoneyFormats(wsDetail, selectedColumns, detailRows.length)
+
+      const summaryHeaders = ['Folio', 'Fecha', 'Hora', 'Cajero', 'Productos vendidos', 'Categorías', 'Forma de pago', 'Total', 'Pagó', 'Cambio', 'Costo actual', 'Ganancia estimada', 'Estado']
+      const summaryRows = salesData.map(sale => {
+        const dt = new Date(sale.created_at)
+        const saleItems = itemsBySale[sale.id] ?? []
+        const products = saleItems.map(item => {
+          const name = item.product_variants?.products?.name ?? 'Sin nombre'
+          const flavor = item.product_variants?.flavor ? ` (${item.product_variants.flavor})` : ''
+          return `${numberValue(item.quantity)} × ${name}${flavor}`
+        })
+        const categories = [...new Set(saleItems.map(item => item.product_variants?.products?.category).filter(Boolean))]
+        const cost = saleItems.reduce((sum, item) => sum + numberValue(item.product_variants?.cost_price) * numberValue(item.quantity), 0)
+        return [
+          sale.id.slice(-6).toUpperCase(),
           dt.toLocaleDateString('es-MX'),
-          dt.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', hour12:true }),
-          cashierMap[s.cashier_id] ?? 'Desconocido',
-          item.product_variants?.products?.name ?? 'Sin nombre',
-          item.product_variants?.flavor ?? '—',
-          item.quantity, item.unit_price, item.subtotal,
-          s.status === 'completed' ? 'Completada' : 'Anulada',
-        ])
+          dt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true }),
+          cashierMap[sale.cashier_id] ?? 'Desconocido',
+          products.join(', ') || 'Sin artículos registrados',
+          categories.join(', ') || 'Sin categoría',
+          METHOD_LABEL[sale.payment_method] ?? sale.payment_method,
+          numberValue(sale.total), numberValue(sale.amount_paid), numberValue(sale.change_given),
+          cost, numberValue(sale.total) - cost,
+          sale.status === 'completed' ? 'Completada' : 'Anulada',
+        ]
+      })
+      const wsSummary = XLSX.utils.aoa_to_sheet([summaryHeaders, ...summaryRows])
+      wsSummary['!cols'] = [{ wch: 10 }, { wch: 13 }, { wch: 12 }, { wch: 20 }, { wch: 55 }, { wch: 24 }, { wch: 17 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 13 }]
+      wsSummary['!autofilter'] = { ref: XLSX.utils.encode_range({ r: 0, c: 0 }, { r: summaryRows.length, c: summaryHeaders.length - 1 }) }
+      for (let columnIndex = 7; columnIndex <= 11; columnIndex++) {
+        for (let rowIndex = 1; rowIndex <= summaryRows.length; rowIndex++) {
+          const cell = wsSummary[XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex })]
+          if (cell?.t === 'n') cell.z = '$#,##0.00'
+        }
       }
-    }
-    const wsDetail = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailRows])
-    wsDetail['!cols'] = [{wch:10},{wch:13},{wch:10},{wch:18},{wch:28},{wch:16},{wch:10},{wch:16},{wch:12},{wch:14}]
 
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Ventas')
-    XLSX.utils.book_append_sheet(wb, wsDetail, 'Detalle líneas')
-    XLSX.writeFile(wb, `ventas-${label}.xlsx`)
-    setExporting(false); setShowExport(false)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, wsDetail, 'Reporte personalizado')
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumen por ticket')
+      XLSX.writeFile(wb, `ventas-${label}.xlsx`)
+      setShowExport(false)
+    } catch (error) {
+      console.error('[Ventas] Error al exportar:', error)
+      setExportError(error instanceof Error ? error.message : 'No se pudo generar el archivo de Excel.')
+    } finally {
+      setExporting(false)
+    }
   }
 
   // ── Filtrado cliente ───────────────────────────────────────────────────────
@@ -576,7 +721,7 @@ function VentasContent() {
                 : 'Busca ventas por texto, período o categoría'}
             </p>
           </div>
-          <button onClick={() => setShowExport(true)}
+          <button onClick={() => { setExportError(null); setShowExport(true) }}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
             style={{ background: '#052e16', color: '#4ade80', border: '1px solid #166534' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1029,7 +1174,7 @@ function VentasContent() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.75)' }}
           onClick={e => { if (e.target === e.currentTarget) setShowExport(false) }}>
-          <div className="w-full max-w-sm rounded-2xl flex flex-col gap-0 overflow-hidden shadow-2xl"
+          <div className="w-full max-w-2xl max-h-[calc(100vh-2rem)] rounded-2xl flex flex-col gap-0 overflow-hidden shadow-2xl"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
 
             <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -1043,7 +1188,7 @@ function VentasContent() {
                 </div>
                 <div>
                   <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>Exportar a Excel</p>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Elige el período a exportar</p>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Elige el período y las columnas del reporte</p>
                 </div>
               </div>
               <button onClick={() => setShowExport(false)}
@@ -1051,7 +1196,10 @@ function VentasContent() {
                 style={{ color: 'var(--text-muted)', background: 'var(--bg)' }}>×</button>
             </div>
 
-            <div className="p-4 flex flex-col gap-2">
+            <div className="p-4 flex flex-col gap-2 overflow-y-auto">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Período</p>
+              </div>
               {([
                 { id: 'day',    label: 'Hoy',                      sub: new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' }) },
                 { id: 'week',   label: 'Esta semana',               sub: 'Lunes de esta semana hasta hoy' },
@@ -1092,25 +1240,62 @@ function VentasContent() {
                   </div>
                 </div>
               )}
+
+              <div className="flex items-center justify-between mt-4 mb-1">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Columnas del reporte</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{exportColumns.length} de {EXPORT_COLUMNS.length} seleccionadas</p>
+                </div>
+                <button type="button"
+                  onClick={() => setExportColumns(exportColumns.length === EXPORT_COLUMNS.length ? [] : DEFAULT_EXPORT_COLUMNS)}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-semibold"
+                  style={{ background: 'var(--bg)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                  {exportColumns.length === EXPORT_COLUMNS.length ? 'Quitar todas' : 'Seleccionar todas'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {EXPORT_COLUMNS.map(column => {
+                  const checked = exportColumns.includes(column.id)
+                  return (
+                    <label key={column.id}
+                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer select-none"
+                      style={{ background: checked ? '#052e16' : 'var(--bg)', border: `1px solid ${checked ? '#166534' : 'var(--border)'}` }}>
+                      <input type="checkbox" checked={checked}
+                        onChange={() => setExportColumns(previous => checked
+                          ? previous.filter(id => id !== column.id)
+                          : [...previous, column.id])}
+                        className="w-4 h-4 accent-green-500" />
+                      <span className="text-xs font-medium" style={{ color: checked ? '#4ade80' : 'var(--text)' }}>{column.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+
+              <div className="mt-2 px-3 py-2.5 rounded-xl text-xs"
+                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                El archivo tendrá <span style={{ color: 'var(--text)' }}>Reporte personalizado</span> (una fila por artículo vendido) y{' '}
+                <span style={{ color: 'var(--text)' }}>Resumen por ticket</span>. El costo, categoría y código de barras reflejan el catálogo actual.
+              </div>
+
+              {exportError && (
+                <div className="px-3 py-2.5 rounded-xl text-xs" role="alert"
+                  style={{ background: '#450a0a', border: '1px solid #991b1b', color: '#fca5a5' }}>
+                  {exportError}
+                </div>
+              )}
             </div>
 
-            <div className="mx-4 mb-4 px-3 py-2.5 rounded-xl text-xs"
-              style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-              El archivo incluirá <span style={{ color: 'var(--text)' }}>2 hojas</span>:{' '}
-              <span style={{ color: 'var(--accent)' }}>Ventas</span> (resumen por ticket) y{' '}
-              <span style={{ color: 'var(--accent)' }}>Detalle líneas</span> (una fila por producto vendido).
-            </div>
-
-            <div className="flex gap-2 px-4 pb-4">
+            <div className="flex gap-2 px-4 py-4" style={{ borderTop: '1px solid var(--border)' }}>
               <button onClick={() => setShowExport(false)}
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
                 style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
                 Cancelar
               </button>
               <button onClick={handleExport}
-                disabled={exporting || (exportRange === 'custom' && (!exportFrom || !exportTo))}
+                disabled={exporting || exportColumns.length === 0 || (exportRange === 'custom' && (!exportFrom || !exportTo))}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-opacity"
-                style={{ background: '#166534', color: '#4ade80', opacity: exporting ? 0.7 : 1 }}>
+                style={{ background: '#166534', color: '#4ade80', opacity: exporting || exportColumns.length === 0 ? 0.55 : 1 }}>
                 {exporting ? (
                   <><div className="w-4 h-4 rounded-full border-2 animate-spin" style={{ borderColor: '#4ade80', borderTopColor: 'transparent' }} />Generando…</>
                 ) : (
