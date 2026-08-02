@@ -64,7 +64,70 @@ export interface CashMovement {
   type: 'in' | 'out'
   amount: number
   reason: string
+  scope: 'business' | 'family' | null
+  category_id: string | null
+  account_id: string | null
+  beneficiary: string | null
+  notes: string | null
+  created_by: string | null
+  status: 'posted' | 'cancelled'
+  cancelled_at: string | null
+  cancelled_by: string | null
+  cancellation_reason: string | null
   created_at: string
+}
+
+export interface MoneyAccount {
+  id: string
+  code: 'cash' | 'mercado_pago'
+  name: string
+  account_type: 'cash' | 'digital_wallet'
+  opening_balance: number
+  initialized_at: string | null
+  is_active: boolean
+  display_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface MoneyAccountBalance extends MoneyAccount {
+  balance: number
+}
+
+export interface FinancialSettings {
+  singleton: true
+  card_fee_rate: number
+  ledger_started_at: string | null
+  started_by: string | null
+  updated_at: string
+}
+
+export interface AccountMovement {
+  id: string
+  account_id: string
+  direction: 'in' | 'out'
+  amount: number
+  entry_type: 'sale' | 'card_fee' | 'cash_movement' | 'credit_payment' | 'transfer' | 'adjustment'
+  description: string
+  reference_type: string | null
+  reference_id: string | null
+  component: string
+  occurred_at: string
+  created_by: string | null
+  status: 'posted' | 'cancelled'
+  cancelled_at: string | null
+  cancellation_reason: string | null
+  created_at: string
+}
+
+export interface CashMovementCategory {
+  id: string
+  name: string
+  scope: 'business' | 'family'
+  movement_type: 'in' | 'out' | 'both'
+  is_active: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface Customer {

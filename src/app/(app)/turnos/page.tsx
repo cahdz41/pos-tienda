@@ -3,14 +3,29 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { summarizeCashMovements } from '@/lib/cashMovementSummary'
+import { summarizeShiftPayments } from '@/lib/financialAccounts'
 import { useAuth } from '@/contexts/AuthContext'
-import type { Shift, CashMovement } from '@/types'
+import type { Shift, CashMovement, CashMovementCategory, MoneyAccount } from '@/types'
 import TurnSummaryModal from '@/components/TurnSummaryModal'
 
 interface ShiftSales {
+  total: number
   cash: number
   card: number
+  transfer: number
   credit: number
+}
+
+interface NewCashMovement {
+  type: 'in' | 'out'
+  amount: number
+  reason: string
+  scope: 'business' | 'family'
+  categoryId: string
+  accountId: string
+  beneficiary: string
+  notes: string
 }
 
 function fmt(n: number) {
@@ -88,18 +103,19 @@ function NoShiftView({ onOpen, saving, error }: {
 }
 
 // ── Cerrar turno ────────────────────────────────────────────────────────────
-function CloseShiftView({ shift, sales, movements, onConfirm, onCancel, saving, error }: {
+function CloseShiftView({ shift, sales, movements, cashAccountId, onConfirm, onCancel, saving, error }: {
   shift: Shift
   sales: ShiftSales
   movements: CashMovement[]
+  cashAccountId: string | null
   onConfirm: (physicalCount: number) => Promise<void>
   onCancel: () => void
   saving: boolean
   error: string | null
 }) {
   const [input, setInput] = useState('')
-  const movNet = movements.reduce((s, m) => s + (m.type === 'in' ? m.amount : -m.amount), 0)
-  const estimatedCash = shift.opening_amount + sales.cash + movNet
+  const movementSummary = summarizeCashMovements(movements, cashAccountId)
+  const estimatedCash = shift.opening_amount + sales.cash + movementSummary.cashNet
   const physicalCount = parseFloat(input)
   const diff = !isNaN(physicalCount) ? physicalCount - estimatedCash : null
 
@@ -117,16 +133,46 @@ function CloseShiftView({ shift, sales, movements, onConfirm, onCancel, saving, 
           <button onClick={onCancel} className="text-sm" style={{ color: 'var(--text-muted)' }}>← Volver</button>
         </div>
 
+        {/* Separación de salidas */}
+        <div className="rounded-xl p-4 flex flex-col gap-3"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+            Control de salidas
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg p-3" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Gastos del negocio</p>
+              <p className="text-sm font-bold font-mono mt-1" style={{ color: '#FFB74D' }}>
+                {fmt(movementSummary.businessExpenses)}
+              </p>
+            </div>
+            <div className="rounded-lg p-3" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Retiros familiares</p>
+              <p className="text-sm font-bold font-mono mt-1" style={{ color: '#CE93D8' }}>
+                {fmt(movementSummary.familyExpenses)}
+              </p>
+            </div>
+          </div>
+          {movementSummary.unclassifiedExpenses > 0 && (
+            <div className="flex justify-between text-xs rounded-lg px-3 py-2"
+              style={{ background: '#2B2410', color: '#FFD166', border: '1px solid #5A4814' }}>
+              <span>Histórico sin clasificar</span>
+              <span className="font-mono font-bold">{fmt(movementSummary.unclassifiedExpenses)}</span>
+            </div>
+          )}
+        </div>
+
         {/* Resumen ventas */}
         <div className="rounded-xl p-4 flex flex-col gap-3"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
           <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
             Resumen de ventas
           </p>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               { label: 'Efectivo', value: sales.cash },
               { label: 'Tarjeta', value: sales.card },
+              { label: 'Transferencia', value: sales.transfer },
               { label: 'Crédito', value: sales.credit },
             ].map(({ label, value }) => (
               <div key={label} className="rounded-lg p-3 text-center"
@@ -139,7 +185,7 @@ function CloseShiftView({ shift, sales, movements, onConfirm, onCancel, saving, 
           <div className="flex justify-between pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
             <span className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Total ventas</span>
             <span className="text-sm font-bold font-mono" style={{ color: 'var(--accent)' }}>
-              {fmt(sales.cash + sales.card + sales.credit)}
+              {fmt(sales.total)}
             </span>
           </div>
         </div>
@@ -153,7 +199,11 @@ function CloseShiftView({ shift, sales, movements, onConfirm, onCancel, saving, 
           {[
             { label: 'Fondo inicial', value: shift.opening_amount, sign: '' },
             { label: 'Ventas en efectivo', value: sales.cash, sign: '+' },
-            ...(movNet !== 0 ? [{ label: 'Movimientos netos', value: Math.abs(movNet), sign: movNet >= 0 ? '+' : '−' }] : []),
+            ...(movementSummary.cashNet !== 0 ? [{
+              label: 'Movimientos netos',
+              value: Math.abs(movementSummary.cashNet),
+              sign: movementSummary.cashNet >= 0 ? '+' : '−',
+            }] : []),
           ].map(({ label, value, sign }) => (
             <div key={label} className="flex justify-between text-sm" style={{ color: 'var(--text-muted)' }}>
               <span>{label}</span>
@@ -206,29 +256,108 @@ function CloseShiftView({ shift, sales, movements, onConfirm, onCancel, saving, 
 }
 
 // ── Turno activo ────────────────────────────────────────────────────────────
-function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose, saving, error }: {
+function ActiveShiftView({
+  shift,
+  sales,
+  movements,
+  categories,
+  accounts,
+  cashAccountId,
+  responsibleName,
+  responsibleNames,
+  canCancel,
+  onAddMovement,
+  onCancelMovement,
+  onStartClose,
+  saving,
+  error,
+}: {
   shift: Shift
   sales: ShiftSales
   movements: CashMovement[]
-  onAddMovement: (type: 'in' | 'out', amount: number, reason: string) => Promise<void>
+  categories: CashMovementCategory[]
+  accounts: MoneyAccount[]
+  cashAccountId: string | null
+  responsibleName: string
+  responsibleNames: Record<string, string>
+  canCancel: boolean
+  onAddMovement: (movement: NewCashMovement) => Promise<boolean>
+  onCancelMovement: (movementId: string, reason: string) => Promise<boolean>
   onStartClose: () => void
   saving: boolean
   error: string | null
 }) {
   const [showModal, setShowModal] = useState(false)
   const [movType, setMovType] = useState<'in' | 'out'>('in')
+  const [movScope, setMovScope] = useState<'business' | 'family'>('business')
+  const [movCategoryId, setMovCategoryId] = useState('')
+  const [movAccountId, setMovAccountId] = useState(cashAccountId ?? '')
   const [movAmount, setMovAmount] = useState('')
   const [movReason, setMovReason] = useState('')
+  const [movBeneficiary, setMovBeneficiary] = useState('')
+  const [movNotes, setMovNotes] = useState('')
+  const [movementToCancel, setMovementToCancel] = useState<CashMovement | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
 
-  const movNet = movements.reduce((s, m) => s + (m.type === 'in' ? m.amount : -m.amount), 0)
-  const estimatedCash = shift.opening_amount + sales.cash + movNet
+  const movementSummary = summarizeCashMovements(movements, cashAccountId)
+  const estimatedCash = shift.opening_amount + sales.cash + movementSummary.cashNet
+  const availableCategories = categories.filter(category =>
+    category.is_active
+    && category.scope === movScope
+    && (category.movement_type === 'both' || category.movement_type === movType)
+  )
+
+  function changeMovementType(type: 'in' | 'out') {
+    setMovType(type)
+    setMovCategoryId('')
+  }
+
+  function changeMovementScope(scope: 'business' | 'family') {
+    setMovScope(scope)
+    setMovCategoryId('')
+  }
+
+  function resetMovementForm() {
+    setMovType('in')
+    setMovScope('business')
+    setMovCategoryId('')
+    setMovAccountId(cashAccountId ?? '')
+    setMovAmount('')
+    setMovReason('')
+    setMovBeneficiary('')
+    setMovNotes('')
+  }
 
   async function handleMovSubmit(e: React.FormEvent) {
     e.preventDefault()
     const n = parseFloat(movAmount)
-    if (isNaN(n) || n <= 0 || !movReason.trim()) return
-    await onAddMovement(movType, n, movReason.trim())
-    setMovAmount(''); setMovReason(''); setShowModal(false)
+    if (
+      isNaN(n) || n <= 0 || !movReason.trim() || !movCategoryId || !movAccountId
+      || !movBeneficiary.trim()
+    ) return
+
+    const saved = await onAddMovement({
+      type: movType,
+      amount: n,
+      reason: movReason.trim(),
+      scope: movScope,
+      categoryId: movCategoryId,
+      accountId: movAccountId,
+      beneficiary: movBeneficiary.trim(),
+      notes: movNotes.trim(),
+    })
+    if (!saved) return
+    resetMovementForm()
+    setShowModal(false)
+  }
+
+  async function handleCancelSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!movementToCancel || !cancelReason.trim()) return
+    const cancelled = await onCancelMovement(movementToCancel.id, cancelReason.trim())
+    if (!cancelled) return
+    setMovementToCancel(null)
+    setCancelReason('')
   }
 
   return (
@@ -249,11 +378,12 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 shrink-0">
         {[
           { label: 'Fondo inicial', value: shift.opening_amount },
           { label: 'Efectivo ventas', value: sales.cash },
           { label: 'Tarjeta', value: sales.card },
+          { label: 'Transferencia', value: sales.transfer },
           { label: 'Crédito', value: sales.credit },
         ].map(({ label, value }) => (
           <div key={label} className="rounded-xl p-3"
@@ -269,7 +399,7 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
         <div className="rounded-xl p-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Total ventas</p>
           <p className="text-lg font-bold mt-1 font-mono" style={{ color: 'var(--accent)' }}>
-            {fmt(sales.cash + sales.card + sales.credit)}
+            {fmt(sales.total)}
           </p>
         </div>
         <div className="rounded-xl p-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
@@ -278,15 +408,40 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
         </div>
       </div>
 
+      {/* Negocio vs familia */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0">
+        <div className="rounded-xl p-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Salidas del negocio</p>
+          <p className="text-base font-bold mt-1 font-mono" style={{ color: '#FFB74D' }}>
+            {fmt(movementSummary.businessExpenses)}
+          </p>
+        </div>
+        <div className="rounded-xl p-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Retiros familiares</p>
+          <p className="text-base font-bold mt-1 font-mono" style={{ color: '#CE93D8' }}>
+            {fmt(movementSummary.familyExpenses)}
+          </p>
+        </div>
+        {movementSummary.unclassifiedExpenses > 0 && (
+          <div className="rounded-xl p-3 col-span-2 sm:col-span-1"
+            style={{ background: '#2B2410', border: '1px solid #5A4814' }}>
+            <p className="text-xs" style={{ color: '#FFD166' }}>Histórico sin clasificar</p>
+            <p className="text-base font-bold mt-1 font-mono" style={{ color: '#FFD166' }}>
+              {fmt(movementSummary.unclassifiedExpenses)}
+            </p>
+          </div>
+        )}
+      </div>
+
       {/* Movimientos */}
       <div className="flex flex-col rounded-xl overflow-hidden shrink-0"
         style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between px-4 py-3"
           style={{ borderBottom: '1px solid var(--border)' }}>
           <span className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
-            Movimientos de efectivo
+            Movimientos de dinero
           </span>
-          <button onClick={() => setShowModal(true)}
+          <button onClick={() => { setMovAccountId(cashAccountId ?? accounts[0]?.id ?? ''); setShowModal(true) }}
             className="text-xs px-3 py-1.5 rounded-lg font-medium"
             style={{ background: 'var(--accent)', color: '#000' }}>
             + Agregar
@@ -299,15 +454,80 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
         ) : (
           <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
             {movements.map(m => (
-              <div key={m.id} className="flex items-center justify-between px-4 py-3">
-                <div>
-                  <p className="text-sm" style={{ color: 'var(--text)' }}>{m.reason}</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{formatTime(m.created_at)}</p>
+              <div key={m.id} className="flex items-start justify-between gap-4 px-4 py-3"
+                style={{ opacity: m.status === 'cancelled' ? 0.55 : 1 }}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="text-sm" style={{
+                      color: 'var(--text)',
+                      textDecoration: m.status === 'cancelled' ? 'line-through' : 'none',
+                    }}>
+                      {m.reason}
+                    </p>
+                    {m.scope && (
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{
+                        background: m.scope === 'business' ? '#33280E' : '#2B1730',
+                        color: m.scope === 'business' ? '#FFB74D' : '#CE93D8',
+                      }}>
+                        {m.scope === 'business' ? 'Negocio' : 'Familia'}
+                      </span>
+                    )}
+                    {!m.scope && (
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                        style={{ background: '#2B2410', color: '#FFD166' }}>
+                        Histórico sin clasificar
+                      </span>
+                    )}
+                    {m.status === 'cancelled' && (
+                      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                        style={{ background: '#2D1010', color: '#FF6B6B' }}>
+                        Cancelado
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    {categories.find(category => category.id === m.category_id)?.name ?? 'Categoría histórica'}
+                    {m.beneficiary ? ` · ${m.beneficiary}` : ''}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    Cuenta: {accounts.find(account => account.id === m.account_id)?.name ?? 'Movimiento anterior a Cuentas 1B'}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {formatTime(m.created_at)} · Responsable: {m.created_by
+                      ? responsibleNames[m.created_by] ?? 'Usuario registrado'
+                      : 'Registro histórico'}
+                  </p>
+                  {m.notes && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{m.notes}</p>}
+                  {m.status === 'cancelled' && m.cancellation_reason && (
+                    <div className="mt-1">
+                      <p className="text-xs" style={{ color: '#FF6B6B' }}>
+                        Motivo de cancelación: {m.cancellation_reason}
+                      </p>
+                      {m.cancelled_at && (
+                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                          Cancelado {formatTime(m.cancelled_at)} por {
+                            m.cancelled_by
+                              ? responsibleNames[m.cancelled_by] ?? 'el propietario'
+                              : 'el propietario'
+                          }
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <span className="text-sm font-bold font-mono"
-                  style={{ color: m.type === 'in' ? 'var(--accent)' : '#FF6B6B' }}>
-                  {m.type === 'in' ? '+' : '−'}{fmt(m.amount)}
-                </span>
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  <span className="text-sm font-bold font-mono"
+                    style={{ color: m.type === 'in' ? 'var(--accent)' : '#FF6B6B' }}>
+                    {m.type === 'in' ? '+' : '−'}{fmt(m.amount)}
+                  </span>
+                  {canCancel && m.status !== 'cancelled' && (
+                    <button type="button" onClick={() => { setMovementToCancel(m); setCancelReason('') }}
+                      className="text-[11px] px-2 py-1 rounded"
+                      style={{ background: '#2D1010', color: '#FF6B6B', border: '1px solid #4D1A1A' }}>
+                      Cancelar
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -319,13 +539,13 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.7)' }}
           onClick={e => { if (e.target === e.currentTarget) setShowModal(false) }}>
-          <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4"
+          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-6 flex flex-col gap-4"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <h2 className="text-base font-bold" style={{ color: 'var(--text)' }}>Movimiento de efectivo</h2>
+            <h2 className="text-base font-bold" style={{ color: 'var(--text)' }}>Movimiento de dinero</h2>
             <form onSubmit={handleMovSubmit} className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-2">
                 {(['in', 'out'] as const).map(t => (
-                  <button key={t} type="button" onClick={() => setMovType(t)}
+                  <button key={t} type="button" onClick={() => changeMovementType(t)}
                     className="py-2 rounded-lg text-sm font-semibold transition-all"
                     style={{
                       background: movType === t ? (t === 'in' ? 'var(--accent)' : '#2D1010') : 'var(--bg)',
@@ -335,6 +555,60 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
                     {t === 'in' ? '↑ Entrada' : '↓ Salida'}
                   </button>
                 ))}
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                  Cuenta de dinero
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {accounts.filter(account => account.is_active).map(account => (
+                    <button key={account.id} type="button" onClick={() => setMovAccountId(account.id)}
+                      className="py-2 rounded-lg text-sm font-semibold"
+                      style={{
+                        background: movAccountId === account.id ? 'var(--accent)' : 'var(--bg)',
+                        color: movAccountId === account.id ? '#000' : 'var(--text-muted)',
+                        border: `1px solid ${movAccountId === account.id ? 'var(--accent)' : 'var(--border)'}`,
+                      }}>
+                      {account.code === 'cash' ? '💵 Caja' : '💳 Mercado Pago'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                  Alcance
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['business', 'family'] as const).map(scope => (
+                    <button key={scope} type="button" onClick={() => changeMovementScope(scope)}
+                      className="py-2 rounded-lg text-sm font-semibold"
+                      style={{
+                        background: movScope === scope ? (scope === 'business' ? '#33280E' : '#2B1730') : 'var(--bg)',
+                        color: movScope === scope ? (scope === 'business' ? '#FFB74D' : '#CE93D8') : 'var(--text-muted)',
+                        border: `1px solid ${movScope === scope ? (scope === 'business' ? '#6B5112' : '#593060') : 'var(--border)'}`,
+                      }}>
+                      {scope === 'business' ? 'Negocio' : 'Familia'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                  Categoría
+                </label>
+                <select required value={movCategoryId} onChange={e => setMovCategoryId(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                  <option value="">Selecciona una categoría</option>
+                  {availableCategories.map(category => (
+                    <option key={category.id} value={category.id}>{category.name}</option>
+                  ))}
+                </select>
+                {availableCategories.length === 0 && (
+                  <p className="text-xs mt-1.5" style={{ color: '#FFD166' }}>
+                    No hay categorías disponibles para esta combinación.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Monto</label>
@@ -349,11 +623,33 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
                 </div>
               </div>
               <div>
-                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Motivo</label>
-                <input type="text" value={movReason} onChange={e => setMovReason(e.target.value)}
-                  placeholder="Ej. Pago de proveedor, vuelto de banco…"
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                  {movType === 'out' ? 'Beneficiario o proveedor' : 'Origen del dinero'}
+                </label>
+                <input type="text" required value={movBeneficiary} onChange={e => setMovBeneficiary(e.target.value)}
+                  placeholder={movType === 'out' ? 'Ej. Planet, arrendador, propietario…' : 'Ej. Propietario, cliente…'}
                   className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
                   style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Concepto o motivo</label>
+                <input type="text" value={movReason} onChange={e => setMovReason(e.target.value)}
+                  placeholder="Ej. Anticipo del pedido del lunes…"
+                  className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                  Notas <span className="font-normal">(opcional)</span>
+                </label>
+                <textarea value={movNotes} onChange={e => setMovNotes(e.target.value)} rows={2}
+                  placeholder="Referencia, pedido relacionado u otra aclaración"
+                  className="w-full rounded-lg px-3 py-2.5 text-sm outline-none resize-none"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+              </div>
+              <div className="rounded-lg px-3 py-2 text-xs"
+                style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                Responsable: <span style={{ color: 'var(--text)' }}>{responsibleName}</span>
               </div>
               {error && <p className="text-xs" style={{ color: '#FF6B6B' }}>{error}</p>}
               <div className="flex gap-2">
@@ -362,10 +658,61 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
                   style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
                   Cancelar
                 </button>
-                <button type="submit" disabled={saving || !movAmount || !movReason.trim()}
+                <button type="submit" disabled={
+                  saving || !movAmount || !movReason.trim() || !movCategoryId
+                  || !movAccountId || !movBeneficiary.trim()
+                }
                   className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
                   style={{ background: 'var(--accent)', color: '#000' }}>
                   {saving ? 'Guardando…' : 'Guardar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cancelación con historial */}
+      {movementToCancel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.7)' }}
+          onClick={e => { if (e.target === e.currentTarget && !saving) setMovementToCancel(null) }}>
+          <div className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-4"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <div>
+              <h2 className="text-base font-bold" style={{ color: 'var(--text)' }}>Cancelar movimiento</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                El movimiento seguirá visible y no se incluirá en los cálculos de caja.
+              </p>
+            </div>
+            <div className="rounded-lg p-3 flex justify-between gap-3"
+              style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+              <span className="text-sm" style={{ color: 'var(--text)' }}>{movementToCancel.reason}</span>
+              <span className="text-sm font-bold font-mono" style={{ color: '#FF6B6B' }}>
+                {fmt(movementToCancel.amount)}
+              </span>
+            </div>
+            <form onSubmit={handleCancelSubmit} className="flex flex-col gap-4">
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                  Motivo de cancelación
+                </label>
+                <textarea required value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={3}
+                  placeholder="Explica por qué se cancela"
+                  className="w-full rounded-lg px-3 py-2.5 text-sm outline-none resize-none"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+              </div>
+              {error && <p className="text-xs" style={{ color: '#FF6B6B' }}>{error}</p>}
+              <div className="flex gap-2">
+                <button type="button" disabled={saving} onClick={() => setMovementToCancel(null)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium disabled:opacity-40"
+                  style={{ background: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                  Volver
+                </button>
+                <button type="submit" disabled={saving || !cancelReason.trim()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
+                  style={{ background: '#2D1010', color: '#FF6B6B', border: '1px solid #4D1A1A' }}>
+                  {saving ? 'Cancelando…' : 'Confirmar cancelación'}
                 </button>
               </div>
             </form>
@@ -378,13 +725,16 @@ function ActiveShiftView({ shift, sales, movements, onAddMovement, onStartClose,
 
 // ── Página principal ────────────────────────────────────────────────────────
 export default function TurnosPage() {
-  const { user, loading: authLoading } = useAuth()
+  const { user, profile, loading: authLoading } = useAuth()
   const searchParams = useSearchParams()
   const router = useRouter()
   const [loadingShift, setLoadingShift] = useState(true)
   const [shift, setShift] = useState<Shift | null>(null)
-  const [sales, setSales] = useState<ShiftSales>({ cash: 0, card: 0, credit: 0 })
+  const [sales, setSales] = useState<ShiftSales>({ total: 0, cash: 0, card: 0, transfer: 0, credit: 0 })
   const [movements, setMovements] = useState<CashMovement[]>([])
+  const [categories, setCategories] = useState<CashMovementCategory[]>([])
+  const [accounts, setAccounts] = useState<MoneyAccount[]>([])
+  const [responsibleNames, setResponsibleNames] = useState<Record<string, string>>({})
   const [view, setView] = useState<'main' | 'summary' | 'closing'>('main')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -392,38 +742,86 @@ export default function TurnosPage() {
   const loadShift = useCallback(async () => {
     if (!user) { setLoadingShift(false); return }
     const supabase = createClient()
+    // El proyecto aún no tiene tipos generados del esquema de Supabase.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = supabase as any
     try {
-      const { data: shiftData, error: shiftError } = await supabase
-        .from('shifts')
-        .select('*')
-        .eq('cashier_id', user.id)
-        .eq('status', 'open')
-        .order('opened_at', { ascending: true })
-        .limit(1)
-        .maybeSingle()
+      const [shiftResult, categoryResult, accountResult] = await Promise.all([
+        db
+          .from('shifts')
+          .select('*')
+          .eq('cashier_id', user.id)
+          .eq('status', 'open')
+          .order('opened_at', { ascending: true })
+          .limit(1)
+          .maybeSingle(),
+        db
+          .from('cash_movement_categories')
+          .select('*')
+          .order('scope')
+          .order('name'),
+        db
+          .from('money_accounts')
+          .select('*')
+          .eq('is_active', true)
+          .order('display_order'),
+      ])
+
+      const { data: shiftData, error: shiftError } = shiftResult
 
       if (shiftError) throw shiftError
+      if (categoryResult.error) {
+        throw new Error('Falta aplicar la migración sql/control_salidas_1a.sql en Supabase.')
+      }
+      if (accountResult.error) {
+        throw new Error('Falta aplicar la migración sql/control_cuentas_1b.sql en Supabase.')
+      }
 
       setShift(shiftData as Shift | null)
+      setCategories((categoryResult.data ?? []) as CashMovementCategory[])
+      setAccounts((accountResult.data ?? []) as MoneyAccount[])
 
       if (shiftData) {
         const [salesRes, movRes] = await Promise.all([
-          supabase.from('sales').select('payment_method, total')
+          db.from('sales').select('id, payment_method, total')
             .eq('shift_id', shiftData.id).eq('status', 'completed'),
-          supabase.from('cash_movements').select('*')
+          db.from('cash_movements').select('*')
             .eq('shift_id', shiftData.id).order('created_at', { ascending: false }),
         ])
-        const stats: ShiftSales = { cash: 0, card: 0, credit: 0 }
-        for (const s of salesRes.data ?? []) {
-          const pm = s.payment_method as keyof ShiftSales
-          if (pm in stats) stats[pm] += Number(s.total)
-        }
+        const saleRows = (salesRes.data ?? []) as { id: string; total: number; payment_method: string }[]
+        const saleIds = saleRows.map(sale => sale.id)
+        const paymentRows = saleIds.length > 0
+          ? ((await db.from('sale_payments').select('sale_id, method, amount').in('sale_id', saleIds)).data ?? [])
+          : []
+        const stats = summarizeShiftPayments(saleRows, paymentRows) as ShiftSales
         setSales(stats)
-        setMovements((movRes.data ?? []) as CashMovement[])
+        const loadedMovements = (movRes.data ?? []) as CashMovement[]
+        setMovements(loadedMovements)
+
+        const responsibleIds = Array.from(new Set(
+          loadedMovements.flatMap(movement =>
+            [movement.created_by, movement.cancelled_by].filter((id): id is string => Boolean(id))
+          )
+        ))
+        if (responsibleIds.length > 0) {
+          const { data: profileRows } = await db
+            .from('profiles')
+            .select('id, name')
+            .in('id', responsibleIds)
+          setResponsibleNames(Object.fromEntries(
+            (profileRows ?? []).map((row: { id: string; name: string }) => [row.id, row.name])
+          ))
+        } else {
+          setResponsibleNames({})
+        }
       }
     } catch (loadError) {
       console.error('[Turnos] Error consultando turno:', loadError)
-      setError('No se pudo consultar el turno. Revisa la conexión e intenta nuevamente.')
+      setError(
+        loadError instanceof Error && loadError.message.includes('.sql')
+          ? loadError.message
+          : 'No se pudo consultar el turno. Revisa la conexión e intenta nuevamente.'
+      )
     } finally {
       setLoadingShift(false)
     }
@@ -446,10 +844,12 @@ export default function TurnosPage() {
     setSaving(true); setError(null)
     try {
       const supabase = createClient()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any
 
       // Volver a comprobar antes de insertar evita turnos duplicados por
       // recargas, navegación rápida o un doble envío del formulario.
-      const { data: existingShift, error: lookupError } = await supabase
+      const { data: existingShift, error: lookupError } = await db
         .from('shifts')
         .select('id')
         .eq('cashier_id', user.id)
@@ -464,14 +864,15 @@ export default function TurnosPage() {
         return
       }
 
-      const { data, error: err } = await supabase
+      const { data, error: err } = await db
         .from('shifts')
         .insert({ cashier_id: user.id, opening_amount: amount, status: 'open' })
         .select().single()
       if (err) throw err
       setShift(data as Shift)
-      setSales({ cash: 0, card: 0, credit: 0 })
+      setSales({ total: 0, cash: 0, card: 0, transfer: 0, credit: 0 })
       setMovements([])
+      setResponsibleNames(profile?.name ? { [user.id]: profile.name } : {})
     } catch {
       setError('Error al abrir turno. Intenta de nuevo.')
     } finally {
@@ -479,19 +880,68 @@ export default function TurnosPage() {
     }
   }
 
-  async function addMovement(type: 'in' | 'out', amount: number, reason: string) {
-    if (!shift) return
+  async function addMovement(movement: NewCashMovement): Promise<boolean> {
+    if (!shift || !user) return false
     setSaving(true); setError(null)
     try {
       const supabase = createClient()
-      const { data, error: err } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any
+      const { data, error: err } = await db
         .from('cash_movements')
-        .insert({ shift_id: shift.id, type, amount, reason })
+        .insert({
+          shift_id: shift.id,
+          type: movement.type,
+          amount: movement.amount,
+          reason: movement.reason,
+          scope: movement.scope,
+          category_id: movement.categoryId,
+          account_id: movement.accountId,
+          beneficiary: movement.beneficiary,
+          notes: movement.notes || null,
+          created_by: user.id,
+        })
         .select().single()
       if (err) throw err
       setMovements(prev => [data as CashMovement, ...prev])
-    } catch {
-      setError('Error al registrar movimiento.')
+      if (profile?.name) {
+        setResponsibleNames(previous => ({ ...previous, [user.id]: profile.name }))
+      }
+      return true
+    } catch (movementError) {
+      console.error('[Turnos] Error registrando movimiento:', movementError)
+      setError('No se pudo registrar el movimiento. Verifica los datos e intenta nuevamente.')
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function cancelMovement(movementId: string, reason: string): Promise<boolean> {
+    if (!shift || profile?.role !== 'owner') return false
+    setSaving(true); setError(null)
+    try {
+      const supabase = createClient()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any
+      const { data, error: cancelError } = await db
+        .rpc('cancel_cash_movement', {
+          p_movement_id: movementId,
+          p_reason: reason,
+        })
+        .single()
+      if (cancelError) throw cancelError
+      setMovements(previous => previous.map(movement =>
+        movement.id === movementId ? data as CashMovement : movement
+      ))
+      if (profile?.name && data?.cancelled_by) {
+        setResponsibleNames(previous => ({ ...previous, [data.cancelled_by]: profile.name }))
+      }
+      return true
+    } catch (cancelError) {
+      console.error('[Turnos] Error cancelando movimiento:', cancelError)
+      setError('No se pudo cancelar el movimiento. Solo el propietario puede realizar esta acción.')
+      return false
     } finally {
       setSaving(false)
     }
@@ -501,10 +951,14 @@ export default function TurnosPage() {
     if (!shift) return
     setSaving(true); setError(null)
     try {
-      const movNet = movements.reduce((s, m) => s + (m.type === 'in' ? m.amount : -m.amount), 0)
-      const estimatedCash = shift.opening_amount + sales.cash + movNet
+      const cashAccountId = accounts.find(account => account.code === 'cash')?.id ?? null
+      const estimatedCash = shift.opening_amount
+        + sales.cash
+        + summarizeCashMovements(movements, cashAccountId).cashNet
       const supabase = createClient()
-      const { error: err } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any
+      const { error: err } = await db
         .from('shifts').update({
           status: 'closed',
           closed_at: new Date().toISOString(),
@@ -512,7 +966,8 @@ export default function TurnosPage() {
           cash_difference: physicalCount - estimatedCash,
         }).eq('id', shift.id)
       if (err) throw err
-      setShift(null); setSales({ cash: 0, card: 0, credit: 0 }); setMovements([]); setView('main')
+      setShift(null); setSales({ total: 0, cash: 0, card: 0, transfer: 0, credit: 0 }); setMovements([])
+      setResponsibleNames({}); setView('main')
     } catch {
       setError('Error al cerrar turno. Intenta de nuevo.')
     } finally {
@@ -534,11 +989,20 @@ export default function TurnosPage() {
 
   if (view === 'closing') {
     return <CloseShiftView shift={shift} sales={sales} movements={movements}
+      cashAccountId={accounts.find(account => account.code === 'cash')?.id ?? null}
       onConfirm={closeShift} onCancel={() => { setView('main'); setError(null) }}
       saving={saving} error={error} />
   }
 
   return <ActiveShiftView shift={shift} sales={sales} movements={movements}
-    onAddMovement={addMovement} onStartClose={() => { setView('summary'); setError(null) }}
+    categories={categories}
+    accounts={accounts}
+    cashAccountId={accounts.find(account => account.code === 'cash')?.id ?? null}
+    responsibleName={profile?.name || 'Usuario actual'}
+    responsibleNames={responsibleNames}
+    canCancel={profile?.role === 'owner'}
+    onAddMovement={addMovement}
+    onCancelMovement={cancelMovement}
+    onStartClose={() => { setView('summary'); setError(null) }}
     saving={saving} error={error} />
 }

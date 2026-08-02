@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
+import { calculateCardSettlement } from '@/lib/financialAccounts'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Customer, CreditPayment } from '@/types'
 
@@ -25,6 +26,7 @@ export default function AbonoModal({ customer, onClose, onPaid, initialAmount }:
   const [saving,     setSaving]     = useState(false)
   const [error,      setError]      = useState<string | null>(null)
   const [payments,   setPayments]   = useState<CreditPayment[]>([])
+  const [cardFeeRate, setCardFeeRate] = useState(0.0405)
 
   const balance   = customer.credit_balance
   const limit     = customer.credit_limit
@@ -34,19 +36,23 @@ export default function AbonoModal({ customer, onClose, onPaid, initialAmount }:
 
   const amountNum = parseFloat(amount) || 0
   const canPay    = amountNum > 0 && amountNum <= balance
+  const cardSettlement = calculateCardSettlement(amountNum, cardFeeRate)
 
-  useEffect(() => { loadPayments() }, [])
+  useEffect(() => { loadPayments() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadPayments() {
     const supabase = createClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data } = await (supabase as any)
-      .from('credit_payments')
-      .select('*')
-      .eq('customer_id', customer.id)
-      .order('created_at', { ascending: false })
-      .limit(8)
-    setPayments((data ?? []) as CreditPayment[])
+    const db = supabase as any
+    const [paymentResult, settingResult] = await Promise.all([
+      db.from('credit_payments').select('*').eq('customer_id', customer.id)
+        .order('created_at', { ascending: false }).limit(8),
+      db.from('financial_settings').select('card_fee_rate').eq('singleton', true).maybeSingle(),
+    ])
+    setPayments((paymentResult.data ?? []) as CreditPayment[])
+    if (settingResult.data?.card_fee_rate != null) {
+      setCardFeeRate(Number(settingResult.data.card_fee_rate))
+    }
   }
 
   async function handlePay() {
@@ -179,6 +185,20 @@ export default function AbonoModal({ customer, onClose, onPaid, initialAmount }:
               </button>
             ))}
           </div>
+
+          {method === 'card' && amountNum > 0 && (
+            <div className="rounded-xl p-3 flex flex-col gap-1.5"
+              style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+              <div className="flex justify-between text-xs">
+                <span style={{ color: 'var(--text-muted)' }}>Comisión Mercado Pago ({(cardFeeRate * 100).toFixed(2)}%)</span>
+                <span className="font-mono" style={{ color: '#FFB74D' }}>−{fmt(cardSettlement.fee)}</span>
+              </div>
+              <div className="flex justify-between text-xs font-semibold">
+                <span style={{ color: 'var(--text-muted)' }}>Disponible en Mercado Pago</span>
+                <span className="font-mono" style={{ color: '#4CAF50' }}>{fmt(cardSettlement.net)}</span>
+              </div>
+            </div>
+          )}
 
           {error && <p className="text-xs" style={{ color: '#FF6B6B' }}>{error}</p>}
 

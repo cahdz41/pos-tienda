@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { calculateCardSettlement } from '@/lib/financialAccounts'
 import { useAuth } from '@/contexts/AuthContext'
 import type { CartItem, Customer, Shift } from '@/types'
 import { Receipt, printReceipt, type ReceiptData } from './Receipt'
@@ -42,6 +43,7 @@ export default function PaymentModal({ cart, total, activeShift, autoMode, onSuc
   const [error, setError]           = useState<string | null>(null)
   const [success, setSuccess]       = useState<ReceiptData | null>(null)
   const [autoPay, setAutoPay]       = useState(false)
+  const [cardFeeRate, setCardFeeRate] = useState(0.0405)
 
   // ── Cliente + monedero ────────────────────────────────────────────────────
   const [customerQuery,    setCustomerQuery]    = useState('')
@@ -90,7 +92,8 @@ export default function PaymentModal({ cart, total, activeShift, autoMode, onSuc
       setMethods(prev => {
         if (prev.has(m) && prev.size === 1) return prev
         const next = new Set(prev)
-        next.has(m) ? next.delete(m) : next.add(m)
+        if (next.has(m)) next.delete(m)
+        else next.add(m)
         return next
       })
     }
@@ -149,6 +152,21 @@ export default function PaymentModal({ cart, total, activeShift, autoMode, onSuc
   }
 
   const change = !isMulti && hasCash ? Math.max(0, cashFinal - effectiveTotal) : 0
+  const cardSettlement = calculateCardSettlement(cardFinal, cardFeeRate)
+  const mercadoPagoNet = Math.round((cardSettlement.net + transferFinal) * 100) / 100
+
+  useEffect(() => {
+    const supabase = createClient()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    void (supabase as any)
+      .from('financial_settings')
+      .select('card_fee_rate')
+      .eq('singleton', true)
+      .maybeSingle()
+      .then(({ data }: { data: { card_fee_rate?: number } | null }) => {
+        if (data?.card_fee_rate != null) setCardFeeRate(Number(data.card_fee_rate))
+      })
+  }, [])
 
   const canPay = (() => {
     if (isCredit) return !!selectedCustomer && availableCredit >= total
@@ -244,11 +262,15 @@ export default function PaymentModal({ cart, total, activeShift, autoMode, onSuc
 
       if (itemsErr) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (supabase as any).from('sales').delete().eq('id', saleId)
+        await (supabase as any).from('sales').update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancel_reason: 'Error al guardar los productos de la venta',
+        }).eq('id', saleId)
         throw new Error(`Error al guardar productos: ${itemsErr.message}`)
       }
 
-      // 3 — Registrar desglose de pagos en sale_payments (no-fatal)
+      // 3 — Registrar desglose de pagos. Es la fuente única de las cuentas.
       if (!isCredit) {
         const payRows: { sale_id: string; method: string; amount: number }[] = []
         if (walletUse > 0) payRows.push({ sale_id: saleId!, method: 'wallet', amount: walletUse })
@@ -264,10 +286,18 @@ export default function PaymentModal({ cart, total, activeShift, autoMode, onSuc
           }
         }
         if (payRows.length > 0) {
-          try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error: paymentError } = await (supabase as any).from('sale_payments').insert(payRows)
+          if (paymentError) {
+            // Mantener auditoría y revertir cualquier asiento parcial vinculado.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (supabase as any).from('sale_payments').insert(payRows)
-          } catch { /* no-fatal: tabla puede no existir en instancias antiguas */ }
+            await (supabase as any).from('sales').update({
+              status: 'cancelled',
+              cancelled_at: new Date().toISOString(),
+              cancel_reason: 'Error al registrar el desglose de pagos',
+            }).eq('id', saleId)
+            throw new Error(`Error al registrar el pago: ${paymentError.message}`)
+          }
         }
       }
 
@@ -354,6 +384,11 @@ export default function PaymentModal({ cart, total, activeShift, autoMode, onSuc
               {success.loyaltyEarned && (
                 <p className="text-xs mt-0.5" style={{ color: '#F0B429' }}>
                   +{fmt(success.loyaltyEarned)} ganados en monedero
+                </p>
+              )}
+              {cardSettlement.gross > 0 && (
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  Mercado Pago disponible: {fmt(mercadoPagoNet)} después de {fmt(cardSettlement.fee)} de comisión
                 </p>
               )}
             </div>
@@ -693,10 +728,20 @@ export default function PaymentModal({ cart, total, activeShift, autoMode, onSuc
                     </div>
                   )}
                   {hasCard && cardFinal > 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span style={{ color: 'var(--text-muted)' }}>💳 Tarjeta</span>
-                      <span className="font-mono font-bold" style={{ color: 'var(--text)' }}>{fmt(cardFinal)}</span>
-                    </div>
+                    <>
+                      <div className="flex justify-between text-xs">
+                        <span style={{ color: 'var(--text-muted)' }}>💳 Tarjeta</span>
+                        <span className="font-mono font-bold" style={{ color: 'var(--text)' }}>{fmt(cardFinal)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span style={{ color: 'var(--text-muted)' }}>Comisión Mercado Pago ({(cardFeeRate * 100).toFixed(2)}%)</span>
+                        <span className="font-mono" style={{ color: '#FFB74D' }}>−{fmt(cardSettlement.fee)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span style={{ color: 'var(--text-muted)' }}>Disponible en Mercado Pago</span>
+                        <span className="font-mono font-bold" style={{ color: '#4CAF50' }}>{fmt(cardSettlement.net)}</span>
+                      </div>
+                    </>
                   )}
                   {hasTransfer && transferFinal > 0 && (
                     <div className="flex justify-between text-xs">
@@ -741,6 +786,18 @@ export default function PaymentModal({ cart, total, activeShift, autoMode, onSuc
                   <p className="text-2xl font-black mt-1 font-mono" style={{ color: 'var(--accent)' }}>
                     {fmt(effectiveTotal)}
                   </p>
+                  {hasCard && (
+                    <div className="mt-3 pt-3 flex flex-col gap-1" style={{ borderTop: '1px solid var(--border)' }}>
+                      <div className="flex justify-between text-xs">
+                        <span style={{ color: 'var(--text-muted)' }}>Comisión {(cardFeeRate * 100).toFixed(2)}%</span>
+                        <span className="font-mono" style={{ color: '#FFB74D' }}>−{fmt(cardSettlement.fee)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span style={{ color: 'var(--text-muted)' }}>Disponible en Mercado Pago</span>
+                        <span className="font-mono" style={{ color: '#4CAF50' }}>{fmt(cardSettlement.net)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
 
 // ── Tipos locales ────────────────────────────────────────────────────────────
 
@@ -21,6 +22,22 @@ interface VoidableSale {
   payment_method: string
   created_at: string
   items: VoidSaleItem[]
+}
+
+interface RawSaleItem {
+  id: string
+  variant_id: string
+  quantity: number
+  unit_price: number
+  subtotal: number
+}
+
+interface RawSale {
+  id: string
+  total: number
+  payment_method: string
+  created_at: string
+  sale_items?: RawSaleItem[]
 }
 
 interface Props {
@@ -43,6 +60,7 @@ function formatTime(iso: string) {
 // ── Componente ───────────────────────────────────────────────────────────────
 
 export default function VoidSaleModal({ onClose, onVoided }: Props) {
+  const { user } = useAuth()
   const [sales, setSales]       = useState<VoidableSale[]>([])
   const [loading, setLoading]   = useState(true)
   const [selected, setSelected] = useState<VoidableSale | null>(null)
@@ -70,12 +88,11 @@ export default function VoidSaleModal({ onClose, onVoided }: Props) {
     if (err || !data) { setLoading(false); return }
 
     // Obtener nombres de variantes en una sola query
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const allItems: any[] = data.flatMap((s: any) => s.sale_items ?? [])
-    const variantIds = [...new Set(allItems.map((i: any) => i.variant_id))]
+    const rawSales = data as RawSale[]
+    const allItems = rawSales.flatMap(sale => sale.sale_items ?? [])
+    const variantIds = [...new Set(allItems.map(item => item.variant_id))]
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let variantMap: Record<string, { name: string; flavor: string | null }> = {}
+    const variantMap: Record<string, { name: string; flavor: string | null }> = {}
     if (variantIds.length > 0) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: variants } = await (supabase as any)
@@ -84,21 +101,18 @@ export default function VoidSaleModal({ onClose, onVoided }: Props) {
         .in('id', variantIds)
 
       if (variants) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for (const v of variants) {
+      for (const v of variants) {
           variantMap[v.id] = { name: v.products?.name ?? 'Sin nombre', flavor: v.flavor ?? null }
         }
       }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: VoidableSale[] = data.map((s: any) => ({
+    const result: VoidableSale[] = rawSales.map(s => ({
       id: s.id,
       total: s.total,
       payment_method: s.payment_method,
       created_at: s.created_at,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      items: (s.sale_items ?? []).map((i: any) => ({
+      items: (s.sale_items ?? []).map(i => ({
         id: i.id,
         variant_id: i.variant_id,
         quantity: i.quantity,
@@ -124,7 +138,12 @@ export default function VoidSaleModal({ onClose, onVoided }: Props) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error: cancelErr } = await (supabase as any)
         .from('sales')
-        .update({ status: 'cancelled' })
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: user?.id ?? null,
+          cancel_reason: reason.trim() || 'Venta anulada desde el POS',
+        })
         .eq('id', selected.id)
 
       if (cancelErr) throw new Error(cancelErr.message)
@@ -136,10 +155,8 @@ export default function VoidSaleModal({ onClose, onVoided }: Props) {
         .select('id, stock')
         .in('id', selected.items.map(i => i.variant_id))
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const stockMap: Record<string, number> = {}
       if (currentVariants) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const v of currentVariants) stockMap[v.id] = v.stock
       }
 
