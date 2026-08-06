@@ -8,6 +8,8 @@ import { cldUrl } from '@/lib/cloudinary'
 import ProductEnrichedContent from '@/components/tienda/ProductEnrichedContent'
 import ProductAnalytics from '@/components/tienda/ProductAnalytics'
 import type { StoreProductContent } from '@/lib/storeProductContent'
+import RelatedProductsCarousel from '@/components/tienda/RelatedProductsCarousel'
+import { getRelatedProducts } from '@/lib/relatedProductsServer'
 
 interface Props {
   params: Promise<{ offerId: string }>
@@ -130,6 +132,10 @@ export default async function OfertaPage({ params }: Props) {
         .eq('status', 'published')
         .maybeSingle()
     : { data: null }
+
+  const related = hasRealVariants
+    ? await getRelatedProducts(supabase, productId, productCategory, variants)
+    : { products: [], offers: [] }
 
   const imageUrl = productImage ?? variants[0]?.image_url
   const pct = offer.precio_lista > 0
@@ -281,6 +287,11 @@ export default async function OfertaPage({ params }: Props) {
           showDescription={false}
         />
       )}
+      <RelatedProductsCarousel
+        products={related.products}
+        offers={related.offers}
+        category={productCategory}
+      />
       {hasRealVariants && <ProductAnalytics productId={productId} entryPoint="offer" />}
     </main>
   )

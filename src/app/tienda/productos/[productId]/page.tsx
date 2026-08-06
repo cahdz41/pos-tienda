@@ -8,6 +8,8 @@ import { cldUrl } from '@/lib/cloudinary'
 import ProductEnrichedContent from '@/components/tienda/ProductEnrichedContent'
 import ProductAnalytics from '@/components/tienda/ProductAnalytics'
 import type { StoreProductContent } from '@/lib/storeProductContent'
+import RelatedProductsCarousel from '@/components/tienda/RelatedProductsCarousel'
+import { getRelatedProducts } from '@/lib/relatedProductsServer'
 
 interface Props {
   params: Promise<{ productId: string }>
@@ -107,6 +109,7 @@ export default async function ProductoPage({ params }: Props) {
   if (variants.length === 0) notFound()
 
   const imageUrl = product.image_url ?? variants[0]?.image_url
+  const related = await getRelatedProducts(supabase, product.id, product.category, variants)
 
   return (
     <main style={{ maxWidth: '1280px', margin: '0 auto', padding: '48px 24px 80px' }}>
@@ -209,6 +212,11 @@ export default async function ProductoPage({ params }: Props) {
           showDescription={false}
         />
       )}
+      <RelatedProductsCarousel
+        products={related.products}
+        offers={related.offers}
+        category={product.category}
+      />
       <ProductAnalytics productId={product.id} entryPoint="direct" />
     </main>
   )
