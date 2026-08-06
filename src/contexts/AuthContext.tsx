@@ -12,6 +12,7 @@ import type { Profile } from '@/types'
 interface AuthContextValue {
   user: User | null
   profile: Profile | null
+  accessToken: string | null
   loading: boolean
   signOut: () => Promise<void>
 }
@@ -19,6 +20,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue>({
   user: null,
   profile: null,
+  accessToken: null,
   loading: true,
   signOut: async () => {},
 })
@@ -57,6 +59,7 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [accessToken, setAccessToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -66,6 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       (_event, session) => {
         const currentUser = session?.user ?? null
         setUser(currentUser)
+        setAccessToken(session?.access_token ?? null)
 
         // IMPORTANTE: no hacer await aquí directamente.
         // Supabase sostiene su lock interno (_initialize) mientras notifica
@@ -99,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signOut }}>
+    <AuthContext.Provider value={{ user, profile, accessToken, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   )

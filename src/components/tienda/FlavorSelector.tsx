@@ -3,15 +3,17 @@
 import { useState } from 'react'
 import { useStoreCart } from '@/contexts/StoreCartContext'
 import type { StoreVariant } from '@/types'
+import { trackStoreProductEvent } from './ProductAnalytics'
 
 interface Props {
   variants: StoreVariant[]
   productId: string
   productName: string
   fallbackImageUrl?: string | null
+  entryPoint?: 'catalog' | 'offer' | 'direct'
 }
 
-export default function FlavorSelector({ variants, productId, productName, fallbackImageUrl }: Props) {
+export default function FlavorSelector({ variants, productId, productName, fallbackImageUrl, entryPoint = 'direct' }: Props) {
   const [selected, setSelected] = useState<StoreVariant>(variants[0])
   const [added, setAdded] = useState(false)
   const { addItem } = useStoreCart()
@@ -24,8 +26,9 @@ export default function FlavorSelector({ variants, productId, productName, fallb
       productName,
       flavor: selected.flavor,
       price: selected.sale_price,
-      imageUrl: selected.image_url ?? fallbackImageUrl,
+      imageUrl: selected.image_url ?? fallbackImageUrl ?? null,
     })
+    trackStoreProductEvent('add_to_cart', productId, selected.id, entryPoint)
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)
   }
@@ -44,7 +47,10 @@ export default function FlavorSelector({ variants, productId, productName, fallb
             {variants.map(v => (
               <button
                 key={v.id}
-                onClick={() => setSelected(v)}
+                onClick={() => {
+                  setSelected(v)
+                  if (v.id !== selected.id) trackStoreProductEvent('flavor_select', productId, v.id, entryPoint)
+                }}
                 style={{
                   padding: '8px 16px', borderRadius: '8px', border: '1px solid',
                   borderColor: selected.id === v.id ? '#F0B429' : '#2A2A2A',

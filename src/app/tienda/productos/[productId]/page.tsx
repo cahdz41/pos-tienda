@@ -5,6 +5,9 @@ import FlavorSelector from '@/components/tienda/FlavorSelector'
 import type { StoreVariant } from '@/types'
 import type { Metadata } from 'next'
 import { cldUrl } from '@/lib/cloudinary'
+import ProductEnrichedContent from '@/components/tienda/ProductEnrichedContent'
+import ProductAnalytics from '@/components/tienda/ProductAnalytics'
+import type { StoreProductContent } from '@/lib/storeProductContent'
 
 interface Props {
   params: Promise<{ productId: string }>
@@ -21,12 +24,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     { auth: { persistSession: false, autoRefreshToken: false } }
   )
 
-  const { data: product } = await supabase
-    .from('products')
-    .select('id, name, category, image_url, store_description')
-    .eq('id', productId)
-    .eq('store_visible', true)
-    .single()
+  const [{ data: product }, { data: enrichedContent }] = await Promise.all([
+    supabase
+      .from('products')
+      .select('id, name, category, image_url, store_description')
+      .eq('id', productId)
+      .eq('store_visible', true)
+      .single(),
+    supabase
+      .from('store_product_content')
+      .select('short_description')
+      .eq('product_id', productId)
+      .eq('status', 'published')
+      .maybeSingle(),
+  ])
 
   if (!product) {
     return {
@@ -35,7 +46,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   const imageUrl = product.image_url ?? null
-  const description = product.store_description ?? `Compra ${product.name} en Chocholand. Suplementos y nutrición deportiva de calidad.`
+  const description = enrichedContent?.short_description ?? product.store_description ?? `Compra ${product.name} en Chocholand. Suplementos y nutrición deportiva de calidad.`
 
   return {
     title: `${product.name} — Chocholand`,
@@ -84,6 +95,13 @@ export default async function ProductoPage({ params }: Props) {
     .single()
 
   if (!product) notFound()
+
+  const { data: enrichedContent } = await supabase
+    .from('store_product_content')
+    .select('*')
+    .eq('product_id', productId)
+    .eq('status', 'published')
+    .maybeSingle()
 
   const variants = (product.product_variants as StoreVariant[]).filter(v => v.stock > 0)
   if (variants.length === 0) notFound()
@@ -165,14 +183,14 @@ export default async function ProductoPage({ params }: Props) {
             {product.name}
           </h1>
 
-          {product.store_description && (
+          {(enrichedContent?.short_description || product.store_description) && (
             <p style={{
               fontSize: '15px',
               color: '#555555',
               lineHeight: 1.7,
               margin: '0 0 32px',
             }}>
-              {product.store_description}
+              {enrichedContent?.short_description ?? product.store_description}
             </p>
           )}
 
@@ -181,9 +199,17 @@ export default async function ProductoPage({ params }: Props) {
             productId={product.id}
             productName={product.name}
             fallbackImageUrl={imageUrl}
+            entryPoint="direct"
           />
         </div>
       </div>
+      {enrichedContent && (
+        <ProductEnrichedContent
+          content={enrichedContent as StoreProductContent}
+          showDescription={false}
+        />
+      )}
+      <ProductAnalytics productId={product.id} entryPoint="direct" />
     </main>
   )
 }

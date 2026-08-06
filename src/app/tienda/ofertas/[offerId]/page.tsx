@@ -5,6 +5,9 @@ import OfferFlavorSelector from '@/components/tienda/OfferFlavorSelector'
 import type { StoreVariant } from '@/types'
 import type { Metadata } from 'next'
 import { cldUrl } from '@/lib/cloudinary'
+import ProductEnrichedContent from '@/components/tienda/ProductEnrichedContent'
+import ProductAnalytics from '@/components/tienda/ProductAnalytics'
+import type { StoreProductContent } from '@/lib/storeProductContent'
 
 interface Props {
   params: Promise<{ offerId: string }>
@@ -119,6 +122,15 @@ export default async function OfertaPage({ params }: Props) {
     productId = `offer-product-${offer.id}`
   }
 
+  const { data: enrichedContent } = hasRealVariants
+    ? await supabase
+        .from('store_product_content')
+        .select('*')
+        .eq('product_id', productId)
+        .eq('status', 'published')
+        .maybeSingle()
+    : { data: null }
+
   const imageUrl = productImage ?? variants[0]?.image_url
   const pct = offer.precio_lista > 0
     ? Math.round(((offer.precio_lista - offer.precio_oferta) / offer.precio_lista) * 100)
@@ -218,14 +230,14 @@ export default async function OfertaPage({ params }: Props) {
             {productName}
           </h1>
 
-          {productDescription && (
+          {(enrichedContent?.short_description || productDescription) && (
             <p style={{
               fontSize: '15px',
               color: '#555555',
               lineHeight: 1.7,
               margin: '0 0 32px',
             }}>
-              {productDescription}
+              {enrichedContent?.short_description ?? productDescription}
             </p>
           )}
 
@@ -263,6 +275,13 @@ export default async function OfertaPage({ params }: Props) {
           />
         </div>
       </div>
+      {enrichedContent && (
+        <ProductEnrichedContent
+          content={enrichedContent as StoreProductContent}
+          showDescription={false}
+        />
+      )}
+      {hasRealVariants && <ProductAnalytics productId={productId} entryPoint="offer" />}
     </main>
   )
 }

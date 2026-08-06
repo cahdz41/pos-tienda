@@ -7,10 +7,12 @@ import type { Offer, Package } from '@/types'
 import TabOfertas from './TabOfertas'
 import TabPaquetes from './TabPaquetes'
 import TabGenerador from './TabGenerador'
+import TabFichasProductos from './TabFichasProductos'
 
-type Tab = 'ofertas' | 'paquetes' | 'generador'
+type Tab = 'ofertas' | 'paquetes' | 'generador' | 'fichas'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'fichas',     label: 'Fichas de Productos', icon: 'FP' },
   { id: 'ofertas',    label: 'Ofertas del Mes',   icon: '🔥' },
   { id: 'paquetes',   label: 'Paquetes en Oferta', icon: '🎁' },
   { id: 'generador',  label: 'Generador',          icon: '🎨' },
@@ -109,6 +111,9 @@ export default function ConfigTiendaPage() {
         )}
         {tab === 'generador' && (
           <TabGenerador />
+        )}
+        {tab === 'fichas' && (
+          <TabFichasProductos />
         )}
       </div>
     </div>

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useStoreCart } from '@/contexts/StoreCartContext'
 import type { StoreVariant } from '@/types'
+import { trackStoreProductEvent } from './ProductAnalytics'
 
 interface Props {
   variants: StoreVariant[]
@@ -41,6 +42,7 @@ export default function OfferFlavorSelector({
       offerId,
       originalPrice,
     })
+    if (hasRealVariants) trackStoreProductEvent('add_to_cart', productId, selected.id, 'offer')
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)
   }
@@ -59,7 +61,10 @@ export default function OfferFlavorSelector({
             {variants.map(v => (
               <button
                 key={v.id}
-                onClick={() => setSelected(v)}
+                onClick={() => {
+                  setSelected(v)
+                  if (v.id !== selected.id) trackStoreProductEvent('flavor_select', productId, v.id, 'offer')
+                }}
                 style={{
                   padding: '8px 16px', borderRadius: '8px', border: '1px solid',
                   borderColor: selected.id === v.id ? '#F0B429' : '#2A2A2A',
