@@ -37,19 +37,39 @@ export async function GET(request: NextRequest) {
     .from('products')
     .select(`
       id, name, brand, category, image_url, store_visible,
-      product_variants (id, flavor, barcode, stock)
+      product_variants!inner (id, flavor, barcode, stock)
     `)
+    .eq('store_visible', true)
+    .gt('product_variants.stock', 0)
     .order('name')
     .limit(limit)
 
-  if (query) productsQuery = productsQuery.ilike('name', `%${query.replace(/[%_]/g, '')}%`)
+  if (query) {
+    const terms = query
+      .replace(/[%_,()]/g, ' ')
+      .split(/\s+/)
+      .map(term => term.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+    for (const term of terms) {
+      productsQuery = productsQuery.or(`name.ilike.%${term}%,brand.ilike.%${term}%`)
+    }
+  }
 
-  const { data: products, error: productsError } = await productsQuery
+  const [{ data: products, error: productsError }, { data: hiddenCategories, error: categoriesError }] = await Promise.all([
+    productsQuery,
+    supabase.from('store_category_visibility').select('name').eq('visible', false),
+  ])
   if (productsError) {
     return NextResponse.json({ error: productsError.message }, { status: 500 })
   }
+  if (categoriesError) {
+    return NextResponse.json({ error: categoriesError.message }, { status: 500 })
+  }
 
-  const productRows = (products ?? []) as ProductListRow[]
+  const hiddenCategoryNames = new Set((hiddenCategories ?? []).map((item: { name: string }) => item.name))
+  const productRows = ((products ?? []) as ProductListRow[])
+    .filter(product => !product.category || !hiddenCategoryNames.has(product.category))
   const productIds = productRows.map(product => product.id)
   let contentByProduct: Record<string, unknown> = {}
 

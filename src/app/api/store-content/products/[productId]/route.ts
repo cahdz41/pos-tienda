@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { requireOwner } from '@/lib/ownerApiAuth'
 import { parseEditableContent } from '@/lib/storeProductContent'
+import { referenceFlavor } from '@/lib/productResearchInput'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,12 +69,30 @@ export async function PUT(request: NextRequest, { params }: Context) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabase = createAdminClient() as any
-  const { data: product } = await supabase.from('products').select('id').eq('id', productId).maybeSingle()
+  const { data: product } = await supabase
+    .from('products')
+    .select('id, product_variants(id, flavor)')
+    .eq('id', productId)
+    .maybeSingle()
   if (!product) return NextResponse.json({ error: 'Producto no encontrado' }, { status: 404 })
+
+  const selectedVariant = (product.product_variants ?? []).find(
+    (variant: { id: string; flavor: string | null }) => variant.id === editable.reference_variant_id,
+  )
+  if (!selectedVariant) {
+    return NextResponse.json({ error: 'Selecciona una variante válida como referencia.' }, { status: 400 })
+  }
+  editable.reference_flavor = referenceFlavor(selectedVariant.flavor)
 
   const { data, error } = await supabase
     .from('store_product_content')
-    .upsert({ product_id: productId, status: 'draft', ...editable }, { onConflict: 'product_id' })
+    .upsert({
+      product_id: productId,
+      status: 'draft',
+      published_at: null,
+      published_by: null,
+      ...editable,
+    }, { onConflict: 'product_id' })
     .select('*')
     .single()
 

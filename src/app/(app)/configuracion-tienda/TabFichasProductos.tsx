@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import ProductEnrichedContent from '@/components/tienda/ProductEnrichedContent'
 import type { NutritionFactRow, StoreProductContent, StoreProductContentStatus } from '@/lib/storeProductContent'
+import { extractPresentationHint, referenceFlavor } from '@/lib/productResearchInput'
 
 interface VariantSummary {
   id: string
@@ -34,8 +35,6 @@ interface ProductDetailResponse {
 const STATUS_LABEL: Record<'missing' | StoreProductContentStatus, string> = {
   missing: 'Sin contenido', draft: 'Borrador', review: 'Listo para revisar', published: 'Publicado',
 }
-const PILOT_NAME = 'Mutant - Mutant Whey 5lbs'
-
 function blankRow(): NutritionFactRow {
   return { name: '', amount: '', unit: '', daily_value: null, indent: 0 }
 }
@@ -60,9 +59,15 @@ function statusColor(status: 'missing' | StoreProductContentStatus): string {
   return '#777777'
 }
 
+function totalResearchTokens(usage: Record<string, unknown> | null): number | null {
+  if (!usage) return null
+  const value = usage.totalTokenCount ?? usage.total_token_count
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
 export default function TabFichasProductos() {
   const { accessToken } = useAuth()
-  const [query, setQuery] = useState('Mutant Whey 5lbs')
+  const [query, setQuery] = useState('')
   const [products, setProducts] = useState<ProductSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<ProductDetailResponse | null>(null)
@@ -72,6 +77,7 @@ export default function TabFichasProductos() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [preview, setPreview] = useState(false)
+  const [dirty, setDirty] = useState(false)
 
   const loadProducts = useCallback(async (search: string) => {
     if (!accessToken) return
@@ -83,14 +89,16 @@ export default function TabFichasProductos() {
       })
       const body = await readResponse<{ products: ProductSummary[] }>(response)
       setProducts(body.products)
-      const exact = body.products.find(product => product.name === PILOT_NAME)
-      if (exact && !selectedId) setSelectedId(exact.id)
+      setSelectedId(current => {
+        if (current && body.products.some(product => product.id === current)) return current
+        return body.products.find(product => product.content?.status === 'published')?.id ?? null
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudieron cargar los productos.')
     } finally {
       setLoadingList(false)
     }
-  }, [accessToken, selectedId])
+  }, [accessToken])
 
   const loadDetail = useCallback(async (productId: string) => {
     if (!accessToken) return
@@ -102,6 +110,7 @@ export default function TabFichasProductos() {
         headers: authHeaders(accessToken), cache: 'no-store',
       })
       setDetail(await readResponse<ProductDetailResponse>(response))
+      setDirty(false)
     } catch (e) {
       setDetail(null)
       setError(e instanceof Error ? e.message : 'No se pudo cargar la ficha.')
@@ -121,11 +130,13 @@ export default function TabFichasProductos() {
   const editableContent = useMemo<StoreProductContent | null>(() => {
     if (content) return content
     if (!detail) return null
-    const reference = detail.product.product_variants.find(variant => variant.barcode === '811662020080')
+    const reference = detail.product.product_variants.find(variant => variant.stock > 0 && variant.barcode)
+      ?? detail.product.product_variants.find(variant => variant.barcode)
+      ?? detail.product.product_variants[0]
     return {
       product_id: detail.product.id, status: 'draft', reference_variant_id: reference?.id ?? null,
-      reference_flavor: 'Vainilla', short_description: '', key_features: ['', '', ''],
-      serving_size: '', servings_per_container: '', presentation: '5 lb (2.27 kg)',
+      reference_flavor: referenceFlavor(reference?.flavor), short_description: '', key_features: ['', '', ''],
+      serving_size: '', servings_per_container: '', presentation: extractPresentationHint(detail.product.name),
       nutrition_facts: [blankRow(), blankRow(), blankRow(), blankRow()], ingredients: '', directions: '',
       nutrition_label_url: null, research_sources: [], research_warnings: [], research_model: null,
       research_prompt_version: null, research_input_hash: null, research_usage: null, researched_at: null,
@@ -133,14 +144,16 @@ export default function TabFichasProductos() {
     }
   }, [content, detail])
 
-  function updateContent(patch: Partial<StoreProductContent>) {
+  function updateContent(patch: Partial<StoreProductContent>, markDirty = true) {
     setDetail(current => current && editableContent
       ? { ...current, content: { ...editableContent, ...patch } }
       : current)
+    if (markDirty) setDirty(true)
   }
 
   async function saveDraft() {
     if (!accessToken || !selectedId || !editableContent) return
+    if (editableContent.status !== 'draft' && !window.confirm('Guardar cambios regresará la ficha a borrador y la retirará temporalmente de la tienda. ¿Continuar?')) return
     setBusy('save'); setError(null); setNotice(null)
     try {
       const response = await fetch(`/api/store-content/products/${selectedId}`, {
@@ -157,28 +170,36 @@ export default function TabFichasProductos() {
           ingredients: editableContent.ingredients,
           directions: editableContent.directions,
           nutrition_label_url: editableContent.nutrition_label_url,
+          research_sources: editableContent.research_sources,
           research_warnings: editableContent.research_warnings,
         }),
       })
       const body = await readResponse<{ content: StoreProductContent }>(response)
       setDetail(current => current ? { ...current, content: body.content } : current)
+      setDirty(false)
       setNotice('Borrador guardado. Esta acción no consumió Gemini.')
       void loadProducts(query)
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo guardar.') }
     finally { setBusy(null) }
   }
 
-  async function research() {
-    if (!accessToken || !selectedId) return
-    const force = Boolean(editableContent?.researched_at)
-    if (force && !window.confirm('Ya existe una investigación. Reinvestigar hará una nueva llamada a Gemini. ¿Continuar?')) return
+  async function research(force = false) {
+    if (!accessToken || !selectedId || !editableContent?.reference_variant_id) {
+      setError('Selecciona un sabor o variante de referencia antes de investigar.')
+      return
+    }
+    if (dirty && !window.confirm('Hay cambios sin guardar que serán reemplazados por la investigación. ¿Continuar?')) return
+    if (!force && editableContent.researched_at && !window.confirm('Se reutilizará la caché si coincide producto, variante y versión. Si algo cambió, se hará una llamada a Gemini y la ficha regresará a borrador. ¿Continuar?')) return
+    if (force && !window.confirm('Se hará una nueva llamada a Gemini y la ficha regresará a borrador. ¿Continuar?')) return
     setBusy('research'); setError(null); setNotice(null)
     try {
       const response = await fetch(`/api/store-content/products/${selectedId}/research`, {
-        method: 'POST', headers: authHeaders(accessToken, true), body: JSON.stringify({ force }),
+        method: 'POST', headers: authHeaders(accessToken, true),
+        body: JSON.stringify({ force, reference_variant_id: editableContent.reference_variant_id }),
       })
       const body = await readResponse<{ content: StoreProductContent; cached: boolean }>(response)
       setDetail(current => current ? { ...current, content: body.content } : current)
+      setDirty(false)
       setNotice(body.cached
         ? 'Se reutilizó la investigación guardada; no hubo consumo nuevo.'
         : 'Investigación terminada con una sola llamada a Gemini. Revisa los datos antes de publicar.')
@@ -199,14 +220,16 @@ export default function TabFichasProductos() {
       })
       const body = await readResponse<{ content: StoreProductContent }>(response)
       setDetail(current => current ? { ...current, content: body.content } : current)
+      setDirty(false)
       setNotice(status === 'published' ? 'Ficha publicada.' : status === 'review' ? 'Ficha lista para revisión.' : 'Ficha regresada a borrador.')
       void loadProducts(query)
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cambiar el estado.') }
     finally { setBusy(null) }
   }
 
-  const isPilot = detail?.product.name === PILOT_NAME
   const listStatus = (product: ProductSummary) => product.content?.status ?? 'missing'
+  const researchTokens = totalResearchTokens(editableContent?.research_usage ?? null)
+  const detailStatus = detail?.content?.status ?? 'missing'
 
   return (
     <div className="product-content-admin">
@@ -221,7 +244,10 @@ export default function TabFichasProductos() {
               : products.map(product => {
                 const status = listStatus(product)
                 return (
-                  <button key={product.id} onClick={() => setSelectedId(product.id)} style={{
+                  <button key={product.id} onClick={() => {
+                    if (dirty && !window.confirm('Hay cambios sin guardar. ¿Cambiar de producto y descartarlos?')) return
+                    setSelectedId(product.id)
+                  }} style={{
                     display: 'block', width: '100%', textAlign: 'left', padding: '13px 14px', cursor: 'pointer',
                     background: selectedId === product.id ? 'rgba(240,180,41,0.08)' : 'transparent',
                     border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text)',
@@ -249,16 +275,39 @@ export default function TabFichasProductos() {
                     <p style={{ margin: '0 0 5px', fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>{detail.product.name}</p>
                     <p style={{ margin: 0, fontSize: 11, color: 'var(--text-muted)' }}>{detail.product.product_variants.map(variant => variant.flavor).filter(Boolean).join(' · ')}</p>
                   </div>
-                  <span style={{ alignSelf: 'flex-start', padding: '5px 10px', borderRadius: 20, border: `1px solid ${statusColor(editableContent.status)}`, color: statusColor(editableContent.status), fontSize: 11, fontWeight: 700 }}>{STATUS_LABEL[editableContent.status]}</span>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {dirty && <span style={{ color: '#F0B429', fontSize: 10 }}>Cambios sin guardar</span>}
+                    <span style={{ padding: '5px 10px', borderRadius: 20, border: `1px solid ${statusColor(detailStatus)}`, color: statusColor(detailStatus), fontSize: 11, fontWeight: 700 }}>{STATUS_LABEL[detailStatus]}</span>
+                  </div>
                 </div>
-                {!isPilot && <p style={{ margin: '14px 0 0', padding: 10, borderRadius: 8, background: '#2A220B', color: '#F0B429', fontSize: 12 }}>La investigación automática está bloqueada durante el piloto. Solo se permite {PILOT_NAME}.</p>}
+                <label style={{ display: 'block', marginTop: 16 }}>
+                  <span style={{ display: 'block', marginBottom: 7, color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>Sabor o variante de referencia</span>
+                  <select
+                    value={editableContent.reference_variant_id ?? ''}
+                    onChange={event => {
+                      const variant = detail.product.product_variants.find(item => item.id === event.target.value)
+                      if (variant) updateContent({ reference_variant_id: variant.id, reference_flavor: referenceFlavor(variant.flavor) }, false)
+                    }}
+                    disabled={busy !== null}
+                    style={{ width: '100%', maxWidth: 460, padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
+                  >
+                    <option value="">Selecciona una variante</option>
+                    {detail.product.product_variants.map(variant => (
+                      <option key={variant.id} value={variant.id}>
+                        {referenceFlavor(variant.flavor)} · {variant.barcode || 'sin código'} · stock {variant.stock}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-                  <button onClick={() => void research()} disabled={!isPilot || busy !== null} style={{ padding: '10px 14px', borderRadius: 9, border: 'none', background: '#F0B429', color: '#000', fontSize: 12, fontWeight: 800, cursor: 'pointer', opacity: !isPilot || busy ? 0.45 : 1 }}>
-                    {busy === 'research' ? 'Investigando…' : editableContent.researched_at ? 'Reinvestigar con Gemini' : 'Investigar y generar borrador'}
+                  <button onClick={() => void research(false)} disabled={!editableContent.reference_variant_id || busy !== null} style={{ padding: '10px 14px', borderRadius: 9, border: 'none', background: '#F0B429', color: '#000', fontSize: 12, fontWeight: 800, cursor: 'pointer', opacity: !editableContent.reference_variant_id || busy ? 0.45 : 1 }}>
+                    {busy === 'research' ? 'Investigando…' : editableContent.researched_at ? 'Usar caché o investigar variante' : 'Investigar y generar borrador'}
                   </button>
+                  {editableContent.researched_at && <button onClick={() => void research(true)} disabled={!editableContent.reference_variant_id || busy !== null} style={{ padding: '10px 14px', borderRadius: 9, border: '1px solid #5C2020', background: '#2D1010', color: '#FF8585', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: busy ? 0.45 : 1 }}>Nueva investigación (consume Gemini)</button>}
                   <button onClick={() => setPreview(value => !value)} disabled={busy !== null} style={{ padding: '10px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{preview ? 'Cerrar vista previa' : 'Vista previa'}</button>
                 </div>
-                {editableContent.researched_at && <p style={{ margin: '12px 0 0', color: 'var(--text-muted)', fontSize: 10 }}>Última investigación: {new Date(editableContent.researched_at).toLocaleString('es-MX')} · Modelo: {editableContent.research_model ?? '—'}</p>}
+                <p style={{ margin: '10px 0 0', color: 'var(--text-muted)', fontSize: 10, lineHeight: 1.5 }}>El botón principal reutiliza la investigación guardada cuando producto, variante y versión coinciden. Solo el botón rojo fuerza un consumo nuevo.</p>
+                {editableContent.researched_at && <p style={{ margin: '12px 0 0', color: 'var(--text-muted)', fontSize: 10 }}>Última investigación: {new Date(editableContent.researched_at).toLocaleString('es-MX')} · Modelo: {editableContent.research_model ?? '—'}{researchTokens !== null ? ` · ${researchTokens.toLocaleString('es-MX')} tokens` : ''}</p>}
               </section>
 
               {preview ? <div style={{ padding: 22, borderRadius: 14, background: '#050505', border: '1px solid #222' }}><p style={{ margin: '0 0 12px', color: '#F0B429', fontSize: 11, fontWeight: 800, textTransform: 'uppercase' }}>Vista previa privada</p><ProductEnrichedContent content={editableContent} /></div>
@@ -275,9 +324,9 @@ export default function TabFichasProductos() {
 
               <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: 8, flexWrap: 'wrap', padding: 12, borderRadius: 12, background: 'rgba(13,13,13,0.96)', border: '1px solid var(--border)', backdropFilter: 'blur(8px)' }}>
                 <button onClick={() => void saveDraft()} disabled={busy !== null} style={footerButton}>{busy === 'save' ? 'Guardando…' : 'Guardar borrador'}</button>
-                {editableContent.status === 'draft' && <button onClick={() => void changeStatus('review')} disabled={busy !== null || !detail.content} style={{ ...footerButton, borderColor: '#80651A', background: '#2A220B', color: '#F0B429' }}>Marcar para revisión</button>}
-                {editableContent.status === 'review' && <><button onClick={() => void changeStatus('draft')} disabled={busy !== null} style={footerButton}>Volver a borrador</button><button onClick={() => void changeStatus('published')} disabled={busy !== null} style={{ ...footerButton, border: 'none', background: '#4CAF50', color: '#061407' }}>Publicar ficha</button></>}
-                {editableContent.status === 'published' && <button onClick={() => void changeStatus('draft')} disabled={busy !== null} style={{ ...footerButton, borderColor: '#5C2020', background: '#2D1010', color: '#FF8585' }}>Retirar publicación</button>}
+                {editableContent.status === 'draft' && <button onClick={() => void changeStatus('review')} disabled={busy !== null || !detail.content || dirty} style={{ ...footerButton, borderColor: '#80651A', background: '#2A220B', color: '#F0B429', opacity: dirty ? 0.45 : 1 }}>Marcar para revisión</button>}
+                {editableContent.status === 'review' && <><button onClick={() => void changeStatus('draft')} disabled={busy !== null || dirty} style={{ ...footerButton, opacity: dirty ? 0.45 : 1 }}>Volver a borrador</button><button onClick={() => void changeStatus('published')} disabled={busy !== null || dirty} style={{ ...footerButton, border: 'none', background: '#4CAF50', color: '#061407', opacity: dirty ? 0.45 : 1 }}>Publicar ficha</button></>}
+                {editableContent.status === 'published' && <button onClick={() => void changeStatus('draft')} disabled={busy !== null || dirty} style={{ ...footerButton, borderColor: '#5C2020', background: '#2D1010', color: '#FF8585', opacity: dirty ? 0.45 : 1 }}>Retirar publicación</button>}
               </div>
             </div>}
       </main>
@@ -296,6 +345,7 @@ function Field({ label, value, onChange, textarea = false, placeholder = '' }: {
 function Editor({ content, onChange }: { content: StoreProductContent; onChange: (patch: Partial<StoreProductContent>) => void }) {
   function updateFeature(index: number, value: string) { const next = [...content.key_features]; next[index] = value; onChange({ key_features: next }) }
   function updateNutrition(index: number, patch: Partial<NutritionFactRow>) { const next = [...content.nutrition_facts]; next[index] = { ...next[index], ...patch }; onChange({ nutrition_facts: next }) }
+  function updateSource(index: number, patch: Partial<StoreProductContent['research_sources'][number]>) { const next = [...content.research_sources]; next[index] = { ...next[index], ...patch }; onChange({ research_sources: next }) }
   return <div style={{ display: 'grid', gap: 14 }}>
     <section style={editorSection}><p style={editorTitle}>Contenido principal</p>
       <Field label="Descripción corta" value={content.short_description} onChange={value => onChange({ short_description: value })} textarea />
@@ -307,7 +357,6 @@ function Editor({ content, onChange }: { content: StoreProductContent; onChange:
         <Field label="Presentación" value={content.presentation} onChange={value => onChange({ presentation: value })} />
         <Field label="Tamaño de porción" value={content.serving_size} onChange={value => onChange({ serving_size: value })} />
         <Field label="Porciones por envase" value={content.servings_per_container} onChange={value => onChange({ servings_per_container: value })} />
-        <Field label="Sabor de referencia" value={content.reference_flavor} onChange={value => onChange({ reference_flavor: value })} />
       </div>
     </section>
     <section style={editorSection}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><p style={editorTitle}>Tabla nutrimental</p><button onClick={() => onChange({ nutrition_facts: [...content.nutrition_facts, blankRow()] })} style={addButton}>+ Fila</button></div>
@@ -322,8 +371,10 @@ function Editor({ content, onChange }: { content: StoreProductContent; onChange:
       <style>{`.nutrition-editor-row{display:grid;grid-template-columns:minmax(130px,2fr) 1fr 70px 85px 32px;gap:6px}@media(max-width:720px){.nutrition-editor-row{grid-template-columns:1fr 1fr}.nutrition-editor-row button{min-height:32px}}`}</style>
     </section>
     <section style={editorSection}><Field label="Ingredientes" value={content.ingredients} onChange={value => onChange({ ingredients: value })} textarea /><Field label="Modo de uso" value={content.directions} onChange={value => onChange({ directions: value })} textarea /></section>
-    <section style={editorSection}><p style={editorTitle}>Fuentes y control de investigación</p>{content.research_sources.length ? <ol style={{ margin: 0, paddingLeft: 20 }}>{content.research_sources.map((source, index) => <li key={`${source.url}-${index}`} style={{ marginBottom: 7, color: 'var(--text-muted)', fontSize: 11 }}><a href={source.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>{source.title || source.url}</a></li>)}</ol> : <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 11 }}>Aún no hay fuentes. Ejecuta la investigación del piloto.</p>}
+    <section style={editorSection}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}><p style={editorTitle}>Fuentes y control de investigación</p>{content.research_sources.length < 10 && <button onClick={() => onChange({ research_sources: [...content.research_sources, { title: '', url: '' }] })} style={addButton}>+ Fuente</button>}</div>
+      {content.research_sources.length ? <div style={{ display: 'grid', gap: 8 }}>{content.research_sources.map((source, index) => <div key={index} className="research-source-row"><input value={source.title} onChange={event => updateSource(index, { title: event.target.value })} placeholder="Título de la fuente" style={cellStyle} /><input value={source.url} onChange={event => updateSource(index, { url: event.target.value })} placeholder="https://…" style={cellStyle} /><button onClick={() => onChange({ research_sources: content.research_sources.filter((_, itemIndex) => itemIndex !== index) })} style={removeButton}>×</button></div>)}</div> : <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 11 }}>Aún no hay fuentes. Ejecuta la investigación del producto seleccionado o agrega una fuente confiable.</p>}
       {content.research_warnings.length > 0 && <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: '#2A220B', color: '#F0B429', fontSize: 11 }}>{content.research_warnings.map((warning, index) => <p key={index} style={{ margin: index ? '5px 0 0' : 0 }}>• {warning}</p>)}</div>}
+      <style>{`.research-source-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(220px,2fr) 34px;gap:7px}@media(max-width:720px){.research-source-row{grid-template-columns:1fr 34px}.research-source-row input:nth-child(2){grid-column:1/2}}`}</style>
     </section>
   </div>
 }

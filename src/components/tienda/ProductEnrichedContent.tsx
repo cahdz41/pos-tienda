@@ -89,7 +89,7 @@ export default function ProductEnrichedContent({
       <div style={{ display: 'grid', gap: 12 }}>
         <Section title="Información nutrimental" open>
           <p style={{ margin: '0 0 18px', fontSize: 12, color: '#777777' }}>
-            Información de referencia: {content.reference_flavor || 'Vainilla'}. Los valores pueden variar según el sabor.
+            Información de referencia: {content.reference_flavor || 'variante seleccionada'}. Los valores pueden variar según el sabor.
           </p>
           <div className="nutrition-layout">
             <div style={{ minWidth: 0 }}>

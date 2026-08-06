@@ -9,12 +9,7 @@ import {
 } from '@/lib/storeProductContent'
 
 export const PRODUCT_RESEARCH_MODEL = 'gemini-2.5-flash'
-export const PRODUCT_RESEARCH_PROMPT_VERSION = 'mutant-whey-pilot-v1'
-export const PILOT_PRODUCT_NAME = 'Mutant - Mutant Whey 5lbs'
-export const PILOT_REFERENCE_FLAVOR = 'Vainilla'
-export const PILOT_REFERENCE_BARCODE = '811662020080'
-export const PILOT_PRODUCT_SOURCE_URL = 'https://mutant-my.com/products/mutant-whey-protein'
-export const PILOT_LABEL_SOURCE_URL = 'https://www.gnc.com/on/demandware.static/-/Sites-GNC2-Library/default/v1732874468680/pdf/433538_lbl.pdf'
+export const PRODUCT_RESEARCH_PROMPT_VERSION = 'catalog-general-v2'
 
 const MAX_OUTPUT_TOKENS = 3000
 const TEMPERATURE = 0.1
@@ -27,7 +22,6 @@ export interface ProductResearchInput {
   reference_flavor: string
   reference_barcode: string
   known_flavors: string[]
-  preferred_sources: string[]
   language: 'es-MX'
 }
 
@@ -49,8 +43,9 @@ No cambies el producto, sabor o presentación solicitados.
 REGLAS DE IDENTIDAD:
 1. El producto debe coincidir en marca, línea, presentación y, cuando exista, código de barras.
 2. Rechaza resultados de productos con nombres parecidos pero líneas distintas.
-3. Para MUTANT WHEY no uses datos de MUTANT HARDCORE WHEY, MUTANT MASS ni MUTANT ISO SURGE.
+3. No uses información de otra presentación, fórmula, versión, tamaño o variante aunque la marca sea la misma.
 4. La tabla, ingredientes y porciones deben corresponder al sabor de referencia indicado.
+5. matched_name, matched_flavor, matched_presentation y matched_barcode describen lo que realmente confirman las fuentes. Si el código no aparece en una fuente, matched_barcode debe ser una cadena vacía.
 
 PRIORIDAD DE FUENTES:
 1. Etiqueta física, PDF de etiqueta o página oficial del fabricante.
@@ -76,8 +71,9 @@ Devuelve exactamente este objeto JSON y ningún texto adicional:
     "matched": true,
     "confidence": "high",
     "matched_name": "",
-    "matched_flavor": "Vainilla",
-    "matched_presentation": ""
+    "matched_flavor": "",
+    "matched_presentation": "",
+    "matched_barcode": ""
   },
   "short_description": "",
   "key_features": [],
@@ -172,13 +168,6 @@ export function selectTrustedLabelCandidate(candidates: string[], sources: Resea
 }
 
 export async function researchProduct(input: ProductResearchInput): Promise<ProductResearchResponse> {
-  if (input.product_name !== PILOT_PRODUCT_NAME) {
-    throw new Error('La primera versión solo permite investigar el producto piloto aprobado.')
-  }
-  if (input.reference_barcode !== PILOT_REFERENCE_BARCODE || input.reference_flavor !== PILOT_REFERENCE_FLAVOR) {
-    throw new Error('La variante de referencia del piloto no coincide con Vainilla.')
-  }
-
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('Falta configurar GEMINI_API_KEY en el servidor.')
 
@@ -199,13 +188,8 @@ export async function researchProduct(input: ProductResearchInput): Promise<Prod
       },
     })
 
-    const content = parseGeminiResearch(extractJson(response.text ?? ''))
-    const groundedSources = extractSources(response)
-    const sources = [
-      { title: 'MUTANT Whey 5 lb — información del producto', url: PILOT_PRODUCT_SOURCE_URL },
-      { title: 'MUTANT Whey Vainilla — etiqueta nutrimental', url: PILOT_LABEL_SOURCE_URL },
-      ...groundedSources,
-    ].filter((source, index, all) => all.findIndex(item => item.url === source.url) === index).slice(0, 10)
+    const content = parseGeminiResearch(extractJson(response.text ?? ''), input)
+    const sources = extractSources(response)
     return {
       content,
       sources,

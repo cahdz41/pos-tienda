@@ -15,6 +15,7 @@ const validResearch = {
     matched_name: 'MUTANT WHEY 5 lb',
     matched_flavor: 'Vanilla Ice Cream',
     matched_presentation: '5 lb (2.27 kg)',
+    matched_barcode: '811662020080',
   },
   short_description: 'Proteína de suero en presentación de cinco libras.',
   key_features: ['22 g de proteína', 'Mezcla de suero', '61 porciones'],
@@ -30,8 +31,16 @@ const validResearch = {
   research_warnings: [],
 }
 
+const mutantIdentity = {
+  product_name: 'Mutant - Mutant Whey 5lbs',
+  brand: 'Mutant',
+  reference_flavor: 'Vainilla',
+  reference_barcode: '811662020080',
+  presentation_hint: '5lbs',
+}
+
 test('acepta una investigación exacta de Mutant Whey Vainilla', () => {
-  const result = parseGeminiResearch(validResearch)
+  const result = parseGeminiResearch(validResearch, mutantIdentity)
   assert.equal(result.identity_match.confidence, 'high')
   assert.equal(result.identity_match.matched_flavor, 'Vanilla Ice Cream')
   assert.equal(result.nutrition_facts[0].name, 'Calorías')
@@ -42,8 +51,8 @@ test('rechaza líneas de producto similares', () => {
     () => parseGeminiResearch({
       ...validResearch,
       identity_match: { ...validResearch.identity_match, matched_name: 'Mutant Hardcore Whey 5 lb' },
-    }),
-    /otra línea/,
+    }, mutantIdentity),
+    /no corresponde/,
   )
 })
 
@@ -52,7 +61,7 @@ test('rechaza sabores diferentes a Vainilla', () => {
     () => parseGeminiResearch({
       ...validResearch,
       identity_match: { ...validResearch.identity_match, matched_flavor: 'Triple Chocolate' },
-    }),
+    }, mutantIdentity),
     /Vainilla/,
   )
 })
@@ -62,8 +71,41 @@ test('rechaza el sabor de referencia dentro de la descripción principal', () =>
     () => parseGeminiResearch({
       ...validResearch,
       short_description: 'Proteína de suero sabor Vainilla Ice Cream con 22 g de proteína.',
-    }),
+    }, mutantIdentity),
     /descripción principal debe ser general/,
+  )
+})
+
+test('acepta otro producto y sabor cuando coinciden con la selección', () => {
+  const result = parseGeminiResearch({
+    ...validResearch,
+    identity_match: {
+      matched: true,
+      confidence: 'high',
+      matched_name: 'Optimum Nutrition Gold Standard 100% Whey Protein Powder 5 lb',
+      matched_flavor: 'Double Rich Chocolate',
+      matched_presentation: '5 lb',
+      matched_barcode: '748927028676',
+    },
+    short_description: 'Proteína de suero de la línea Gold Standard con mezcla de aislado y concentrado.',
+  }, {
+    product_name: 'Optimum Nutrition - Gold Standard Whey 5lbs',
+    brand: 'Optimum Nutrition',
+    reference_flavor: 'Double Rich Chocolate',
+    reference_barcode: '748927028676',
+    presentation_hint: '5lbs',
+  })
+
+  assert.equal(result.identity_match.matched_barcode, '748927028676')
+})
+
+test('rechaza un código de barras confirmado para otra variante', () => {
+  assert.throws(
+    () => parseGeminiResearch({
+      ...validResearch,
+      identity_match: { ...validResearch.identity_match, matched_barcode: '000000000000' },
+    }, mutantIdentity),
+    /código de barras/,
   )
 })
 
@@ -80,12 +122,17 @@ test('limpia y limita el contenido editable', () => {
     ingredients: 'Leche',
     directions: 'Mezclar',
     nutrition_label_url: 'javascript:alert(1)',
+    research_sources: [
+      { title: 'Fabricante', url: 'https://example.com/producto' },
+      { title: 'Inválida', url: 'javascript:alert(1)' },
+    ],
     research_warnings: [],
   })
 
   assert.equal(parsed.reference_flavor, 'Vainilla')
   assert.equal(parsed.key_features.length, 6)
   assert.equal(parsed.nutrition_label_url, null)
+  assert.deepEqual(parsed.research_sources, [{ title: 'Fabricante', url: 'https://example.com/producto' }])
 })
 
 test('valida campos necesarios antes de revisión', () => {

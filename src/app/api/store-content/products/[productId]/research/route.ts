@@ -3,16 +3,17 @@ import { createAdminClient } from '@/lib/supabase-admin'
 import { requireOwner } from '@/lib/ownerApiAuth'
 import {
   buildResearchInputHash,
-  PILOT_PRODUCT_NAME,
-  PILOT_PRODUCT_SOURCE_URL,
-  PILOT_LABEL_SOURCE_URL,
-  PILOT_REFERENCE_BARCODE,
-  PILOT_REFERENCE_FLAVOR,
   PRODUCT_RESEARCH_PROMPT_VERSION,
   researchProduct,
   selectTrustedLabelCandidate,
   type ProductResearchInput,
 } from '@/lib/productResearch'
+import {
+  deriveProductBrand,
+  extractPresentationHint,
+  referenceFlavor,
+  uniqueKnownFlavors,
+} from '@/lib/productResearchInput'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -25,9 +26,13 @@ export async function POST(request: NextRequest, { params }: Context) {
 
   const { productId } = await params
   let force = false
+  let requestedVariantId = ''
   try {
     const body = await request.json()
     force = body?.force === true
+    requestedVariantId = typeof body?.reference_variant_id === 'string'
+      ? body.reference_variant_id.trim().slice(0, 100)
+      : ''
   } catch {
     // Un cuerpo vacío equivale a usar caché.
   }
@@ -41,12 +46,10 @@ export async function POST(request: NextRequest, { params }: Context) {
       product_variants (id, flavor, barcode, stock)
     `)
     .eq('id', productId)
+    .eq('store_visible', true)
     .single()
 
   if (productError || !product) return NextResponse.json({ error: 'Producto no encontrado' }, { status: 404 })
-  if (product.name !== PILOT_PRODUCT_NAME) {
-    return NextResponse.json({ error: 'La primera versión está limitada al producto piloto aprobado.' }, { status: 403 })
-  }
 
   const variants = (product.product_variants ?? []) as Array<{
     id: string
@@ -54,22 +57,26 @@ export async function POST(request: NextRequest, { params }: Context) {
     barcode: string
     stock: number
   }>
-  const referenceVariant = variants.find(variant =>
-    variant.barcode === PILOT_REFERENCE_BARCODE && /vainilla|vanilla/i.test(variant.flavor ?? '')
-  )
+  const referenceVariant = requestedVariantId
+    ? variants.find(variant => variant.id === requestedVariantId)
+    : variants.length === 1 ? variants[0] : null
   if (!referenceVariant) {
-    return NextResponse.json({ error: 'No se encontró la variante Vainilla aprobada para el piloto.' }, { status: 409 })
+    return NextResponse.json({
+      error: requestedVariantId
+        ? 'La variante seleccionada no pertenece a este producto.'
+        : 'Selecciona el sabor o variante que se usará como referencia.',
+    }, { status: 409 })
   }
 
+  const selectedFlavor = referenceFlavor(referenceVariant.flavor)
   const input: ProductResearchInput = {
     product_name: product.name,
-    brand: product.brand || 'Mutant',
+    brand: deriveProductBrand(product.name, product.brand),
     category: product.category,
-    presentation_hint: '5 lb / 2.27 kg',
-    reference_flavor: PILOT_REFERENCE_FLAVOR,
-    reference_barcode: PILOT_REFERENCE_BARCODE,
-    known_flavors: variants.map(variant => variant.flavor).filter((flavor): flavor is string => Boolean(flavor)),
-    preferred_sources: [PILOT_PRODUCT_SOURCE_URL, PILOT_LABEL_SOURCE_URL],
+    presentation_hint: extractPresentationHint(product.name),
+    reference_flavor: selectedFlavor,
+    reference_barcode: referenceVariant.barcode?.trim() || '',
+    known_flavors: uniqueKnownFlavors(variants.map(variant => variant.flavor)),
     language: 'es-MX',
   }
   const inputHash = buildResearchInputHash(input)
@@ -93,14 +100,21 @@ export async function POST(request: NextRequest, { params }: Context) {
     const nutritionLabelUrl = selectTrustedLabelCandidate(
       result.content.nutrition_label_candidates,
       result.sources,
-    ) ?? PILOT_LABEL_SOURCE_URL
+    )
+    const researchWarnings = [...result.content.research_warnings]
+    if (result.sources.length === 0) {
+      researchWarnings.push('Gemini no devolvió fuentes verificables. Agrega una fuente antes de enviar la ficha a revisión.')
+    }
+    if (!result.content.identity_match.matched_barcode && input.reference_barcode) {
+      researchWarnings.push('Las fuentes no permitieron confirmar el código de barras; verifica manualmente la variante elegida.')
+    }
     const { data: saved, error: saveError } = await supabase
       .from('store_product_content')
       .upsert({
         product_id: productId,
         status: 'draft',
         reference_variant_id: referenceVariant.id,
-        reference_flavor: PILOT_REFERENCE_FLAVOR,
+        reference_flavor: selectedFlavor,
         short_description: result.content.short_description,
         key_features: result.content.key_features,
         serving_size: result.content.serving_size,
@@ -111,7 +125,7 @@ export async function POST(request: NextRequest, { params }: Context) {
         directions: result.content.directions,
         nutrition_label_url: nutritionLabelUrl,
         research_sources: result.sources,
-        research_warnings: result.content.research_warnings,
+        research_warnings: researchWarnings,
         research_model: result.model,
         research_prompt_version: result.promptVersion,
         research_input_hash: result.inputHash,

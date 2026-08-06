@@ -53,6 +53,7 @@ export interface EditableStoreProductContent {
   ingredients: string
   directions: string
   nutrition_label_url: string | null
+  research_sources: ResearchSource[]
   research_warnings: string[]
 }
 
@@ -63,6 +64,7 @@ export interface GeminiResearchResult {
     matched_name: string
     matched_flavor: string
     matched_presentation: string
+    matched_barcode: string
   }
   short_description: string
   key_features: string[]
@@ -74,6 +76,14 @@ export interface GeminiResearchResult {
   directions: string
   nutrition_label_candidates: string[]
   research_warnings: string[]
+}
+
+export interface ResearchIdentityExpectation {
+  product_name: string
+  brand: string
+  reference_flavor: string
+  reference_barcode: string
+  presentation_hint: string
 }
 
 const EDITABLE_KEYS = new Set([
@@ -88,6 +98,7 @@ const EDITABLE_KEYS = new Set([
   'ingredients',
   'directions',
   'nutrition_label_url',
+  'research_sources',
   'research_warnings',
 ])
 
@@ -133,6 +144,22 @@ function cleanNullableUrl(value: unknown): string | null {
   }
 }
 
+export function normalizeResearchSources(value: unknown): ResearchSource[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const sources: ResearchSource[] = []
+
+  for (const item of value.slice(0, 10)) {
+    if (!isRecord(item)) continue
+    const url = cleanNullableUrl(item.url)
+    if (!url || seen.has(url)) continue
+    const parsed = new URL(url)
+    seen.add(url)
+    sources.push({ title: cleanText(item.title, 240) || parsed.hostname, url })
+  }
+  return sources
+}
+
 export function normalizeNutritionFacts(value: unknown): NutritionFactRow[] {
   if (!Array.isArray(value)) return []
 
@@ -158,6 +185,79 @@ export function normalizeNutritionFacts(value: unknown): NutritionFactRow[] {
     .filter((row): row is NutritionFactRow => row !== null)
 }
 
+function normalizeIdentityText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('es-MX')
+    .replace(/(\d)([a-z])/g, '$1 $2')
+    .replace(/\b(lbs?|pounds?)\b/g, ' lb ')
+    .replace(/\b(kgs?|kilograms?)\b/g, ' kg ')
+    .replace(/\b(grs?|grams?|gramos?)\b/g, ' g ')
+    .replace(/\b(serv(?:ing)?s?|porciones?)\b/g, ' servings ')
+    .replace(/\b(caps?|capsulas?)\b/g, ' caps ')
+    .replace(/\b(pzas?|pieces?|unidades?)\b/g, ' unit ')
+    .replace(/\bvanilla\b/g, ' vainilla ')
+    .replace(/\bstrawberry\b/g, ' fresa ')
+    .replace(/\b(unflavou?red|plain)\b/g, ' sin sabor ')
+    .replace(/\b(and|n)\b|&/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function identityTokens(value: string): string[] {
+  const ignored = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'con', 'para', 'sabor', 'flavor'])
+  return [...new Set(normalizeIdentityText(value).split(' ').filter(token => token && !ignored.has(token)))]
+}
+
+export function areProductNamesCompatible(
+  expected: string,
+  matched: string,
+  brand = '',
+  allowedExtrasText = '',
+): boolean {
+  const expectedTokens = identityTokens(`${brand} ${expected}`)
+  const matchedTokens = new Set(identityTokens(matched))
+  if (expectedTokens.length === 0 || matchedTokens.size === 0) return false
+
+  const matchedCount = expectedTokens.filter(token => matchedTokens.has(token)).length
+  if (matchedCount / expectedTokens.length < 0.6) return false
+
+  const genericExtras = new Set([
+    '100', 'protein', 'proteina', 'powder', 'polvo', 'supplement', 'suplemento',
+    'formula', 'dietary', 'nutrition', 'nutricion', 'percent', 'porciento', 'ice', 'cream',
+    ...identityTokens(allowedExtrasText),
+  ])
+  return [...matchedTokens].every(token => expectedTokens.includes(token) || genericExtras.has(token))
+}
+
+export function areFlavorNamesCompatible(expected: string, matched: string): boolean {
+  const expectedNormalized = normalizeIdentityText(expected)
+  const matchedNormalized = normalizeIdentityText(matched)
+  if (!expectedNormalized || !matchedNormalized) return false
+  if (expectedNormalized === matchedNormalized) return true
+  if (expectedNormalized.includes('sin sabor') && matchedNormalized.includes('sin sabor')) return true
+
+  const expectedTokens = identityTokens(expectedNormalized).filter(token => !['ice', 'cream'].includes(token))
+  const matchedTokens = new Set(identityTokens(matchedNormalized).filter(token => !['ice', 'cream'].includes(token)))
+  return expectedTokens.length > 0 && expectedTokens.every(token => matchedTokens.has(token))
+}
+
+export function isPresentationCompatible(expected: string, matched: string): boolean {
+  if (!expected.trim()) return true
+  const expectedTokens = identityTokens(expected)
+  const matchedTokens = new Set(identityTokens(matched))
+  return expectedTokens.length > 0 && expectedTokens.every(token => matchedTokens.has(token))
+}
+
+function descriptionMentionsReferenceFlavor(description: string, flavor: string): boolean {
+  const normalizedFlavor = normalizeIdentityText(flavor)
+  if (!normalizedFlavor || normalizedFlavor.includes('sin sabor')) return false
+  const descriptionTokens = new Set(identityTokens(description))
+  const flavorTokens = identityTokens(flavor).filter(token => !['ice', 'cream'].includes(token))
+  return flavorTokens.length > 0 && flavorTokens.every(token => descriptionTokens.has(token))
+}
+
 export function parseEditableContent(value: unknown): EditableStoreProductContent {
   if (!isRecord(value)) throw new Error('Contenido inválido.')
 
@@ -177,18 +277,22 @@ export function parseEditableContent(value: unknown): EditableStoreProductConten
     ingredients: cleanText(value.ingredients, 5000),
     directions: cleanText(value.directions, 2000),
     nutrition_label_url: cleanNullableUrl(value.nutrition_label_url),
+    research_sources: normalizeResearchSources(value.research_sources),
     research_warnings: cleanTextArray(value.research_warnings, 20, 500),
   }
 }
 
-export function parseGeminiResearch(value: unknown): GeminiResearchResult {
+export function parseGeminiResearch(
+  value: unknown,
+  expectedIdentity?: ResearchIdentityExpectation,
+): GeminiResearchResult {
   if (!isRecord(value)) throw new Error('Gemini no devolvió un objeto JSON.')
 
   const unknownKeys = Object.keys(value).filter(key => !RESEARCH_KEYS.has(key))
   if (unknownKeys.length) throw new Error(`Gemini agregó campos no permitidos: ${unknownKeys.join(', ')}`)
 
   if (!isRecord(value.identity_match)) throw new Error('Falta la validación de identidad.')
-  const identityKeys = new Set(['matched', 'confidence', 'matched_name', 'matched_flavor', 'matched_presentation'])
+  const identityKeys = new Set(['matched', 'confidence', 'matched_name', 'matched_flavor', 'matched_presentation', 'matched_barcode'])
   const unknownIdentity = Object.keys(value.identity_match).filter(key => !identityKeys.has(key))
   if (unknownIdentity.length) throw new Error('La validación de identidad contiene campos no permitidos.')
 
@@ -199,20 +303,33 @@ export function parseGeminiResearch(value: unknown): GeminiResearchResult {
 
   const matchedName = cleanText(value.identity_match.matched_name, 200)
   const matchedFlavor = cleanText(value.identity_match.matched_flavor, 80)
-  const normalizedName = matchedName.toLocaleLowerCase('es-MX')
+  const matchedPresentation = cleanText(value.identity_match.matched_presentation, 120)
+  const matchedBarcode = cleanText(value.identity_match.matched_barcode, 100).replace(/\s/g, '')
   if (value.identity_match.matched !== true) throw new Error('Gemini no confirmó la identidad del producto.')
-  if (!normalizedName.includes('mutant') || !normalizedName.includes('whey')) {
-    throw new Error('La fuente encontrada no corresponde a Mutant Whey.')
-  }
-  if (/hardcore|mass|iso\s*surge/i.test(matchedName)) {
-    throw new Error('Se rechazó información de otra línea de Mutant.')
-  }
-  if (!/vainilla|vanilla/i.test(matchedFlavor)) {
-    throw new Error('La información nutrimental no corresponde a Vainilla.')
+  if (confidence === 'low') throw new Error('Gemini devolvió una coincidencia de identidad con confianza baja.')
+
+  if (expectedIdentity) {
+    if (!areProductNamesCompatible(
+      expectedIdentity.product_name,
+      matchedName,
+      expectedIdentity.brand,
+      `${expectedIdentity.reference_flavor} ${matchedPresentation}`,
+    )) {
+      throw new Error(`La fuente encontrada no corresponde a ${expectedIdentity.product_name}.`)
+    }
+    if (!areFlavorNamesCompatible(expectedIdentity.reference_flavor, matchedFlavor)) {
+      throw new Error(`La información encontrada no corresponde al sabor ${expectedIdentity.reference_flavor}.`)
+    }
+    if (!isPresentationCompatible(expectedIdentity.presentation_hint, matchedPresentation)) {
+      throw new Error(`La presentación encontrada no coincide con ${expectedIdentity.presentation_hint}.`)
+    }
+    if (matchedBarcode && expectedIdentity.reference_barcode && matchedBarcode !== expectedIdentity.reference_barcode.replace(/\s/g, '')) {
+      throw new Error('El código de barras encontrado pertenece a otra variante.')
+    }
   }
 
   const shortDescription = cleanText(value.short_description, 1200)
-  if (/vainilla|vanilla/i.test(shortDescription)) {
+  if (expectedIdentity && descriptionMentionsReferenceFlavor(shortDescription, expectedIdentity.reference_flavor)) {
     throw new Error('La descripción principal debe ser general y no mencionar el sabor de referencia.')
   }
 
@@ -222,7 +339,8 @@ export function parseGeminiResearch(value: unknown): GeminiResearchResult {
       confidence,
       matched_name: matchedName,
       matched_flavor: matchedFlavor,
-      matched_presentation: cleanText(value.identity_match.matched_presentation, 120),
+      matched_presentation: matchedPresentation,
+      matched_barcode: matchedBarcode,
     },
     short_description: shortDescription,
     key_features: cleanTextArray(value.key_features, 6, 240),
@@ -241,6 +359,7 @@ export function parseGeminiResearch(value: unknown): GeminiResearchResult {
 
 export function validateContentForReview(content: Partial<StoreProductContent>): string[] {
   const missing: string[] = []
+  if (!content.reference_variant_id?.trim()) missing.push('Variante de referencia')
   if (!content.reference_flavor?.trim()) missing.push('Sabor de referencia')
   if (!content.short_description?.trim()) missing.push('Descripción corta')
   if (!content.key_features || content.key_features.length < 3) missing.push('Al menos 3 características clave')
