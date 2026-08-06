@@ -197,6 +197,7 @@ function normalizeIdentityText(value: string): string {
     .replace(/\b(serv(?:ing)?s?|porciones?)\b/g, ' servings ')
     .replace(/\b(caps?|capsulas?)\b/g, ' caps ')
     .replace(/\b(pzas?|pieces?|unidades?)\b/g, ' unit ')
+    .replace(/\bsports\b/g, ' sport ')
     .replace(/\bvanilla\b/g, ' vainilla ')
     .replace(/\bstrawberry\b/g, ' fresa ')
     .replace(/\b(unflavou?red|plain)\b/g, ' sin sabor ')
@@ -220,15 +221,27 @@ export function areProductNamesCompatible(
   const matchedTokens = new Set(identityTokens(matched))
   if (expectedTokens.length === 0 || matchedTokens.size === 0) return false
 
+  const brandTokens = new Set(identityTokens(brand))
+  const presentationTokens = new Set(['lb', 'kg', 'g', 'oz', 'ml', 'l', 'servings', 'caps', 'unit'])
+  const coreTokens = expectedTokens.filter(token =>
+    !brandTokens.has(token) && !presentationTokens.has(token) && !/^\d+$/.test(token),
+  )
+  const coreMatched = coreTokens.filter(token => matchedTokens.has(token)).length
+  if (coreTokens.length > 0 && coreMatched / coreTokens.length < 0.8) return false
+  if (brandTokens.size > 0 && ![...brandTokens].some(token => matchedTokens.has(token))) return false
+
   const matchedCount = expectedTokens.filter(token => matchedTokens.has(token)).length
   if (matchedCount / expectedTokens.length < 0.6) return false
 
   const genericExtras = new Set([
     '100', 'protein', 'proteina', 'powder', 'polvo', 'supplement', 'suplemento',
     'formula', 'dietary', 'nutrition', 'nutricion', 'percent', 'porciento', 'ice', 'cream',
+    'whey', 'isolate', 'isolated', 'aislado', 'servings', 'caps', 'unit',
     ...identityTokens(allowedExtrasText),
   ])
-  return [...matchedTokens].every(token => expectedTokens.includes(token) || genericExtras.has(token))
+  return [...matchedTokens].every(token =>
+    expectedTokens.includes(token) || genericExtras.has(token) || /^\d+$/.test(token),
+  )
 }
 
 export function areFlavorNamesCompatible(expected: string, matched: string): boolean {
@@ -315,7 +328,7 @@ export function parseGeminiResearch(
       expectedIdentity.brand,
       `${expectedIdentity.reference_flavor} ${matchedPresentation}`,
     )) {
-      throw new Error(`La fuente encontrada no corresponde a ${expectedIdentity.product_name}.`)
+      throw new Error(`Gemini encontró "${matchedName || 'nombre no identificado'}", que no corresponde a "${expectedIdentity.product_name}".`)
     }
     if (!areFlavorNamesCompatible(expectedIdentity.reference_flavor, matchedFlavor)) {
       throw new Error(`La información encontrada no corresponde al sabor ${expectedIdentity.reference_flavor}.`)

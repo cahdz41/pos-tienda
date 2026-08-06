@@ -99,6 +99,50 @@ test('acepta otro producto y sabor cuando coinciden con la selección', () => {
   assert.equal(result.identity_match.matched_barcode, '748927028676')
 })
 
+test('acepta BPI Sport e ISO HD aunque la fuente use BPI Sports y añada Whey Protein', () => {
+  const result = parseGeminiResearch({
+    ...validResearch,
+    identity_match: {
+      matched: true,
+      confidence: 'high',
+      matched_name: 'BPI Sports ISO HD 100% Whey Protein Powder',
+      matched_flavor: 'Chocolate Brownie',
+      matched_presentation: '5 lb',
+      matched_barcode: '',
+    },
+    short_description: 'Proteína de suero de la línea ISO HD con una mezcla de aislado y concentrado.',
+  }, {
+    product_name: 'Bpi Sport - Iso Hd 5 Lbs',
+    brand: 'Bpi Sport',
+    reference_flavor: 'Chocolate Brownie',
+    reference_barcode: '811213020043',
+    presentation_hint: '5 Lbs',
+  })
+
+  assert.equal(result.identity_match.matched_name, 'BPI Sports ISO HD 100% Whey Protein Powder')
+})
+
+test('no confunde BPI ISO HD con la línea BPI Whey HD', () => {
+  assert.throws(
+    () => parseGeminiResearch({
+      ...validResearch,
+      identity_match: {
+        ...validResearch.identity_match,
+        matched_name: 'BPI Sports Whey HD 100% Whey Protein Powder 5 lb',
+        matched_flavor: 'Chocolate Brownie',
+        matched_barcode: '',
+      },
+    }, {
+      product_name: 'Bpi Sport - Iso Hd 5 Lbs',
+      brand: 'Bpi Sport',
+      reference_flavor: 'Chocolate Brownie',
+      reference_barcode: '811213020043',
+      presentation_hint: '5 Lbs',
+    }),
+    /no corresponde/,
+  )
+})
+
 test('rechaza un código de barras confirmado para otra variante', () => {
   assert.throws(
     () => parseGeminiResearch({
