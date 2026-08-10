@@ -14,6 +14,7 @@ import {
   referenceFlavor,
   uniqueKnownFlavors,
 } from '@/lib/productResearchInput'
+import { formatProductResearchError } from '@/lib/storeProductContent'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -103,7 +104,7 @@ export async function POST(request: NextRequest, { params }: Context) {
     )
     const researchWarnings = [...result.content.research_warnings]
     if (result.sources.length === 0) {
-      researchWarnings.push('Gemini no devolvió fuentes verificables. Agrega una fuente antes de enviar la ficha a revisión.')
+      researchWarnings.push('Gemini no devolvió fuentes verificables. La ficha puede publicarse después de que el propietario revise y apruebe manualmente la información.')
     }
     if (!result.content.identity_match.matched_barcode && input.reference_barcode) {
       researchWarnings.push('Las fuentes no permitieron confirmar el código de barras; verifica manualmente la variante elegida.')
@@ -141,7 +142,7 @@ export async function POST(request: NextRequest, { params }: Context) {
     return NextResponse.json({ content: saved, cached: false })
   } catch (error) {
     return NextResponse.json({
-      error: error instanceof Error ? error.message : 'No se pudo investigar el producto.',
+      error: formatProductResearchError(error),
       retried: false,
     }, { status: 422 })
   }

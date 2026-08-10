@@ -210,7 +210,12 @@ export default function TabFichasProductos() {
 
   async function changeStatus(status: StoreProductContentStatus) {
     if (!accessToken || !selectedId || !editableContent) return
-    if (status === 'published' && !window.confirm('¿Publicar esta ficha en la tienda y en sus ofertas?')) return
+    if (status === 'published') {
+      const sourceNotice = editableContent.research_sources.length === 0
+        ? '\n\nEsta ficha no tiene fuentes verificables. Al continuar confirmas que revisaste y apruebas manualmente la información.'
+        : ''
+      if (!window.confirm(`¿Publicar esta ficha en la tienda y en sus ofertas?${sourceNotice}`)) return
+    }
     if (status === 'draft' && editableContent.status === 'published' &&
         !window.confirm('¿Retirar la ficha enriquecida? El producto seguirá visible con su vista anterior.')) return
     setBusy('status'); setError(null); setNotice(null)
@@ -230,6 +235,13 @@ export default function TabFichasProductos() {
   const listStatus = (product: ProductSummary) => product.content?.status ?? 'missing'
   const researchTokens = totalResearchTokens(editableContent?.research_usage ?? null)
   const detailStatus = detail?.content?.status ?? 'missing'
+  const publicationHelp = editableContent?.status === 'published'
+    ? 'La ficha ya está visible en la página del producto y en sus ofertas asociadas.'
+    : editableContent?.status === 'review'
+      ? 'Revisión completada. Pulsa “Publicar ficha” para enviarla a la tienda.'
+      : dirty || !detail?.content
+        ? 'Paso 1 de 2: guarda el borrador. Después podrás continuar para publicarlo.'
+        : 'Paso 2 de 2: continúa a revisión. Enseguida aparecerá el botón verde “Publicar ficha”.'
 
   return (
     <div className="product-content-admin">
@@ -322,11 +334,17 @@ export default function TabFichasProductos() {
                 </div>
               </section>
 
-              <div style={{ position: 'sticky', bottom: 0, display: 'flex', gap: 8, flexWrap: 'wrap', padding: 12, borderRadius: 12, background: 'rgba(13,13,13,0.96)', border: '1px solid var(--border)', backdropFilter: 'blur(8px)' }}>
-                <button onClick={() => void saveDraft()} disabled={busy !== null} style={footerButton}>{busy === 'save' ? 'Guardando…' : 'Guardar borrador'}</button>
-                {editableContent.status === 'draft' && <button onClick={() => void changeStatus('review')} disabled={busy !== null || !detail.content || dirty} style={{ ...footerButton, borderColor: '#80651A', background: '#2A220B', color: '#F0B429', opacity: dirty ? 0.45 : 1 }}>Marcar para revisión</button>}
-                {editableContent.status === 'review' && <><button onClick={() => void changeStatus('draft')} disabled={busy !== null || dirty} style={{ ...footerButton, opacity: dirty ? 0.45 : 1 }}>Volver a borrador</button><button onClick={() => void changeStatus('published')} disabled={busy !== null || dirty} style={{ ...footerButton, border: 'none', background: '#4CAF50', color: '#061407', opacity: dirty ? 0.45 : 1 }}>Publicar ficha</button></>}
-                {editableContent.status === 'published' && <button onClick={() => void changeStatus('draft')} disabled={busy !== null || dirty} style={{ ...footerButton, borderColor: '#5C2020', background: '#2D1010', color: '#FF8585', opacity: dirty ? 0.45 : 1 }}>Retirar publicación</button>}
+              <div style={{ position: 'sticky', bottom: 0, padding: 12, borderRadius: 12, background: 'rgba(13,13,13,0.96)', border: '1px solid var(--border)', backdropFilter: 'blur(8px)' }}>
+                <p style={{ margin: '0 0 10px', color: editableContent.status === 'published' ? '#7BD98A' : 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>
+                  <strong style={{ color: editableContent.status === 'published' ? '#7BD98A' : '#F0B429' }}>Publicación: </strong>
+                  {publicationHelp}
+                </p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button onClick={() => void saveDraft()} disabled={busy !== null} style={footerButton}>{busy === 'save' ? 'Guardando…' : 'Guardar borrador'}</button>
+                  {editableContent.status === 'draft' && <button onClick={() => void changeStatus('review')} disabled={busy !== null || !detail.content || dirty} style={{ ...footerButton, borderColor: '#80651A', background: '#2A220B', color: '#F0B429', opacity: dirty || !detail.content ? 0.45 : 1 }}>Continuar para publicar</button>}
+                  {editableContent.status === 'review' && <><button onClick={() => void changeStatus('draft')} disabled={busy !== null || dirty} style={{ ...footerButton, opacity: dirty ? 0.45 : 1 }}>Volver a borrador</button><button onClick={() => void changeStatus('published')} disabled={busy !== null || dirty} style={{ ...footerButton, border: 'none', background: '#4CAF50', color: '#061407', opacity: dirty ? 0.45 : 1 }}>Publicar ficha</button></>}
+                  {editableContent.status === 'published' && <><a href={`/tienda/productos/${selectedId}`} target="_blank" rel="noreferrer" style={{ ...footerButton, display: 'inline-flex', alignItems: 'center', borderColor: '#265C31', background: '#102614', color: '#7BD98A', textDecoration: 'none' }}>Ver en tienda ↗</a><button onClick={() => void changeStatus('draft')} disabled={busy !== null || dirty} style={{ ...footerButton, borderColor: '#5C2020', background: '#2D1010', color: '#FF8585', opacity: dirty ? 0.45 : 1 }}>Retirar publicación</button></>}
+                </div>
               </div>
             </div>}
       </main>
@@ -372,7 +390,7 @@ function Editor({ content, onChange }: { content: StoreProductContent; onChange:
     </section>
     <section style={editorSection}><Field label="Ingredientes" value={content.ingredients} onChange={value => onChange({ ingredients: value })} textarea /><Field label="Modo de uso" value={content.directions} onChange={value => onChange({ directions: value })} textarea /></section>
     <section style={editorSection}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}><p style={editorTitle}>Fuentes y control de investigación</p>{content.research_sources.length < 10 && <button onClick={() => onChange({ research_sources: [...content.research_sources, { title: '', url: '' }] })} style={addButton}>+ Fuente</button>}</div>
-      {content.research_sources.length ? <div style={{ display: 'grid', gap: 8 }}>{content.research_sources.map((source, index) => <div key={index} className="research-source-row"><input value={source.title} onChange={event => updateSource(index, { title: event.target.value })} placeholder="Título de la fuente" style={cellStyle} /><input value={source.url} onChange={event => updateSource(index, { url: event.target.value })} placeholder="https://…" style={cellStyle} /><button onClick={() => onChange({ research_sources: content.research_sources.filter((_, itemIndex) => itemIndex !== index) })} style={removeButton}>×</button></div>)}</div> : <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 11 }}>Aún no hay fuentes. Ejecuta la investigación del producto seleccionado o agrega una fuente confiable.</p>}
+      {content.research_sources.length ? <div style={{ display: 'grid', gap: 8 }}>{content.research_sources.map((source, index) => <div key={index} className="research-source-row"><input value={source.title} onChange={event => updateSource(index, { title: event.target.value })} placeholder="Título de la fuente" style={cellStyle} /><input value={source.url} onChange={event => updateSource(index, { url: event.target.value })} placeholder="https://…" style={cellStyle} /><button onClick={() => onChange({ research_sources: content.research_sources.filter((_, itemIndex) => itemIndex !== index) })} style={removeButton}>×</button></div>)}</div> : <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 11 }}>Aún no hay fuentes. Son recomendadas, pero no obligatorias si revisas y apruebas manualmente la ficha antes de publicarla.</p>}
       {content.research_warnings.length > 0 && <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: '#2A220B', color: '#F0B429', fontSize: 11 }}>{content.research_warnings.map((warning, index) => <p key={index} style={{ margin: index ? '5px 0 0' : 0 }}>• {warning}</p>)}</div>}
       <style>{`.research-source-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(220px,2fr) 34px;gap:7px}@media(max-width:720px){.research-source-row{grid-template-columns:1fr 34px}.research-source-row input:nth-child(2){grid-column:1/2}}`}</style>
     </section>

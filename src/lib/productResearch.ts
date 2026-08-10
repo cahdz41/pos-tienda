@@ -1,18 +1,76 @@
 import 'server-only'
 
 import { createHash } from 'node:crypto'
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI, ThinkingLevel } from '@google/genai'
 import {
   parseGeminiResearch,
+  parseResearchJsonText,
   type GeminiResearchResult,
   type ResearchSource,
 } from '@/lib/storeProductContent'
 
-export const PRODUCT_RESEARCH_MODEL = 'gemini-2.5-flash'
-export const PRODUCT_RESEARCH_PROMPT_VERSION = 'catalog-general-v2'
+export const PRODUCT_RESEARCH_MODEL = 'gemini-3.5-flash'
+export const PRODUCT_RESEARCH_PROMPT_VERSION = 'catalog-general-v3'
 
-const MAX_OUTPUT_TOKENS = 3000
-const TEMPERATURE = 0.1
+const MAX_OUTPUT_TOKENS = 6000
+
+const RESEARCH_RESPONSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'identity_match',
+    'short_description',
+    'key_features',
+    'presentation',
+    'serving_size',
+    'servings_per_container',
+    'nutrition_facts',
+    'ingredients',
+    'directions',
+    'nutrition_label_candidates',
+    'research_warnings',
+  ],
+  properties: {
+    identity_match: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['matched', 'confidence', 'matched_name', 'matched_flavor', 'matched_presentation', 'matched_barcode'],
+      properties: {
+        matched: { type: 'boolean' },
+        confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+        matched_name: { type: 'string' },
+        matched_flavor: { type: 'string' },
+        matched_presentation: { type: 'string' },
+        matched_barcode: { type: 'string' },
+      },
+    },
+    short_description: { type: 'string' },
+    key_features: { type: 'array', maxItems: 6, items: { type: 'string' } },
+    presentation: { type: 'string' },
+    serving_size: { type: 'string' },
+    servings_per_container: { type: 'string' },
+    nutrition_facts: {
+      type: 'array',
+      maxItems: 40,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'amount', 'unit', 'daily_value', 'indent'],
+        properties: {
+          name: { type: 'string' },
+          amount: { type: 'string' },
+          unit: { type: 'string' },
+          daily_value: { type: ['string', 'null'] },
+          indent: { type: 'integer', minimum: 0, maximum: 2 },
+        },
+      },
+    },
+    ingredients: { type: 'string' },
+    directions: { type: 'string' },
+    nutrition_label_candidates: { type: 'array', maxItems: 6, items: { type: 'string' } },
+    research_warnings: { type: 'array', maxItems: 20, items: { type: 'string' } },
+  },
+} as const
 
 export interface ProductResearchInput {
   product_name: string
@@ -52,6 +110,7 @@ PRIORIDAD DE FUENTES:
 2. Distribuidor reconocido que muestre la etiqueta completa.
 3. Comercio reconocido que identifique exactamente producto, presentación y sabor.
 4. Marketplace solamente como respaldo y nunca para reemplazar una etiqueta oficial disponible.
+5. Usa Google Search en cada investigación para contrastar los datos con páginas actuales.
 
 REGLAS DE EXTRACCIÓN:
 1. Usa español de México.
@@ -95,20 +154,6 @@ export function buildResearchInputHash(input: ProductResearchInput): string {
   return createHash('sha256')
     .update(JSON.stringify({ promptVersion: PRODUCT_RESEARCH_PROMPT_VERSION, input }))
     .digest('hex')
-}
-
-function extractJson(text: string): unknown {
-  const firstBrace = text.indexOf('{')
-  const lastBrace = text.lastIndexOf('}')
-  if (firstBrace < 0 || lastBrace <= firstBrace) {
-    throw new Error('Gemini no devolvió JSON válido. No se realizó un segundo consumo.')
-  }
-
-  try {
-    return JSON.parse(text.slice(firstBrace, lastBrace + 1))
-  } catch {
-    throw new Error('No se pudo interpretar la respuesta de Gemini. No se realizó un segundo consumo.')
-  }
 }
 
 function extractSources(response: unknown): ResearchSource[] {
@@ -182,13 +227,19 @@ export async function researchProduct(input: ProductResearchInput): Promise<Prod
       contents: [{ role: 'user', parts: [{ text: `Investiga este único producto:\n${JSON.stringify(input)}` }] }],
       config: {
         systemInstruction: SYSTEM_PROMPT,
-        temperature: TEMPERATURE,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        responseMimeType: 'application/json',
+        responseJsonSchema: RESEARCH_RESPONSE_SCHEMA,
         tools: [{ googleSearch: {} }],
       },
     })
 
-    const content = parseGeminiResearch(extractJson(response.text ?? ''), input)
+    const finishReason = response.candidates?.[0]?.finishReason ?? ''
+    const content = parseGeminiResearch(
+      parseResearchJsonText(response.text ?? '', finishReason),
+      input,
+    )
     const sources = extractSources(response)
     return {
       content,
