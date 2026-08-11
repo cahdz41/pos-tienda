@@ -7,9 +7,12 @@ import {
   canTransitionContentStatus,
   formatProductResearchError,
   isPresentationCompatible,
+  IdentityConfirmationRequiredError,
   parseEditableContent,
   parseGeminiResearch,
   parseResearchJsonText,
+  PresentationMismatchError,
+  ProductNameMismatchError,
   validateContentForReview,
 } from '../src/lib/storeProductContent.ts'
 
@@ -61,24 +64,29 @@ test('rechaza líneas de producto similares', () => {
   )
 })
 
-test('rechaza sabores diferentes a Vainilla', () => {
-  assert.throws(
-    () => parseGeminiResearch({
-      ...validResearch,
-      identity_match: { ...validResearch.identity_match, matched_flavor: 'Triple Chocolate' },
-    }, mutantIdentity),
-    /Vainilla/,
-  )
+test('el sabor nunca bloquea la identidad del producto', () => {
+  const result = parseGeminiResearch({
+    ...validResearch,
+    identity_match: { ...validResearch.identity_match, matched_flavor: 'Triple Chocolate' },
+  }, mutantIdentity)
+  assert.match(result.research_warnings.at(-1), /sabor no determina la identidad/)
 })
 
-test('rechaza el sabor de referencia dentro de la descripción principal', () => {
-  assert.throws(
-    () => parseGeminiResearch({
-      ...validResearch,
-      short_description: 'Proteína de suero sabor Vainilla Ice Cream con 22 g de proteína.',
-    }, mutantIdentity),
-    /descripción principal debe ser general/,
-  )
+test('una mención de sabor en la descripción genera advertencia y no un fallo', () => {
+  const result = parseGeminiResearch({
+    ...validResearch,
+    short_description: 'Proteína de suero sabor Vainilla Ice Cream con 22 g de proteína.',
+  }, mutantIdentity)
+  assert.match(result.research_warnings.at(-1), /descripción principal menciona el sabor/)
+})
+
+test('acepta Cappuccino aunque el inventario diga Capupchino', () => {
+  const result = parseGeminiResearch({
+    ...validResearch,
+    identity_match: { ...validResearch.identity_match, matched_flavor: 'Cappuccino' },
+  }, { ...mutantIdentity, reference_flavor: 'Capupchino' })
+  assert.equal(result.identity_match.matched_flavor, 'Cappuccino')
+  assert.match(result.research_warnings.at(-1), /sabor no determina la identidad/)
 })
 
 test('acepta otro producto y sabor cuando coinciden con la selección', () => {
@@ -102,6 +110,70 @@ test('acepta otro producto y sabor cuando coinciden con la selección', () => {
   })
 
   assert.equal(result.identity_match.matched_barcode, '748927028676')
+})
+
+test('reconoce siglas de marca y una errata menor en el nombre del inventario', () => {
+  const result = parseGeminiResearch({
+    ...validResearch,
+    identity_match: {
+      matched: true,
+      confidence: 'high',
+      matched_name: 'Optimum Nutrition Gold Standard 100% Whey Protein Powder, Extreme Milk Chocolate',
+      matched_flavor: 'Extreme Milk Chocolate',
+      matched_presentation: '5 lb',
+      matched_barcode: '',
+    },
+    short_description: 'Proteína de suero de la línea Gold Standard 100% Whey.',
+  }, {
+    product_name: 'ON - Gold Standar 100% Whey 5 LBS',
+    brand: 'ON',
+    reference_flavor: 'Extreme Milk Chocolate',
+    reference_barcode: '',
+    presentation_hint: '5 LBS',
+  })
+
+  assert.equal(result.identity_match.matched_name, 'Optimum Nutrition Gold Standard 100% Whey Protein Powder, Extreme Milk Chocolate')
+})
+
+test('no usa las siglas ON para aceptar otra línea de Optimum Nutrition', () => {
+  assert.equal(areProductNamesCompatible(
+    'ON - Gold Standar 100% Whey 5 LBS',
+    'Optimum Nutrition Gold Standard 100% Casein',
+    'ON',
+    '5 lb',
+  ), false)
+})
+
+test('conserva una coincidencia dudosa para confirmación manual sin segunda investigación', () => {
+  const candidate = {
+    ...validResearch,
+    identity_match: {
+      matched: true,
+      confidence: 'high',
+      matched_name: 'MuscleMeds Carnivor Bioengineered Beef Protein Isolate',
+      matched_flavor: 'Chocolate',
+      matched_presentation: '4 lb',
+      matched_barcode: '',
+    },
+    short_description: 'Proteína aislada de res de la línea Carnivor.',
+  }
+  const identity = {
+    product_name: 'Musclemeds - Carnivor 4 Lbs',
+    brand: 'Musclemeds',
+    reference_flavor: 'Chocolate',
+    reference_barcode: '',
+    presentation_hint: '4 Lbs',
+  }
+
+  assert.throws(() => parseGeminiResearch(candidate, identity), ProductNameMismatchError)
+  const pending = parseGeminiResearch(candidate, identity, { allow_product_name_mismatch: true })
+  assert.equal(pending.identity_match.matched_name, candidate.identity_match.matched_name)
+
+  const confirmed = parseGeminiResearch(candidate, identity, {
+    allow_product_name_mismatch: true,
+    record_manual_identity_confirmation: true,
+  })
+  assert.match(confirmed.research_warnings.at(-1), /confirmó manualmente/)
 })
 
 test('acepta BPI Sport e ISO HD aunque la fuente use BPI Sports y añada Whey Protein', () => {
@@ -191,6 +263,56 @@ test('no confunde Nitro-Tech Whey Gold con otra línea Nitro-Tech', () => {
   ), false)
 })
 
+test('acepta el nombre canónico aunque el inventario agregue color y porciones', () => {
+  assert.equal(areProductNamesCompatible(
+    'Insane Labz - Psychotic Rojo 35serv',
+    'Insane Labz Psychotic',
+    'Insane Labz',
+    '35 servings',
+  ), true)
+
+  const result = parseGeminiResearch({
+    ...validResearch,
+    identity_match: {
+      ...validResearch.identity_match,
+      matched_name: 'Insane Labz Psychotic',
+      matched_flavor: 'Fruit Punch',
+      matched_presentation: '35 servings',
+      matched_barcode: '',
+    },
+    short_description: 'Preentreno de la línea Psychotic de Insane Labz.',
+  }, {
+    product_name: 'Insane Labz - Psychotic Rojo 35serv',
+    brand: 'Insane Labz',
+    reference_flavor: 'Fruit Punch',
+    reference_barcode: '',
+    presentation_hint: '35serv',
+  })
+
+  assert.equal(result.identity_match.matched_name, 'Insane Labz Psychotic')
+})
+
+test('sigue rechazando otra edición y coincidencias parciales de la marca', () => {
+  assert.equal(areProductNamesCompatible(
+    'Insane Labz - Psychotic Rojo 35serv',
+    'Insane Labz Psychotic Gold',
+    'Insane Labz',
+    '35 servings',
+  ), false)
+  assert.equal(areProductNamesCompatible(
+    'Insane Labz - Psychotic Rojo 35serv',
+    'Another Labz Psychotic',
+    'Insane Labz',
+    '35 servings',
+  ), false)
+  assert.equal(areProductNamesCompatible(
+    'Insane Labz - Psychotic Rojo 35serv',
+    'InsaneLabz Psychotic',
+    'Insane Labz',
+    '35 servings',
+  ), true)
+})
+
 test('acepta nombres comerciales completos para sabores Reese\'s y Hershey\'s', () => {
   assert.equal(areFlavorNamesCompatible('Reeses', "REESE'S Peanut Butter & Chocolate"), true)
   assert.equal(areFlavorNamesCompatible('Hersheys', "HERSHEY'S Milk Chocolate"), true)
@@ -231,6 +353,7 @@ test('convierte errores 400 de Gemini en un mensaje útil', () => {
 test('acepta 4.9 lb o 2,208 g como redondeo comercial de 5 lb', () => {
   assert.equal(isPresentationCompatible('5 Lbs', '4.9 lbs (2,208 g)'), true)
   assert.equal(isPresentationCompatible('5 Lbs', '2.208 kg'), true)
+  assert.equal(isPresentationCompatible('4 Lbs', '3.7 lbs (1680 g)'), true)
 })
 
 test('acepta 5.85 lb como la presentación comercial de 5 lb y conserva el peso real', () => {
@@ -264,6 +387,23 @@ test('rechaza presentaciones realmente distintas', () => {
   assert.equal(isPresentationCompatible('5 Lbs', '2 kg'), false)
 })
 
+test('conserva una presentación dudosa para que el propietario pueda confirmarla', () => {
+  const candidate = {
+    ...validResearch,
+    identity_match: {
+      ...validResearch.identity_match,
+      matched_presentation: '2 lb',
+    },
+  }
+
+  assert.throws(() => parseGeminiResearch(candidate, mutantIdentity), PresentationMismatchError)
+  const confirmed = parseGeminiResearch(candidate, mutantIdentity, {
+    allow_presentation_mismatch: true,
+    record_manual_identity_confirmation: true,
+  })
+  assert.match(confirmed.research_warnings.at(-1), /presentación.*confirmó|confirmó.*presentación/i)
+})
+
 test('rechaza un código de barras confirmado para otra variante', () => {
   assert.throws(
     () => parseGeminiResearch({
@@ -272,6 +412,38 @@ test('rechaza un código de barras confirmado para otra variante', () => {
     }, mutantIdentity),
     /código de barras/,
   )
+})
+
+test('una identidad incierta se conserva como coincidencia confirmable', () => {
+  const candidate = {
+    ...validResearch,
+    identity_match: { ...validResearch.identity_match, matched: false, confidence: 'low' },
+  }
+  assert.throws(() => parseGeminiResearch(candidate, mutantIdentity), IdentityConfirmationRequiredError)
+  const pending = parseGeminiResearch(candidate, mutantIdentity, { allow_unconfirmed_identity: true })
+  assert.equal(pending.identity_match.matched, false)
+})
+
+test('usa el código de barras exacto como ancla aunque la fuente abrevie la marca', () => {
+  const result = parseGeminiResearch({
+    ...validResearch,
+    identity_match: {
+      ...validResearch.identity_match,
+      matched_name: 'Psychotic Pre-Workout',
+      matched_flavor: 'Fruit Punch',
+      matched_presentation: '35 servings',
+      matched_barcode: '850031700123',
+    },
+    short_description: 'Preentreno de la línea Psychotic.',
+  }, {
+    product_name: 'Insane Labz - Psychotic Rojo 35serv',
+    brand: 'Insane Labz',
+    reference_flavor: 'Fruit Punch',
+    reference_barcode: '850031700123',
+    presentation_hint: '35serv',
+  })
+
+  assert.equal(result.identity_match.matched_barcode, '850031700123')
 })
 
 test('limpia y limita el contenido editable', () => {
@@ -303,8 +475,28 @@ test('limpia y limita el contenido editable', () => {
 
 test('valida campos necesarios antes de revisión sin exigir una fuente', () => {
   const missing = validateContentForReview({ short_description: 'Lista' })
-  assert.ok(missing.includes('Tabla nutrimental completa'))
+  assert.ok(missing.includes('Tabla nutrimental con al menos una fila válida'))
   assert.equal(missing.includes('Al menos una fuente'), false)
+})
+
+test('acepta una sola fila nutrimental válida para mezclas propietarias', () => {
+  const missing = validateContentForReview({
+    nutrition_facts: [
+      { name: 'Psychotic Blend', amount: '4459', unit: 'mg', daily_value: null, indent: 0 },
+    ],
+  })
+
+  assert.equal(missing.includes('Tabla nutrimental con al menos una fila válida'), false)
+})
+
+test('rechaza filas nutrimentales vacías aunque existan en el arreglo', () => {
+  const missing = validateContentForReview({
+    nutrition_facts: [
+      { name: '', amount: '', unit: 'mg', daily_value: null, indent: 0 },
+    ],
+  })
+
+  assert.ok(missing.includes('Tabla nutrimental con al menos una fila válida'))
 })
 
 test('solo permite las transiciones acordadas', () => {

@@ -88,6 +88,26 @@ export interface ResearchIdentityExpectation {
   presentation_hint: string
 }
 
+export interface GeminiResearchParseOptions {
+  allow_unconfirmed_identity?: boolean
+  allow_product_name_mismatch?: boolean
+  allow_presentation_mismatch?: boolean
+  allow_barcode_mismatch?: boolean
+  record_manual_identity_confirmation?: boolean
+}
+
+export class IdentityConfirmationRequiredError extends Error {
+  readonly code: string = 'IDENTITY_CONFIRMATION_REQUIRED'
+}
+
+export class ProductNameMismatchError extends IdentityConfirmationRequiredError {
+  readonly code = 'PRODUCT_NAME_MISMATCH'
+}
+
+export class PresentationMismatchError extends IdentityConfirmationRequiredError {
+  readonly code = 'PRESENTATION_MISMATCH'
+}
+
 export function parseResearchJsonText(text: string, finishReason = ''): unknown {
   if (finishReason === 'MAX_TOKENS') {
     throw new Error('Gemini agotó el límite de salida antes de completar la ficha. No se realizó un segundo consumo.')
@@ -265,49 +285,218 @@ function mergeAdjacentCompoundTokens(tokens: string[], referenceTokens: Set<stri
   return merged
 }
 
+const PRESENTATION_IDENTITY_TOKENS = new Set([
+  'lb', 'kg', 'g', 'oz', 'ml', 'l', 'servings', 'caps', 'unit',
+])
+
+const NON_LINE_IDENTITY_TOKENS = new Set([
+  '100', 'powder', 'polvo', 'supplement', 'suplemento', 'formula', 'dietary',
+  'nutrition', 'nutricion', 'percent', 'porciento', 'ice', 'cream', 'pre', 'workout',
+])
+
+const CATEGORY_DESCRIPTOR_TOKENS = new Set([
+  'protein', 'proteina', 'whey', 'isolate', 'isolated', 'aislado',
+])
+
+function identityTokensMatch(expected: string, matched: string): boolean {
+  if (expected === matched) return true
+  if (Math.min(expected.length, matched.length) < 5) return false
+  if (Math.abs(expected.length - matched.length) > 1) return false
+
+  let expectedIndex = 0
+  let matchedIndex = 0
+  let edits = 0
+  while (expectedIndex < expected.length && matchedIndex < matched.length) {
+    if (expected[expectedIndex] === matched[matchedIndex]) {
+      expectedIndex += 1
+      matchedIndex += 1
+      continue
+    }
+    edits += 1
+    if (edits > 1) return false
+    if (expected.length > matched.length) expectedIndex += 1
+    else if (matched.length > expected.length) matchedIndex += 1
+    else {
+      expectedIndex += 1
+      matchedIndex += 1
+    }
+  }
+  if (expectedIndex < expected.length || matchedIndex < matched.length) edits += 1
+  return edits <= 1
+}
+
+function matchIdentityTokenGroups(expectedTokens: string[], matchedTokens: string[]) {
+  const usedMatched = new Set<number>()
+  const shared: string[] = []
+
+  for (const expectedToken of expectedTokens) {
+    let matchedIndex = matchedTokens.findIndex((matchedToken, index) =>
+      !usedMatched.has(index) && expectedToken === matchedToken,
+    )
+    if (matchedIndex < 0) {
+      matchedIndex = matchedTokens.findIndex((matchedToken, index) =>
+        !usedMatched.has(index) && identityTokensMatch(expectedToken, matchedToken),
+      )
+    }
+    if (matchedIndex < 0) continue
+    usedMatched.add(matchedIndex)
+    shared.push(expectedToken)
+  }
+
+  return {
+    shared,
+    unexpectedMatched: matchedTokens.filter((_, index) => !usedMatched.has(index)),
+  }
+}
+
+function resolveBrandIdentity(brand: string, matchedTokens: string[]) {
+  const rawBrandTokens = identityTokens(brand)
+  const expectedBrandTokens = mergeAdjacentCompoundTokens(rawBrandTokens, new Set(matchedTokens))
+  if (expectedBrandTokens.length === 0) {
+    return { compatible: true, expectedBrandTokens: new Set<string>(), matchedBrandTokens: new Set<string>() }
+  }
+
+  const directMatch = matchIdentityTokenGroups(expectedBrandTokens, matchedTokens)
+  if (directMatch.shared.length === expectedBrandTokens.length) {
+    const matchedBrandTokens = matchedTokens.filter(token =>
+      expectedBrandTokens.some(expectedToken => identityTokensMatch(expectedToken, token)),
+    )
+    return {
+      compatible: true,
+      expectedBrandTokens: new Set(expectedBrandTokens),
+      matchedBrandTokens: new Set(matchedBrandTokens),
+    }
+  }
+
+  const compactBrand = rawBrandTokens.join('')
+  const compactMatch = matchedTokens.find(token => identityTokensMatch(compactBrand, token))
+  if (compactMatch) {
+    return {
+      compatible: true,
+      expectedBrandTokens: new Set([compactBrand]),
+      matchedBrandTokens: new Set([compactMatch]),
+    }
+  }
+
+  const rawBrand = brand.replace(/[^A-Za-z0-9]/g, '')
+  const isInventoryAcronym = /^[A-Z0-9]{2,6}$/.test(rawBrand)
+  if (isInventoryAcronym && rawBrandTokens.length === 1) {
+    const acronym = rawBrandTokens[0]
+    for (let index = 0; index <= matchedTokens.length - acronym.length; index += 1) {
+      const expansion = matchedTokens.slice(index, index + acronym.length)
+      if (expansion.map(token => token[0]).join('') === acronym) {
+        return {
+          compatible: true,
+          expectedBrandTokens: new Set(rawBrandTokens),
+          matchedBrandTokens: new Set(expansion),
+        }
+      }
+    }
+  }
+
+  if (rawBrandTokens.length > 1) {
+    const acronym = rawBrandTokens.map(token => token[0]).join('')
+    const acronymMatch = matchedTokens.find(token => token === acronym)
+    if (acronymMatch) {
+      return {
+        compatible: true,
+        expectedBrandTokens: new Set(expectedBrandTokens),
+        matchedBrandTokens: new Set([acronymMatch]),
+      }
+    }
+  }
+
+  return {
+    compatible: false,
+    expectedBrandTokens: new Set(expectedBrandTokens),
+    matchedBrandTokens: new Set<string>(),
+  }
+}
+
+function productNameParts(
+  expected: string,
+  matched: string,
+  brand: string,
+  allowedExtrasText: string,
+) {
+  const rawExpectedTokens = identityTokens(`${brand} ${expected}`)
+  const rawMatchedTokens = identityTokens(matched)
+  const expectedTokens = mergeAdjacentCompoundTokens(rawExpectedTokens, new Set(rawMatchedTokens))
+  const matchedTokens = mergeAdjacentCompoundTokens(rawMatchedTokens, new Set(rawExpectedTokens))
+  const brandIdentity = resolveBrandIdentity(brand, matchedTokens)
+  const allowedAttributeTokens = identityTokens(allowedExtrasText)
+  const isExpectedLineToken = (token: string) =>
+    !brandIdentity.expectedBrandTokens.has(token) &&
+    !PRESENTATION_IDENTITY_TOKENS.has(token) &&
+    !NON_LINE_IDENTITY_TOKENS.has(token) &&
+    !allowedAttributeTokens.some(attribute => identityTokensMatch(attribute, token)) &&
+    !/^\d+$/.test(token)
+  const isMatchedLineToken = (token: string) =>
+    !brandIdentity.matchedBrandTokens.has(token) &&
+    !PRESENTATION_IDENTITY_TOKENS.has(token) &&
+    !NON_LINE_IDENTITY_TOKENS.has(token) &&
+    !allowedAttributeTokens.some(attribute => identityTokensMatch(attribute, token)) &&
+    !/^\d+$/.test(token)
+
+  return {
+    brandCompatible: brandIdentity.compatible,
+    expectedLineTokens: [...new Set(expectedTokens.filter(isExpectedLineToken))],
+    matchedLineTokens: [...new Set(matchedTokens.filter(isMatchedLineToken))],
+  }
+}
+
+function hasExplicitProductNameConflict(
+  expected: string,
+  matched: string,
+  brand: string,
+  allowedExtrasText: string,
+): boolean {
+  const { expectedLineTokens, matchedLineTokens } = productNameParts(
+    expected,
+    matched,
+    brand,
+    allowedExtrasText,
+  )
+  if (expectedLineTokens.length === 0 || matchedLineTokens.length === 0) return false
+
+  const { shared, unexpectedMatched } = matchIdentityTokenGroups(expectedLineTokens, matchedLineTokens)
+  const conflictingMatched = unexpectedMatched.filter(token => !CATEGORY_DESCRIPTOR_TOKENS.has(token))
+  const expectedCoverage = shared.length / expectedLineTokens.length
+
+  return conflictingMatched.length > 0 || (unexpectedMatched.length > 0 && expectedCoverage < 0.8)
+}
+
 export function areProductNamesCompatible(
   expected: string,
   matched: string,
   brand = '',
   allowedExtrasText = '',
 ): boolean {
-  const rawExpectedTokens = identityTokens(`${brand} ${expected}`)
-  const rawMatchedTokens = identityTokens(matched)
-  const expectedTokens = mergeAdjacentCompoundTokens(rawExpectedTokens, new Set(rawMatchedTokens))
-  const matchedTokens = new Set(mergeAdjacentCompoundTokens(rawMatchedTokens, new Set(rawExpectedTokens)))
-  if (expectedTokens.length === 0 || matchedTokens.size === 0) return false
+  const {
+    brandCompatible,
+    expectedLineTokens,
+    matchedLineTokens,
+  } = productNameParts(expected, matched, brand, allowedExtrasText)
 
-  const brandTokens = new Set(identityTokens(brand))
-  const presentationTokens = new Set(['lb', 'kg', 'g', 'oz', 'ml', 'l', 'servings', 'caps', 'unit'])
-  const optionalExpectedTokens = new Set<string>()
-  if (expectedTokens.includes('protein') && matchedTokens.has('protein')) {
-    optionalExpectedTokens.add('pro')
-  }
-  const coreTokens = expectedTokens.filter(token =>
-    !brandTokens.has(token) &&
-    !presentationTokens.has(token) &&
-    !optionalExpectedTokens.has(token) &&
-    !/^\d+$/.test(token),
-  )
-  const coreMatched = coreTokens.filter(token => matchedTokens.has(token)).length
-  if (coreTokens.length > 0 && coreMatched / coreTokens.length < 0.8) return false
-  if (brandTokens.size > 0 && ![...brandTokens].some(token => matchedTokens.has(token))) return false
+  if (expectedLineTokens.length === 0 || matchedLineTokens.length === 0) return false
 
-  const coverageTokens = expectedTokens.filter(token =>
-    !presentationTokens.has(token) && !optionalExpectedTokens.has(token) && !/^\d+$/.test(token),
-  )
-  const matchedCount = coverageTokens.filter(token => matchedTokens.has(token)).length
-  if (coverageTokens.length > 0 && matchedCount / coverageTokens.length < 0.6) return false
+  // A multi-word brand is one identity signal. Matching only "Nutrition" or
+  // "Labs" is not enough to claim the same manufacturer.
+  if (!brandCompatible) return false
 
-  const genericExtras = new Set([
-    '100', 'protein', 'proteina', 'powder', 'polvo', 'supplement', 'suplemento',
-    'formula', 'dietary', 'nutrition', 'nutricion', 'percent', 'porciento', 'ice', 'cream',
-    'whey', 'isolate', 'isolated', 'aislado', 'servings', 'caps', 'unit',
-    ...identityTokens(allowedExtrasText),
-  ])
-  return [...matchedTokens].every(token =>
-    expectedTokens.includes(token) || genericExtras.has(token) || /^\d+$/.test(token),
-  )
+  const { shared, unexpectedMatched } = matchIdentityTokenGroups(expectedLineTokens, matchedLineTokens)
+  const conflictingMatched = unexpectedMatched.filter(token => !CATEGORY_DESCRIPTOR_TOKENS.has(token))
+
+  // Extra line words in the web result are dangerous: "Hardcore", "Ripped"
+  // or another edition name can identify a genuinely different formula.
+  // Conversely, the POS name may legitimately append one internal qualifier
+  // (colour, edition or package nickname) that the canonical name omits.
+  if (conflictingMatched.length > 0 || shared.length === 0) return false
+
+  const expectedCoverage = shared.length / expectedLineTokens.length
+  const matchedCoverage = shared.length / matchedLineTokens.length
+  if (unexpectedMatched.length > 0 && expectedCoverage < 0.8) return false
+  return matchedCoverage >= 0.5 && expectedCoverage >= 0.5
 }
 
 export function areFlavorNamesCompatible(expected: string, matched: string): boolean {
@@ -362,6 +551,10 @@ function comparePresentations(expected: string, matched: string): PresentationCo
     if (expectedWeights.some(expectedWeight =>
       matchedWeights.some(matchedWeight => Math.abs(expectedWeight - matchedWeight) / expectedWeight <= 0.05),
     )) return 'exact'
+
+    if (expectedWeights.some(expectedWeight =>
+      matchedWeights.some(matchedWeight => Math.abs(expectedWeight - matchedWeight) / expectedWeight <= 0.10),
+    )) return 'commercial-size'
 
     const fivePoundsInGrams = 5 * 453.59237
     const expectedIsFivePoundClass = expectedWeights.some(weight =>
@@ -424,6 +617,7 @@ export function parseEditableContent(value: unknown): EditableStoreProductConten
 export function parseGeminiResearch(
   value: unknown,
   expectedIdentity?: ResearchIdentityExpectation,
+  options: GeminiResearchParseOptions = {},
 ): GeminiResearchResult {
   if (!isRecord(value)) throw new Error('Gemini no devolvió un objeto JSON.')
 
@@ -444,35 +638,71 @@ export function parseGeminiResearch(
   const matchedFlavor = cleanText(value.identity_match.matched_flavor, 80)
   const matchedPresentation = cleanText(value.identity_match.matched_presentation, 120)
   const matchedBarcode = cleanText(value.identity_match.matched_barcode, 100).replace(/\s/g, '')
-  if (value.identity_match.matched !== true) throw new Error('Gemini no confirmó la identidad del producto.')
-  if (confidence === 'low') throw new Error('Gemini devolvió una coincidencia de identidad con confianza baja.')
+  let identityUnconfirmed = false
+  if (value.identity_match.matched !== true || confidence === 'low') {
+    if (!options.allow_unconfirmed_identity) {
+      throw new IdentityConfirmationRequiredError(
+        value.identity_match.matched !== true
+          ? 'Gemini no confirmó la identidad del producto.'
+          : 'Gemini devolvió una coincidencia de identidad con confianza baja.',
+      )
+    }
+    identityUnconfirmed = true
+  }
 
   let presentationCompatibility: PresentationCompatibility = 'exact'
+  let productNameMismatchConfirmed = false
+  let presentationMismatchConfirmed = false
+  let barcodeMismatchConfirmed = false
+  let flavorDiffers = false
   if (expectedIdentity) {
-    if (!areProductNamesCompatible(
+    const expectedBarcode = expectedIdentity.reference_barcode.replace(/\s/g, '')
+    const barcodeMatches = Boolean(matchedBarcode && expectedBarcode && matchedBarcode === expectedBarcode)
+    const allowedNameAttributes = `${expectedIdentity.reference_flavor} ${expectedIdentity.presentation_hint} ${matchedPresentation}`
+    if (matchedBarcode && expectedBarcode && !barcodeMatches) {
+      if (!options.allow_barcode_mismatch) {
+        throw new IdentityConfirmationRequiredError('El código de barras encontrado pertenece a otra variante.')
+      }
+      barcodeMismatchConfirmed = true
+    }
+    const productNameMatches = areProductNamesCompatible(
       expectedIdentity.product_name,
       matchedName,
       expectedIdentity.brand,
-      `${expectedIdentity.reference_flavor} ${matchedPresentation}`,
-    )) {
-      throw new Error(`Gemini encontró "${matchedName || 'nombre no identificado'}", que no corresponde a "${expectedIdentity.product_name}".`)
+      allowedNameAttributes,
+    )
+    const nameHasConflict = hasExplicitProductNameConflict(
+      expectedIdentity.product_name,
+      matchedName,
+      expectedIdentity.brand,
+      allowedNameAttributes,
+    )
+    if (!productNameMatches && (!barcodeMatches || nameHasConflict)) {
+      if (!options.allow_product_name_mismatch) {
+        throw new ProductNameMismatchError(
+          `Gemini encontró "${matchedName || 'nombre no identificado'}", que no corresponde a "${expectedIdentity.product_name}".`,
+        )
+      }
+      productNameMismatchConfirmed = true
     }
     if (!areFlavorNamesCompatible(expectedIdentity.reference_flavor, matchedFlavor)) {
-      throw new Error(`Gemini encontró el sabor "${matchedFlavor || 'no identificado'}", que no corresponde a "${expectedIdentity.reference_flavor}".`)
+      flavorDiffers = true
     }
     presentationCompatibility = comparePresentations(expectedIdentity.presentation_hint, matchedPresentation)
     if (presentationCompatibility === 'mismatch') {
-      throw new Error(`La presentación encontrada, "${matchedPresentation || 'no identificada'}", no coincide con ${expectedIdentity.presentation_hint}.`)
-    }
-    if (matchedBarcode && expectedIdentity.reference_barcode && matchedBarcode !== expectedIdentity.reference_barcode.replace(/\s/g, '')) {
-      throw new Error('El código de barras encontrado pertenece a otra variante.')
+      if (!options.allow_presentation_mismatch) {
+        throw new PresentationMismatchError(
+          `La presentación encontrada, "${matchedPresentation || 'no identificada'}", no coincide con ${expectedIdentity.presentation_hint}.`,
+        )
+      }
+      presentationMismatchConfirmed = true
     }
   }
 
   const shortDescription = cleanText(value.short_description, 1200)
-  if (expectedIdentity && descriptionMentionsReferenceFlavor(shortDescription, expectedIdentity.reference_flavor)) {
-    throw new Error('La descripción principal debe ser general y no mencionar el sabor de referencia.')
-  }
+  const descriptionIncludesReferenceFlavor = Boolean(
+    expectedIdentity && descriptionMentionsReferenceFlavor(shortDescription, expectedIdentity.reference_flavor),
+  )
 
   const researchWarnings = cleanTextArray(value.research_warnings, 20, 500)
   if (presentationCompatibility === 'commercial-size') {
@@ -480,10 +710,36 @@ export function parseGeminiResearch(
       `La fuente identifica la presentación como ${matchedPresentation}; se aceptó como equivalente comercial de ${expectedIdentity?.presentation_hint}.`,
     )
   }
+  if (flavorDiffers && expectedIdentity) {
+    researchWarnings.push(
+      `Gemini encontró el sabor "${matchedFlavor || 'no identificado'}" en lugar de "${expectedIdentity.reference_flavor}"; se conservó porque el sabor no determina la identidad del producto.`,
+    )
+  }
+  if (descriptionIncludesReferenceFlavor) {
+    researchWarnings.push('La descripción principal menciona el sabor de referencia; revísala si deseas que sea general para todas las variantes.')
+  }
+  if (productNameMismatchConfirmed && options.record_manual_identity_confirmation && expectedIdentity) {
+    researchWarnings.push(
+      `El propietario confirmó manualmente que "${matchedName}" corresponde a "${expectedIdentity.product_name}".`,
+    )
+  }
+  if (presentationMismatchConfirmed && options.record_manual_identity_confirmation && expectedIdentity) {
+    researchWarnings.push(
+      `El propietario confirmó manualmente que la presentación "${matchedPresentation}" corresponde a "${expectedIdentity.presentation_hint}".`,
+    )
+  }
+  if (identityUnconfirmed && options.record_manual_identity_confirmation) {
+    researchWarnings.push('El propietario confirmó manualmente una coincidencia que Gemini marcó con identidad o confianza insuficiente.')
+  }
+  if (barcodeMismatchConfirmed && options.record_manual_identity_confirmation && expectedIdentity) {
+    researchWarnings.push(
+      `El propietario confirmó manualmente la coincidencia aunque el código "${matchedBarcode}" difiere de "${expectedIdentity.reference_barcode}".`,
+    )
+  }
 
   return {
     identity_match: {
-      matched: true,
+      matched: value.identity_match.matched === true,
       confidence,
       matched_name: matchedName,
       matched_flavor: matchedFlavor,
@@ -514,7 +770,13 @@ export function validateContentForReview(content: Partial<StoreProductContent>):
   if (!content.presentation?.trim()) missing.push('Presentación')
   if (!content.serving_size?.trim()) missing.push('Tamaño de porción')
   if (!content.servings_per_container?.trim()) missing.push('Número de porciones')
-  if (!content.nutrition_facts || content.nutrition_facts.length < 4) missing.push('Tabla nutrimental completa')
+  // El número de filas depende del tipo de suplemento. Una proteína suele
+  // declarar varios nutrimentos, mientras que un preentreno con mezcla
+  // propietaria puede tener una sola fila legítima con el total de la mezcla.
+  // La completitud se revisa por la validez de la fila, no por un mínimo fijo.
+  if (normalizeNutritionFacts(content.nutrition_facts).length === 0) {
+    missing.push('Tabla nutrimental con al menos una fila válida')
+  }
   if (!content.ingredients?.trim()) missing.push('Ingredientes')
   if (!content.directions?.trim()) missing.push('Modo de uso')
   return missing

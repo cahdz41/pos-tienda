@@ -32,6 +32,22 @@ interface ProductDetailResponse {
   metrics: { view: number; flavor_select: number; add_to_cart: number }
 }
 
+interface IdentityConfirmationCandidate {
+  id: string
+  identity: {
+    matched_name: string
+    matched_flavor: string
+    matched_presentation: string
+    matched_barcode: string
+  }
+  research: unknown
+}
+
+interface IdentityConfirmationResponse {
+  requires_identity_confirmation: true
+  candidates: IdentityConfirmationCandidate[]
+}
+
 const STATUS_LABEL: Record<'missing' | StoreProductContentStatus, string> = {
   missing: 'Sin contenido', draft: 'Borrador', review: 'Listo para revisar', published: 'Publicado',
 }
@@ -78,6 +94,9 @@ export default function TabFichasProductos() {
   const [notice, setNotice] = useState<string | null>(null)
   const [preview, setPreview] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [identityCandidates, setIdentityCandidates] = useState<IdentityConfirmationCandidate[]>([])
+  const [selectedIdentityCandidateId, setSelectedIdentityCandidateId] = useState('')
+  const [rejectedIdentityNames, setRejectedIdentityNames] = useState<string[]>([])
 
   const loadProducts = useCallback(async (search: string) => {
     if (!accessToken) return
@@ -105,6 +124,9 @@ export default function TabFichasProductos() {
     setLoadingDetail(true)
     setError(null)
     setNotice(null)
+    setIdentityCandidates([])
+    setSelectedIdentityCandidateId('')
+    setRejectedIdentityNames([])
     try {
       const response = await fetch(`/api/store-content/products/${productId}`, {
         headers: authHeaders(accessToken), cache: 'no-store',
@@ -191,21 +213,124 @@ export default function TabFichasProductos() {
     if (dirty && !window.confirm('Hay cambios sin guardar que serán reemplazados por la investigación. ¿Continuar?')) return
     if (!force && editableContent.researched_at && !window.confirm('Se reutilizará la caché si coincide producto, variante y versión. Si algo cambió, se hará una llamada a Gemini y la ficha regresará a borrador. ¿Continuar?')) return
     if (force && !window.confirm('Se hará una nueva llamada a Gemini y la ficha regresará a borrador. ¿Continuar?')) return
-    setBusy('research'); setError(null); setNotice(null)
+    setBusy('research'); setError(null); setNotice(null); setIdentityCandidates([]); setSelectedIdentityCandidateId(''); setRejectedIdentityNames([])
     try {
       const response = await fetch(`/api/store-content/products/${selectedId}/research`, {
         method: 'POST', headers: authHeaders(accessToken, true),
         body: JSON.stringify({ force, reference_variant_id: editableContent.reference_variant_id }),
       })
-      const body = await readResponse<{ content: StoreProductContent; cached: boolean }>(response)
-      setDetail(current => current ? { ...current, content: body.content } : current)
+      const rawBody = await response.json().catch(() => ({})) as Partial<IdentityConfirmationResponse> & {
+        content?: StoreProductContent
+        cached?: boolean
+        error?: string
+        missing?: unknown
+      }
+      if (response.status === 409 && rawBody.requires_identity_confirmation === true &&
+          Array.isArray(rawBody.candidates) && rawBody.candidates.length > 0) {
+        setIdentityCandidates(rawBody.candidates)
+        setSelectedIdentityCandidateId(rawBody.candidates[0].id)
+        setNotice('Gemini encontró una coincidencia similar. Confírmala manualmente para conservar esta investigación.')
+        return
+      }
+      if (!response.ok || !rawBody.content) {
+        const details = Array.isArray(rawBody.missing) ? `\nFalta: ${rawBody.missing.join(', ')}` : ''
+        throw new Error(`${rawBody.error || 'No se pudo investigar.'}${details}`)
+      }
+      setDetail(current => current ? { ...current, content: rawBody.content as StoreProductContent } : current)
       setDirty(false)
-      setNotice(body.cached
+      setNotice(rawBody.cached
         ? 'Se reutilizó la investigación guardada; no hubo consumo nuevo.'
         : 'Investigación terminada con una sola llamada a Gemini. Revisa los datos antes de publicar.')
       void loadProducts(query)
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo investigar.') }
     finally { setBusy(null) }
+  }
+
+  async function confirmIdentityCandidate() {
+    if (!accessToken || !selectedId || !editableContent?.reference_variant_id) return
+    const candidate = identityCandidates.find(item => item.id === selectedIdentityCandidateId)
+    if (!candidate) {
+      setError('Selecciona una coincidencia antes de continuar.')
+      return
+    }
+
+    setBusy('research'); setError(null); setNotice(null)
+    try {
+      const response = await fetch(`/api/store-content/products/${selectedId}/research`, {
+        method: 'POST', headers: authHeaders(accessToken, true),
+        body: JSON.stringify({
+          reference_variant_id: editableContent.reference_variant_id,
+          confirmed_candidate: candidate.research,
+        }),
+      })
+      const body = await readResponse<{ content: StoreProductContent }>(response)
+      setDetail(current => current ? { ...current, content: body.content } : current)
+      setIdentityCandidates([])
+      setSelectedIdentityCandidateId('')
+      setRejectedIdentityNames([])
+      setDirty(false)
+      setNotice('Coincidencia confirmada y borrador guardado sin consumir nuevamente Gemini.')
+      void loadProducts(query)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo confirmar la coincidencia.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function rejectIdentityAndSearchDeeper() {
+    if (!accessToken || !selectedId || !editableContent?.reference_variant_id) return
+    const candidate = identityCandidates.find(item => item.id === selectedIdentityCandidateId)
+    if (!candidate) {
+      setError('Selecciona la coincidencia que deseas descartar.')
+      return
+    }
+    if (!window.confirm('Se descartará esta coincidencia y se hará una nueva búsqueda profunda. Esta acción consume otra llamada a Gemini. ¿Continuar?')) return
+
+    const nextRejectedNames = [...new Set([
+      ...rejectedIdentityNames,
+      candidate.identity.matched_name,
+    ].filter(Boolean))].slice(0, 5)
+    setBusy('research'); setError(null); setNotice(null)
+    try {
+      const response = await fetch(`/api/store-content/products/${selectedId}/research`, {
+        method: 'POST', headers: authHeaders(accessToken, true),
+        body: JSON.stringify({
+          force: true,
+          reference_variant_id: editableContent.reference_variant_id,
+          search_deeper: true,
+          rejected_matches: nextRejectedNames,
+        }),
+      })
+      const rawBody = await response.json().catch(() => ({})) as Partial<IdentityConfirmationResponse> & {
+        content?: StoreProductContent
+        error?: string
+        missing?: unknown
+      }
+      if (response.status === 409 && rawBody.requires_identity_confirmation === true &&
+          Array.isArray(rawBody.candidates) && rawBody.candidates.length > 0) {
+        setRejectedIdentityNames(nextRejectedNames)
+        setIdentityCandidates(rawBody.candidates)
+        setSelectedIdentityCandidateId(rawBody.candidates[0].id)
+        setNotice('Búsqueda profunda terminada. Revisa la nueva coincidencia antes de aceptarla.')
+        return
+      }
+      if (!response.ok || !rawBody.content) {
+        const details = Array.isArray(rawBody.missing) ? `\nFalta: ${rawBody.missing.join(', ')}` : ''
+        throw new Error(`${rawBody.error || 'No se encontró otra coincidencia.'}${details}`)
+      }
+      setDetail(current => current ? { ...current, content: rawBody.content as StoreProductContent } : current)
+      setIdentityCandidates([])
+      setSelectedIdentityCandidateId('')
+      setRejectedIdentityNames([])
+      setDirty(false)
+      setNotice('La búsqueda profunda generó y guardó un nuevo borrador.')
+      void loadProducts(query)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo completar la búsqueda profunda.')
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function changeStatus(status: StoreProductContentStatus) {
@@ -298,7 +423,12 @@ export default function TabFichasProductos() {
                     value={editableContent.reference_variant_id ?? ''}
                     onChange={event => {
                       const variant = detail.product.product_variants.find(item => item.id === event.target.value)
-                      if (variant) updateContent({ reference_variant_id: variant.id, reference_flavor: referenceFlavor(variant.flavor) }, false)
+                      if (variant) {
+                        updateContent({ reference_variant_id: variant.id, reference_flavor: referenceFlavor(variant.flavor) }, false)
+                        setIdentityCandidates([])
+                        setSelectedIdentityCandidateId('')
+                        setRejectedIdentityNames([])
+                      }
                     }}
                     disabled={busy !== null}
                     style={{ width: '100%', maxWidth: 460, padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', outline: 'none', fontSize: 12 }}
@@ -320,6 +450,32 @@ export default function TabFichasProductos() {
                 </div>
                 <p style={{ margin: '10px 0 0', color: 'var(--text-muted)', fontSize: 10, lineHeight: 1.5 }}>El botón principal reutiliza la investigación guardada cuando producto, variante y versión coinciden. Solo el botón rojo fuerza un consumo nuevo.</p>
                 {editableContent.researched_at && <p style={{ margin: '12px 0 0', color: 'var(--text-muted)', fontSize: 10 }}>Última investigación: {new Date(editableContent.researched_at).toLocaleString('es-MX')} · Modelo: {editableContent.research_model ?? '—'}{researchTokens !== null ? ` · ${researchTokens.toLocaleString('es-MX')} tokens` : ''}</p>}
+                {identityCandidates.length > 0 && <div style={{ marginTop: 16, padding: 14, borderRadius: 10, background: '#2A220B', border: '1px solid #80651A' }}>
+                  <p style={{ margin: '0 0 6px', color: '#F0B429', fontSize: 12, fontWeight: 800 }}>Confirma la identidad encontrada</p>
+                  <p style={{ margin: '0 0 10px', color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>Gemini encontró esta opción. Acéptala solamente si corresponde al mismo producto del inventario; el sabor no impide usarla.</p>
+                  <select value={selectedIdentityCandidateId} onChange={event => setSelectedIdentityCandidateId(event.target.value)} disabled={busy !== null}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 9, border: '1px solid #80651A', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
+                    {identityCandidates.map(candidate => <option key={candidate.id} value={candidate.id}>{[
+                      candidate.identity.matched_name,
+                      candidate.identity.matched_flavor,
+                      candidate.identity.matched_presentation,
+                      candidate.identity.matched_barcode,
+                    ].filter(Boolean).join(' · ')}</option>)}
+                  </select>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                    <button onClick={() => void confirmIdentityCandidate()} disabled={busy !== null || !selectedIdentityCandidateId}
+                      style={{ padding: '9px 13px', borderRadius: 8, border: 'none', background: '#F0B429', color: '#000', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>
+                      {busy === 'research' ? 'Guardando…' : 'Usar esta coincidencia'}
+                    </button>
+                    <button onClick={() => void rejectIdentityAndSearchDeeper()} disabled={busy !== null || !selectedIdentityCandidateId}
+                      style={{ padding: '9px 13px', borderRadius: 8, border: '1px solid #B94747', background: '#5C1717', color: '#FFF', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>
+                      {busy === 'research' ? 'Buscando…' : 'Descartar y buscar más a fondo'}
+                    </button>
+                    <button onClick={() => { setIdentityCandidates([]); setSelectedIdentityCandidateId(''); setRejectedIdentityNames([]); setNotice(null) }} disabled={busy !== null}
+                      style={{ padding: '9px 13px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Cancelar</button>
+                  </div>
+                  <p style={{ margin: '8px 0 0', color: 'var(--text-muted)', fontSize: 10, lineHeight: 1.5 }}>Confirmar reutiliza la respuesta actual sin otro consumo. Descartar excluye esa opción y hace una nueva llamada a Gemini con búsqueda profunda.</p>
+                </div>}
               </section>
 
               {preview ? <div style={{ padding: 22, borderRadius: 14, background: '#050505', border: '1px solid #222' }}><p style={{ margin: '0 0 12px', color: '#F0B429', fontSize: 11, fontWeight: 800, textTransform: 'uppercase' }}>Vista previa privada</p><ProductEnrichedContent content={editableContent} /></div>

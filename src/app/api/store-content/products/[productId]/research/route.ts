@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase-admin'
 import { requireOwner } from '@/lib/ownerApiAuth'
 import {
   buildResearchInputHash,
+  confirmResearchCandidate,
   PRODUCT_RESEARCH_PROMPT_VERSION,
   researchProduct,
   selectTrustedLabelCandidate,
@@ -28,12 +29,24 @@ export async function POST(request: NextRequest, { params }: Context) {
   const { productId } = await params
   let force = false
   let requestedVariantId = ''
+  let confirmedCandidate: unknown = null
+  let searchDeeper = false
+  let rejectedMatches: string[] = []
   try {
     const body = await request.json()
     force = body?.force === true
     requestedVariantId = typeof body?.reference_variant_id === 'string'
       ? body.reference_variant_id.trim().slice(0, 100)
       : ''
+    confirmedCandidate = body?.confirmed_candidate ?? null
+    searchDeeper = body?.search_deeper === true
+    rejectedMatches = Array.isArray(body?.rejected_matches)
+      ? body.rejected_matches
+        .filter((value: unknown): value is string => typeof value === 'string')
+        .map((value: string) => value.trim().slice(0, 200))
+        .filter(Boolean)
+        .slice(0, 5)
+      : []
   } catch {
     // Un cuerpo vacío equivale a usar caché.
   }
@@ -91,13 +104,26 @@ export async function POST(request: NextRequest, { params }: Context) {
     return NextResponse.json({ error: 'La migración de fichas todavía no está aplicada.', detail: existingError.message }, { status: 503 })
   }
 
-  if (!force && existing?.research_input_hash === inputHash &&
+  if (!confirmedCandidate && !force && existing?.research_input_hash === inputHash &&
       existing?.research_prompt_version === PRODUCT_RESEARCH_PROMPT_VERSION && existing?.researched_at) {
     return NextResponse.json({ content: existing, cached: true })
   }
 
   try {
-    const result = await researchProduct(input)
+    const result = confirmedCandidate
+      ? confirmResearchCandidate(confirmedCandidate, input)
+      : await researchProduct(input, { searchDeeper, rejectedMatches })
+    if (result.requiresIdentityConfirmation) {
+      const identity = result.content.identity_match
+      return NextResponse.json({
+        requires_identity_confirmation: true,
+        candidates: [{
+          id: 'gemini-best-match',
+          identity,
+          research: result,
+        }],
+      }, { status: 409 })
+    }
     const nutritionLabelUrl = selectTrustedLabelCandidate(
       result.content.nutrition_label_candidates,
       result.sources,
