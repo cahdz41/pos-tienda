@@ -9,6 +9,7 @@ interface VariantRow {
   product_id: string
   barcode: string
   flavor: string | null
+  image_url: string | null
   product: {
     id: string
     name: string
@@ -17,15 +18,22 @@ interface VariantRow {
   }
 }
 
-type Stage = 'idle' | 'removing-bg' | 'uploading' | 'saving' | 'done' | 'error'
+type Stage = 'idle' | 'removing-bg' | 'optimizing' | 'uploading' | 'saving' | 'done' | 'error'
+type ProcessingMode = 'ai' | 'as-is'
+type PhotoScope = 'all-flavors' | 'specific'
 
 const STAGE_LABEL: Record<Stage, string> = {
   idle:          '',
   'removing-bg': 'Recortando fondo con IA…',
+  optimizing:    'Optimizando imagen…',
   uploading:     'Subiendo a la nube…',
   saving:        'Guardando en base de datos…',
   done:          '¡Imagen guardada!',
   error:         'Error al procesar',
+}
+
+function effectiveImage(v: VariantRow) {
+  return v.image_url ?? v.product.image_url
 }
 
 export default function PhotoManager({ initialSearch }: { initialSearch?: string }) {
@@ -36,6 +44,8 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
   const [preview,   setPreview]   = useState<string | null>(null)
   const [stage,     setStage]     = useState<Stage>('idle')
   const [errorMsg,  setErrorMsg]  = useState('')
+  const [processingMode, setProcessingMode] = useState<ProcessingMode>('ai')
+  const [photoScope,     setPhotoScope]     = useState<PhotoScope>('all-flavors')
   const inputRef = useRef<HTMLInputElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -48,7 +58,7 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
     const supabase = createClient()
     const { data } = await supabase
       .from('product_variants')
-      .select('id, product_id, barcode, flavor, product:products(id, name, category, image_url)')
+      .select('id, product_id, barcode, flavor, image_url, product:products(id, name, category, image_url)')
       .order('product_id')
     const rows = (data as unknown as VariantRow[]) ?? []
     setVariants(rows)
@@ -84,9 +94,13 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
 
   function selectVariant(v: VariantRow) {
     setSelected(v)
-    setPreview(v.product.image_url ?? null)
+    setPreview(effectiveImage(v))
     setStage('idle')
     setErrorMsg('')
+    // Siempre vuelve a los valores seguros por defecto para no arrastrar
+    // una elección (p. ej. "específica") al siguiente producto.
+    setProcessingMode('ai')
+    setPhotoScope('all-flavors')
   }
 
   // Cuántos sabores tiene el mismo producto
@@ -100,25 +114,35 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
 
     try {
       setPreview(URL.createObjectURL(file))
-      setStage('removing-bg')
 
-      // 1. Import dinámico — nunca en el top del archivo
-      const { removeBackground } = await import('@imgly/background-removal')
-      // @ts-expect-error — onnxruntime-web no resuelve sus tipos via exports map
-      const ort = await import('onnxruntime-web')
-      ort.env.wasm.wasmPaths = '/ort-wasm/'
+      let blob: Blob = file
 
-      const blob = await removeBackground(file, {
-        publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
-        proxyToWorker: false,
-      })
+      if (processingMode === 'ai') {
+        setStage('removing-bg')
 
-      setPreview(URL.createObjectURL(blob))
+        // 1. Import dinámico — nunca en el top del archivo
+        const { removeBackground } = await import('@imgly/background-removal')
+        // @ts-expect-error — onnxruntime-web no resuelve sus tipos via exports map
+        const ort = await import('onnxruntime-web')
+        ort.env.wasm.wasmPaths = '/ort-wasm/'
+
+        blob = await removeBackground(file, {
+          publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
+          proxyToWorker: false,
+        })
+
+        setPreview(URL.createObjectURL(blob))
+      } else {
+        // Ya viene recortada/transparente — solo se comprime y convierte más abajo.
+        setStage('optimizing')
+      }
+
       setStage('uploading')
 
-      // 2. Subir a Cloudinary
+      // 2. Subir a Cloudinary (ahí se comprime y convierte a WebP)
       const formData = new FormData()
-      formData.append('file', new File([blob], 'producto.png', { type: 'image/png' }))
+      const uploadName = processingMode === 'ai' ? 'producto.png' : file.name
+      formData.append('file', new File([blob], uploadName, { type: blob.type || file.type }))
 
       const res = await fetch('/api/cloudinary', { method: 'POST', body: formData })
       const json = await res.json()
@@ -127,27 +151,54 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
 
       setStage('saving')
 
-      // 3. Guardar en products (nivel producto, aplica a todos los sabores)
       const supabase = createClient()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (supabase as any)
-        .from('products')
-        .update({ image_url: url })
-        .eq('id', selected.product_id)
 
-      if (error) throw new Error(`Error Supabase: ${error.message}`)
+      if (photoScope === 'specific') {
+        // 3a. Guardar solo en esta variante — no toca al resto de sabores
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase as any)
+          .from('product_variants')
+          .update({ image_url: url })
+          .eq('id', selected.id)
 
-      // 4. Actualizar estado local — todos los sabores del mismo producto
-      setVariants(prev =>
-        prev.map(v =>
-          v.product_id === selected.product_id
-            ? { ...v, product: { ...v.product, image_url: url } }
-            : v
+        if (error) throw new Error(`Error Supabase: ${error.message}`)
+
+        setVariants(prev =>
+          prev.map(v => (v.id === selected.id ? { ...v, image_url: url } : v))
         )
-      )
-      setSelected(prev =>
-        prev ? { ...prev, product: { ...prev.product, image_url: url } } : prev
-      )
+        setSelected(prev => (prev ? { ...prev, image_url: url } : prev))
+      } else {
+        // 3b. Guardar en products (nivel producto, aplica a todos los sabores).
+        // También se limpia cualquier foto específica previa de los sabores
+        // hermanos para que la nueva foto genérica realmente se vea en todos.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase as any)
+          .from('products')
+          .update({ image_url: url })
+          .eq('id', selected.product_id)
+
+        if (error) throw new Error(`Error Supabase: ${error.message}`)
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: clearError } = await (supabase as any)
+          .from('product_variants')
+          .update({ image_url: null })
+          .eq('product_id', selected.product_id)
+
+        if (clearError) throw new Error(`Error Supabase: ${clearError.message}`)
+
+        setVariants(prev =>
+          prev.map(v =>
+            v.product_id === selected.product_id
+              ? { ...v, image_url: null, product: { ...v.product, image_url: url } }
+              : v
+          )
+        )
+        setSelected(prev =>
+          prev ? { ...prev, image_url: null, product: { ...prev.product, image_url: url } } : prev
+        )
+      }
+
       setPreview(url)
       setStage('done')
       setTimeout(() => setStage('idle'), 2500)
@@ -172,7 +223,7 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs -mt-1" style={{ color: 'var(--text-muted)' }}>
-        Selecciona cualquier sabor del producto — la foto aplica a <strong style={{ color: 'var(--text)' }}>todos los sabores</strong> automáticamente.
+        Selecciona un sabor y elige cómo procesar la foto y a quién aplicarla.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -202,7 +253,8 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
             ) : (
               filtered.map(v => {
                 const isSelected = selected?.id === v.id
-                const hasPhoto   = !!v.product.image_url
+                const thumbnail  = effectiveImage(v)
+                const hasPhoto   = !!thumbnail
                 return (
                   <button
                     key={v.id}
@@ -219,7 +271,7 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
                       <div className="w-8 h-8 rounded shrink-0 overflow-hidden flex items-center justify-center"
                         style={{ background: 'var(--surface)' }}>
                         {hasPhoto
-                          ? <img src={v.product.image_url!} alt="" className="w-full h-full object-contain" />
+                          ? <img src={thumbnail!} alt="" className="w-full h-full object-contain" />
                           : <span style={{ fontSize: 16 }}>📷</span>
                         }
                       </div>
@@ -256,11 +308,74 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
                 {selected.flavor && (
                   <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Sabor: {selected.flavor}</p>
                 )}
-                {siblings > 1 && (
+                {photoScope === 'all-flavors' && siblings > 1 && (
                   <p className="text-xs mt-0.5" style={{ color: 'var(--accent)' }}>
                     ✓ La foto se aplicará a los {siblings} sabores de este producto
                   </p>
                 )}
+                {photoScope === 'specific' && (
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--accent)' }}>
+                    ✓ La foto se aplicará solo a {selected.flavor || 'este sabor'}
+                  </p>
+                )}
+              </div>
+
+              {/* Alcance: específica o genérica para todos los sabores */}
+              {siblings > 1 && (
+                <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setPhotoScope('all-flavors')}
+                    className="flex-1 py-2 text-xs font-semibold"
+                    style={{
+                      background: photoScope === 'all-flavors' ? 'var(--accent)' : 'var(--bg)',
+                      color: photoScope === 'all-flavors' ? '#000' : 'var(--text-muted)',
+                    }}
+                  >
+                    Todos los sabores ({siblings})
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setPhotoScope('specific')}
+                    className="flex-1 py-2 text-xs font-semibold"
+                    style={{
+                      background: photoScope === 'specific' ? 'var(--accent)' : 'var(--bg)',
+                      color: photoScope === 'specific' ? '#000' : 'var(--text-muted)',
+                    }}
+                  >
+                    Solo este sabor
+                  </button>
+                </div>
+              )}
+
+              {/* Procesamiento: IA automática o imagen ya lista */}
+              <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setProcessingMode('ai')}
+                  className="flex-1 py-2 text-xs font-semibold"
+                  style={{
+                    background: processingMode === 'ai' ? 'var(--accent)' : 'var(--bg)',
+                    color: processingMode === 'ai' ? '#000' : 'var(--text-muted)',
+                  }}
+                >
+                  Automático con IA
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setProcessingMode('as-is')}
+                  className="flex-1 py-2 text-xs font-semibold"
+                  style={{
+                    background: processingMode === 'as-is' ? 'var(--accent)' : 'var(--bg)',
+                    color: processingMode === 'as-is' ? '#000' : 'var(--text-muted)',
+                  }}
+                >
+                  Ya está lista (solo comprimir)
+                </button>
               </div>
 
               {/* Zona de preview / drop */}
@@ -311,7 +426,9 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
                       Click para elegir imagen
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      Se quitará el fondo automáticamente
+                      {processingMode === 'ai'
+                        ? 'Se quitará el fondo automáticamente'
+                        : 'Se comprimirá y convertirá a WebP tal cual'}
                     </p>
                   </div>
                 )}
@@ -322,7 +439,7 @@ export default function PhotoManager({ initialSearch }: { initialSearch?: string
                   onClick={() => inputRef.current?.click()}
                   className="py-2.5 rounded-xl text-sm font-bold"
                   style={{ background: 'var(--accent)', color: '#000' }}>
-                  {selected.product.image_url ? 'Cambiar foto' : 'Subir foto'}
+                  {effectiveImage(selected) ? 'Cambiar foto' : 'Subir foto'}
                 </button>
               )}
             </>

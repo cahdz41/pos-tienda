@@ -50,7 +50,7 @@ interface Category { id: string; name: string }
 
 type ExportRange  = 'day' | 'week' | 'month' | 'custom'
 type MethodFilter = 'all' | 'cash' | 'card' | 'transfer' | 'credit' | 'mixed'
-type PeriodFilter = 'today' | 'lastMonth' | 'lastWeek' | 'thisMonth' | 'custom'
+type PeriodFilter = 'today' | 'yesterday' | 'lastMonth' | 'lastWeek' | 'thisMonth' | 'custom'
 
 interface ExportSaleRecord {
   id: string
@@ -122,6 +122,7 @@ const METHOD_COLOR: Record<string, string> = {
 
 const PERIOD_OPTS: { id: PeriodFilter; label: string }[] = [
   { id: 'today',     label: 'Hoy'           },
+  { id: 'yesterday', label: 'Ayer'          },
   { id: 'lastMonth', label: 'Último mes'    },
   { id: 'lastWeek',  label: 'Última semana' },
   { id: 'thisMonth', label: 'Mes en curso'  },
@@ -167,6 +168,12 @@ function getSearchRange(period: PeriodFilter, customFrom: string, customTo: stri
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
     return { start: start.toISOString(), end: todayEnd.toISOString() }
   }
+  if (period === 'yesterday') {
+    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+    const start = new Date(y.getFullYear(), y.getMonth(), y.getDate(), 0, 0, 0, 0)
+    const end   = new Date(y.getFullYear(), y.getMonth(), y.getDate(), 23, 59, 59, 999)
+    return { start: start.toISOString(), end: end.toISOString() }
+  }
   if (period === 'lastMonth') {
     const start = new Date(now); start.setDate(now.getDate() - 30); start.setHours(0, 0, 0, 0)
     return { start: start.toISOString(), end: todayEnd.toISOString() }
@@ -177,6 +184,11 @@ function getSearchRange(period: PeriodFilter, customFrom: string, customTo: stri
   }
   if (period === 'thisMonth') {
     const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+    return { start: start.toISOString(), end: todayEnd.toISOString() }
+  }
+  // Fecha personalizada a medio escribir: se evita reventar con "Invalid time value".
+  if (!isValidSalesDate(customFrom) || !isValidSalesDate(customTo)) {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
     return { start: start.toISOString(), end: todayEnd.toISOString() }
   }
   const [fy, fm, fd] = customFrom.split('-').map(Number)
@@ -275,6 +287,7 @@ function VentasContent() {
   const searchParams = useSearchParams()
   const initialSearchHandled = useRef(false)
   const lastVoiceRequest = useRef<string | null>(null)
+  const searchRequestId = useRef(0)
 
   // Búsqueda
   const [hasSearched, setHasSearched]         = useState(false)
@@ -356,7 +369,7 @@ function VentasContent() {
       setCustomFrom(voiceRange.from)
       setCustomTo(voiceRange.to)
       setSelectedCats(matchedCategory ? [matchedCategory.name] : [])
-      void handleSearch(voiceRange)
+      void handleSearch({ voiceRange })
       router.replace('/ventas', { scroll: false })
       return
     }
@@ -382,16 +395,23 @@ function VentasContent() {
     return () => document.removeEventListener('mousedown', onOutsideClick)
   }, [])
 
-  async function handleSearch(dateOverride?: { from: string; to: string }) {
+  async function handleSearch(opts?: {
+    voiceRange?: { from: string; to: string }
+    period?: PeriodFilter
+    from?: string
+    to?: string
+  }) {
+    const requestId = ++searchRequestId.current
     setLoading(true)
     setHasSearched(true)
     setQueryError(null)
     setDetail(null)
     const supabase = createClient()
-    const overrideRange = dateOverride
-      ? getSalesRangeUtc(dateOverride.from, dateOverride.to)
+    const overrideRange = opts?.voiceRange
+      ? getSalesRangeUtc(opts.voiceRange.from, opts.voiceRange.to)
       : null
-    const { start, end } = overrideRange ?? getSearchRange(periodFilter, customFrom, customTo)
+    const { start, end } = overrideRange
+      ?? getSearchRange(opts?.period ?? periodFilter, opts?.from ?? customFrom, opts?.to ?? customTo)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query = (supabase as any)
@@ -404,6 +424,7 @@ function VentasContent() {
     if (cashierFilter !== 'all') query = query.eq('cashier_id', cashierFilter)
 
     const { data: salesData, error } = await query
+    if (requestId !== searchRequestId.current) return // una búsqueda más reciente ya está en curso
     if (error) {
       console.error('[Ventas] Error al consultar ventas:', error)
       setQueryError(error.message ?? 'Error al cargar ventas')
@@ -459,6 +480,8 @@ function VentasContent() {
           itemPreviewMap[id] = grouped[id].slice(0, 3).join(', ') + (grouped[id].length > 3 ? '…' : '')
       }
     }
+
+    if (requestId !== searchRequestId.current) return // una búsqueda más reciente ya está en curso
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setRawSales((salesData as any[]).map((s: any) => ({
@@ -698,6 +721,24 @@ function VentasContent() {
   const cashTotal    = completed.filter(s => s.payment_method === 'cash').reduce((sum, s) => sum + s.total, 0)
   const cardTotal    = completed.filter(s => s.payment_method === 'card').reduce((sum, s) => sum + s.total, 0)
 
+  // Los botones de período actualizan las ventas de inmediato; "Buscar" queda solo para el texto.
+  function selectPeriod(id: PeriodFilter) {
+    setPeriodFilter(id)
+    if (id === 'custom') return // se busca cuando el usuario elige las fechas
+    void handleSearch({ period: id })
+  }
+
+  function selectCustomFrom(value: string) {
+    setCustomFrom(value)
+    // El input nativo puede emitir una fecha incompleta mientras se escribe.
+    if (isValidSalesDate(value)) void handleSearch({ period: 'custom', from: value, to: customTo })
+  }
+
+  function selectCustomTo(value: string) {
+    setCustomTo(value)
+    if (isValidSalesDate(value)) void handleSearch({ period: 'custom', from: customFrom, to: value })
+  }
+
   function toggleCat(name: string) {
     setSelectedCats(prev => prev.includes(name) ? prev.filter(c => c !== name) : [...prev, name])
   }
@@ -777,7 +818,7 @@ function VentasContent() {
             {/* Período */}
             <div className="flex items-center gap-1">
               {PERIOD_OPTS.map(opt => (
-                <button key={opt.id} onClick={() => setPeriodFilter(opt.id)}
+                <button key={opt.id} onClick={() => selectPeriod(opt.id)}
                   className="px-2.5 py-1 rounded-full text-xs font-semibold transition-all shrink-0"
                   style={{
                     background: periodFilter === opt.id ? 'var(--accent)' : 'var(--bg)',
@@ -793,12 +834,12 @@ function VentasContent() {
             {periodFilter === 'custom' && (
               <div className="flex items-center gap-1.5">
                 <input type="date" value={customFrom} max={customTo}
-                  onChange={e => setCustomFrom(e.target.value)}
+                  onChange={e => selectCustomFrom(e.target.value)}
                   className="px-2 py-1 rounded-lg text-xs outline-none"
                   style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', colorScheme: 'dark' }} />
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>
                 <input type="date" value={customTo} min={customFrom} max={toLocalDateStr(new Date())}
-                  onChange={e => setCustomTo(e.target.value)}
+                  onChange={e => selectCustomTo(e.target.value)}
                   className="px-2 py-1 rounded-lg text-xs outline-none"
                   style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', colorScheme: 'dark' }} />
               </div>
@@ -950,7 +991,7 @@ function VentasContent() {
               <div className="text-center">
                 <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Busca ventas para comenzar</p>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                  Selecciona un período y pulsa Buscar, o escribe un término para filtrar
+                  Selecciona un período o escribe un término para filtrar
                 </p>
               </div>
             </div>

@@ -102,9 +102,10 @@ export default function ProductPanel({
     setSelectedVoiceMatchId(matches[0]?.item.stock > 0 ? matches[0].item.id : null)
   }, [allVariants, loading, voiceProductRequest])
 
-  // Foco automático al montar
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { searchRef.current?.focus() }, [])
+  // Foco automático al montar. El input no existe en el DOM mientras `loading`
+  // es true (se renderiza un spinner en su lugar), así que se espera a que
+  // termine de cargar para que el ref ya apunte al elemento real.
+  useEffect(() => { if (!loading) searchRef.current?.focus() }, [loading])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadProducts() }, [refreshKey])
