@@ -8,14 +8,16 @@ import TabOfertas from './TabOfertas'
 import TabPaquetes from './TabPaquetes'
 import TabGenerador from './TabGenerador'
 import TabFichasProductos from './TabFichasProductos'
+import TabRedesSociales from './TabRedesSociales'
 
-type Tab = 'ofertas' | 'paquetes' | 'generador' | 'fichas'
+type Tab = 'ofertas' | 'paquetes' | 'generador' | 'fichas' | 'redes-sociales'
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'fichas',     label: 'Fichas de Productos', icon: 'FP' },
-  { id: 'ofertas',    label: 'Ofertas del Mes',   icon: '🔥' },
-  { id: 'paquetes',   label: 'Paquetes en Oferta', icon: '🎁' },
-  { id: 'generador',  label: 'Generador',          icon: '🎨' },
+  { id: 'fichas',          label: 'Fichas de Productos', icon: 'FP' },
+  { id: 'ofertas',         label: 'Ofertas del Mes',     icon: '🔥' },
+  { id: 'paquetes',        label: 'Paquetes en Oferta',  icon: '🎁' },
+  { id: 'generador',       label: 'Generador',           icon: '🎨' },
+  { id: 'redes-sociales',  label: 'Redes Sociales',      icon: '📱' },
 ]
 
 export default function ConfigTiendaPage() {
@@ -114,6 +116,9 @@ export default function ConfigTiendaPage() {
         )}
         {tab === 'fichas' && (
           <TabFichasProductos />
+        )}
+        {tab === 'redes-sociales' && (
+          <TabRedesSociales />
         )}
       </div>
     </div>
